@@ -53,8 +53,8 @@ full python implementation.
 
 # Libraries
 
-1. [ro-crate-rs core](src/README.md)
-2. [rocraters python bindings](python/README.md)
+1. [ro-crate-rs core](src/README_rs.md)
+2. [rocraters python bindings](python/README_py.md)
 3. [cli tool](cli/README.md)
 
 # Compatability 

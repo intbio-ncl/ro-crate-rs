@@ -1,0 +1,25 @@
+[package]
+name = "rocraters-python"
+version = "0.3.0"
+edition = "2021"
+authors = ["Matt Burridge <m.burridge1@newcastle.ac.uk>"]
+description = "Lightweight Python library for RO-Crate manipulation implemented in Rust"
+license = "Apache-2.0"
+keywords = ["ro-crate", "rocrate", "research object", "rocraters"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "rocraters"
+crate-type = ["cdylib"]
+
+[workspace]
+
+[dependencies]
+pyo3 = "0.21.1"
+serde_json = "1.0"
+chrono = "0.4"
+
+[dependencies.ro-crate-rs]
+path = "../"
+version = "0"
+

@@ -1,0 +1,5 @@
+maturin==1.5.1
+patchelf==0.17.2.1
+-e git+ssh://git@github.com/intbio-ncl/ro-crate-rs.git@425d3fa0f7a6170c76bdcbac54051f96bd678bcc#egg=rocraters&subdirectory=python
+tomli==2.0.1
+ziglang==0.11.0

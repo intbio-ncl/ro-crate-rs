@@ -1,0 +1,13 @@
+[package]
+name = "rocraters"
+version = "0.3.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+ro-crate-rs = {path = "../"}
+clap = { version = "4.4.16", features = ["derive"] }
+chrono = "0.4"
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }

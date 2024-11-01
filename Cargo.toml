@@ -1,0 +1,36 @@
+[package]
+name = "ro-crate-rs"
+version = "0.4.0"
+edition = "2021"
+repository = "https://github.com/intbio-ncl/ro-crate-rs"
+authors = ["Matt Burridge <m.burridge1@newcastle.ac.uk>"]
+autoexamples = false
+license = "Apache-2.0"
+description = "Library for creating, modifying and reading RO-Crates"
+keywords = ["researchobject","ro-crate","ro","metadata","jsonld"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "rocraters"
+path = "src/lib.rs"
+doctest = false
+
+[workspace]
+members = [
+    "cli",
+]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = { version = "0.4.31", features = ["serde"]}
+uuid = { version = "1.0", features = ["v4"] }
+rand = "0.8"
+url = "2.2"
+zip = "0.6.6"
+walkdir = "2"
+reqwest = { version = "0.11", features =  ["blocking", "json"], default-features = false}
+
+[dev-dependencies]
+tempfile = "3.9"
+

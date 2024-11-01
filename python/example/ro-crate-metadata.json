@@ -1,0 +1,49 @@
+{
+  "@context": "https://w3id.org/ro/crate/1.1/context",
+  "@graph": [
+    {
+      "@id": "ro-crate-metadata.json",
+      "@type": "CreativeWork",
+      "conformsTo": {
+        "@id": "https://w3id.org/ro/crate/1.1"
+      },
+      "about": {
+        "@id": "./"
+      }
+    },
+    {
+      "@id": "./",
+      "@type": "Dataset",
+      "name": "Example Crate",
+      "description": "Description of the Example Crate",
+      "datePublished": "2017",
+      "license": {
+        "@id": "https://creativecommons.org/licenses/by-nc-sa/3.0/au/"
+      },
+      "author": {
+        "@id": "#johndoe"
+      },
+      "hasPart": [
+        {
+          "@id": "output/data_file.txt"
+        },
+        {
+          "@id": "this_is_not_a_file.txt"
+        }
+      ]
+    },
+    {
+      "@id": "output/data_file.txt",
+      "@type": "Dataset",
+      "name": "Data file name"
+    },
+    {
+      "@id": "#JohnDoe",
+      "@type": "Person"
+    },
+    {
+      "@id": "this_is_not_a_file.txt",
+      "@type": "Dataset"
+    }
+  ]
+}

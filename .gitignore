@@ -1,7 +1,12 @@
+examples/examples.zip
+ro-crate-metadata
+.vscode*
+ro-crate-metadata_big*
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
+venv_mdp*
 
 # C extensions
 *.so

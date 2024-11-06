@@ -901,7 +901,7 @@ dependencies = [
 
 [[package]]
 name = "ro-crate-rs"
-version = "0.4.1"
+version = "0.4.4"
 dependencies = [
  "chrono",
  "rand",
@@ -917,7 +917,7 @@ dependencies = [
 
 [[package]]
 name = "rocraters"
-version = "0.3.0"
+version = "0.4.4"
 dependencies = [
  "chrono",
  "clap",

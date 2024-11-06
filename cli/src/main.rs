@@ -327,8 +327,10 @@ fn create_default_crate(mut rocrate: RoCrate) -> RoCrate {
     let root_data_entity = root::RootDataEntity {
         id: "./".to_string(),
         type_: DataType::Term("Dataset".to_string()),
-        date_published: Option::Some(Utc::now().to_rfc3339()),
-        license: Option::Some(License::Description(String::from("Private"))),
+        date_published: Utc::now().to_rfc3339(),
+        name: "Default Crate Name".to_string(),
+        description: "Default crate description".to_string(),
+        license: License::Description(String::from("Private")),
         dynamic_entity: None,
     };
 

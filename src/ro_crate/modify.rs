@@ -200,7 +200,9 @@ pub trait DynamicEntityManipulation: Serialize {
             for key in fallback_keys_to_modify {
                 if let Some(DynamicEntity::Fallback(fallback_value)) = dynamic_entity.get_mut(&key)
                 {
-                    remove_matching_value_from_json(fallback_value, target_id);
+                    if let Some(fallback_value) = fallback_value.as_mut() {
+                        remove_matching_value_from_json(fallback_value, target_id);
+                    }
                 }
             }
 

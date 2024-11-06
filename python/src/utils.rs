@@ -238,9 +238,15 @@ pub fn convert_dynamic_entity_to_pyobject(py: Python, value: &DynamicEntity) -> 
         DynamicEntity::NestedDynamicEntity(boxed_entity) => {
             convert_dynamic_entity_to_pyobject(py, boxed_entity)
         }
-        DynamicEntity::Fallback(value) => {
+        DynamicEntity::Fallback(value_option) => {
             // Convert serde_json::Value to PyObject
-            convert_serde_json_value_to_pyobject(py, value)
+            if let Some(value) = value_option {
+                // Convert serde_json::Value to PyObject when there's a value
+                convert_serde_json_value_to_pyobject(py, value)
+            } else {
+                // Handle the case where Fallback contains None (i.e., represents null)
+                convert_serde_json_value_to_pyobject(py, &serde_json::Value::Null)
+            }
         }
     }
 }

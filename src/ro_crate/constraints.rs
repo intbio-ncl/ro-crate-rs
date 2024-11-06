@@ -82,7 +82,7 @@ pub enum DynamicEntity {
     EntityObject(HashMap<String, DynamicEntity>),
     EntityVecObject(Vec<HashMap<String, DynamicEntity>>),
     NestedDynamicEntity(Box<DynamicEntity>),
-    Fallback(serde_json::Value),
+    Fallback(Option<serde_json::Value>),
 }
 
 /// Tests
@@ -138,10 +138,11 @@ mod tests {
     #[test]
     fn test_dynamic_entity_fallback() {
         let json_value = json!({"unexpected": "data"});
-        let entity = DynamicEntity::Fallback(json_value.clone());
+        let entity = DynamicEntity::Fallback(Some(json_value.clone()));
+
         match entity {
-            DynamicEntity::Fallback(value) => assert_eq!(value, json_value),
-            _ => panic!("Fallback variant expected"),
+            DynamicEntity::Fallback(Some(value)) => assert_eq!(value, json_value),
+            _ => panic!("Fallback variant with expected value was not found"),
         }
     }
 

@@ -73,11 +73,11 @@ pub enum DynamicEntity {
     EntityVecString(Vec<String>),
     EntityId(Id),
     EntityIdVec(Vec<Id>),
-    EntityBool(bool),
     Entityi64(i64),
     Entityf64(f64),
     EntityVeci64(Vec<i64>),
     EntityVecf64(Vec<f64>),
+    EntityBool(Option<bool>),
     EntityVec(Vec<DynamicEntity>),
     EntityObject(HashMap<String, DynamicEntity>),
     EntityVecObject(Vec<HashMap<String, DynamicEntity>>),
@@ -157,9 +157,9 @@ mod tests {
 
     #[test]
     fn test_dynamic_entity_bool() {
-        let entity = DynamicEntity::EntityBool(true);
+        let entity = DynamicEntity::EntityBool(Some(true));
         match entity {
-            DynamicEntity::EntityBool(value) => assert!(value),
+            DynamicEntity::EntityBool(Some(value)) => assert!(value),
             _ => panic!("EntityBool variant expected"),
         }
     }
@@ -197,10 +197,10 @@ mod tests {
     #[test]
     fn test_dynamic_entity_fallback_empty() {
         let json_value = json!({});
-        let entity = DynamicEntity::Fallback(json_value.clone());
+        let entity = DynamicEntity::Fallback(Some(json_value.clone()));
         match entity {
-            DynamicEntity::Fallback(value) => assert_eq!(value, json_value),
-            _ => panic!("Fallback variant expected"),
+            DynamicEntity::Fallback(Some(value)) => assert_eq!(value, json_value),
+            _ => panic!("Fallback variant with expected value was not found"),
         }
     }
 

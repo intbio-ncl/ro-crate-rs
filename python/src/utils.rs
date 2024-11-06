@@ -192,7 +192,12 @@ pub fn convert_dynamic_entity_to_pyobject(py: Python, value: &DynamicEntity) -> 
             );
             py_list.into()
         }
-        DynamicEntity::EntityBool(b) => PyBool::new_bound(py, *b).into_py(py),
+        DynamicEntity::EntityBool(b) => {
+            match b {
+                Some(value) => PyBool::new_bound(py, *value).into_py(py), // If it's a bool, convert it
+                None => py.None().into_py(py), // If it's None, keep it as None in Python
+            }
+        }
         DynamicEntity::Entityi64(num) => (*num).into_py(py),
         DynamicEntity::Entityf64(num) => PyFloat::new_bound(py, *num).into(),
         DynamicEntity::EntityVeci64(vec) => {
@@ -595,7 +600,7 @@ fn convert_pyobject_to_dynamic_entity(py: Python, obj: &PyAny) -> PyResult<Dynam
     }
     // Boolean
     if let Ok(b) = obj.extract::<bool>() {
-        return Ok(DynamicEntity::EntityBool(b));
+        return Ok(DynamicEntity::EntityBool(Some(b)));
     }
     // i64
     if let Ok(i) = obj.extract::<i64>() {

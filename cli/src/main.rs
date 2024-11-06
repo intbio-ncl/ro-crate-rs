@@ -429,7 +429,7 @@ fn add_dynamic_entity() -> Option<HashMap<String, DynamicEntity>> {
             let bvalue = parse_bool(value);
             match bvalue {
                 Ok(value) => {
-                    dynamic_entity.insert(key, DynamicEntity::EntityBool(value));
+                    dynamic_entity.insert(key, DynamicEntity::EntityBool(Some(value)));
                 }
                 Err(e) => println!("An error occurred: {}", e),
             }

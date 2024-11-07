@@ -1,22 +1,28 @@
 //! Cli binding logic
 
+use ::serde::Serialize;
 use args::{
     AddCommand, ContextType, CrateAction, DeleteCommand, ModifyCommand, PackageCommand,
     ReadCommand, ValidateCommand,
 };
+use chrono::naive::serde;
 use chrono::Utc;
 use clap::Parser;
 use constraints::{DataType, DynamicEntity, Id, IdValue, License};
 use data_entity::DataEntity;
+use json_to_table::{json_to_table, Orientation};
 use read::{crate_path, read_crate};
 use rocraters::ro_crate::rocrate::{ContextItem, GraphVector, RoCrate, RoCrateContext};
 use rocraters::ro_crate::{constraints, data_entity, metadata_descriptor, read, root, write};
-use serde::Serialize;
-use serde_json::to_string_pretty;
 use serde_json::Value as JsonValue;
+use serde_json::{json, to_string_pretty};
 use std::collections::HashMap;
 use std::io::{self, Write};
 use std::path::PathBuf;
+use tabled::{
+    settings::{object::Rows, peaker::PriorityMax, Modify, Padding, Style, Width},
+    Table, Tabled,
+};
 use write::{write_crate, zip_crate};
 pub mod args;
 
@@ -147,7 +153,10 @@ fn main() {
                 } else {
                     match to_string_pretty(&rocrate) {
                         Ok(json_ld) => {
-                            println!("{}", json_ld)
+                            let mut table = json_to_table(&json!(&rocrate.graph)).into_table();
+                            table.with(Style::modern_rounded());
+                            table.modify(Rows::new(1..), Width::truncate(79).suffix("..."));
+                            println!("{}", table)
                         }
                         Err(e) => eprintln!("Failed to display crate: {}", e),
                     }
@@ -165,7 +174,11 @@ fn main() {
                         } else {
                             match to_string_pretty(&graph_vector) {
                                 Ok(json_ld) => {
-                                    println!("{}", json_ld);
+                                    let mut table =
+                                        json_to_table(&json!(&graph_vector)).into_table();
+                                    table.with(Style::modern_rounded());
+                                    table.modify(Rows::new(1..), Width::truncate(79).suffix("..."));
+                                    println!("{}", table)
                                 }
                                 Err(e) => eprintln!("Failed to display entity: {}", e),
                             }

@@ -77,6 +77,7 @@ pub enum DynamicEntity {
     Entityf64(f64),
     EntityVeci64(Vec<i64>),
     EntityVecf64(Vec<f64>),
+    // Option to capture nulls before nesting
     EntityBool(Option<bool>),
     EntityVec(Vec<DynamicEntity>),
     EntityObject(HashMap<String, DynamicEntity>),

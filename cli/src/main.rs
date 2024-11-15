@@ -5,24 +5,21 @@ use args::{
     AddCommand, ContextType, CrateAction, DeleteCommand, ModifyCommand, PackageCommand,
     ReadCommand, ValidateCommand,
 };
-use chrono::naive::serde;
 use chrono::Utc;
 use clap::Parser;
-use constraints::{DataType, DynamicEntity, Id, IdValue, License};
+use constraints::{DataType, EntityValue, Id, License};
 use data_entity::DataEntity;
-use json_to_table::{json_to_table, Orientation};
+use json_to_table::json_to_table;
 use read::{crate_path, read_crate};
-use rocraters::ro_crate::rocrate::{ContextItem, GraphVector, RoCrate, RoCrateContext};
+use rocraters::ro_crate::graph_vector::GraphVector;
+use rocraters::ro_crate::rocrate::{ContextItem, RoCrate, RoCrateContext};
 use rocraters::ro_crate::{constraints, data_entity, metadata_descriptor, read, root, write};
 use serde_json::Value as JsonValue;
 use serde_json::{json, to_string_pretty};
 use std::collections::HashMap;
 use std::io::{self, Write};
 use std::path::PathBuf;
-use tabled::{
-    settings::{object::Rows, peaker::PriorityMax, Modify, Padding, Style, Width},
-    Table, Tabled,
-};
+use tabled::settings::{object::Rows, Style, Width};
 use write::{write_crate, zip_crate};
 pub mod args;
 
@@ -65,85 +62,62 @@ fn main() {
 
             write_crate(&rocrate, delete_command.target_crate)
         }
-        CrateAction::Modify(modify_command) => {
-            match modify_command {
-                ModifyCommand::AddString(add_string_command) => {
-                    let mut rocrate = open_and_load_crate(&add_string_command.target_crate);
-                    let mut values: HashMap<String, DynamicEntity> = HashMap::new();
-                    values.insert(
-                        add_string_command.key,
-                        DynamicEntity::EntityString(add_string_command.value),
-                    );
+        CrateAction::Modify(modify_command) => match modify_command {
+            ModifyCommand::AddIdValue(add_id_value_command) => {
+                let mut rocrate = open_and_load_crate(&add_id_value_command.target_crate);
+                let mut values: HashMap<String, EntityValue> = HashMap::new();
+                values.insert(
+                    add_id_value_command.key,
+                    EntityValue::EntityId(Id::Id(add_id_value_command.value)),
+                );
 
-                    rocrate.add_dynamic_entity_field(&add_string_command.id, values);
+                rocrate.add_dynamic_entity_property(&add_id_value_command.id, values);
 
-                    write_crate(&rocrate, add_string_command.target_crate)
-                }
-                ModifyCommand::AddIdValue(add_id_value_command) => {
-                    let mut rocrate = open_and_load_crate(&add_id_value_command.target_crate);
-                    let mut values: HashMap<String, DynamicEntity> = HashMap::new();
-                    values.insert(
-                        add_id_value_command.key,
-                        DynamicEntity::EntityId(Id::Id(IdValue {
-                            id: add_id_value_command.value,
-                        })),
-                    );
-
-                    rocrate.add_dynamic_entity_field(&add_id_value_command.id, values);
-
-                    write_crate(&rocrate, add_id_value_command.target_crate)
-                }
-                ModifyCommand::AddIdVecValues(add_id_vec_values_command) => {
-                    let mut rocrate = open_and_load_crate(&add_id_vec_values_command.target_crate);
-                    let mut values: HashMap<String, DynamicEntity> = HashMap::new();
-                    let mut id_vec = Vec::new();
-                    for id_value in add_id_vec_values_command.values {
-                        id_vec.push(Id::Id(IdValue {
-                            id: id_value.to_string(),
-                        }));
-                    }
-                    values.insert(
-                        add_id_vec_values_command.key,
-                        DynamicEntity::EntityIdVec(id_vec),
-                    );
-
-                    rocrate.add_dynamic_entity_field(&add_id_vec_values_command.id, values);
-
-                    write_crate(&rocrate, add_id_vec_values_command.target_crate)
-                }
-                ModifyCommand::AddMultiple(add_multiple_command) => {
-                    let mut rocrate = open_and_load_crate(&add_multiple_command.target_crate);
-                    let id = &add_multiple_command.id;
-
-                    loop {
-                        if let Some(dynamic_entity) = add_dynamic_entity() {
-                            rocrate.add_dynamic_entity_field(id, dynamic_entity);
-
-                            println!("Exit? (Y/n)");
-                            let mut answer = String::new();
-                            io::stdin().read_line(&mut answer).unwrap();
-                            if answer.trim().eq_ignore_ascii_case("Y") {
-                                break;
-                            }
-                        } else {
-                            // If add_dynamic_entity() returns None, break the loop
-                            break;
-                        }
-                    }
-
-                    write_crate(&rocrate, add_multiple_command.target_crate)
-                }
-                ModifyCommand::RemoveField(remove_field_command) => {
-                    let mut rocrate = open_and_load_crate(&remove_field_command.target_crate);
-                    rocrate.remove_dynamic_entity_field(
-                        &remove_field_command.id,
-                        &remove_field_command.field,
-                    );
-
-                    write_crate(&rocrate, remove_field_command.target_crate)
-                }
+                write_crate(&rocrate, add_id_value_command.target_crate)
             }
-        }
+            ModifyCommand::AddIdVecValues(add_id_vec_values_command) => {
+                let mut rocrate = open_and_load_crate(&add_id_vec_values_command.target_crate);
+                let mut values: HashMap<String, EntityValue> = HashMap::new();
+                let mut id_vec: Vec<String> = Vec::new();
+                for id_value in add_id_vec_values_command.values {
+                    id_vec.push(id_value.to_string());
+                }
+                values.insert(
+                    add_id_vec_values_command.key,
+                    EntityValue::EntityId(Id::IdArray(id_vec)),
+                );
+
+                rocrate.add_dynamic_entity_property(&add_id_vec_values_command.id, values);
+
+                write_crate(&rocrate, add_id_vec_values_command.target_crate)
+            }
+            ModifyCommand::AddMultiple(add_multiple_command) => {
+                let mut rocrate = open_and_load_crate(&add_multiple_command.target_crate);
+                let id = &add_multiple_command.id;
+
+                while let Some(dynamic_entity) = add_dynamic_entity() {
+                    rocrate.add_dynamic_entity_property(id, dynamic_entity);
+
+                    println!("Exit? (Y/n)");
+                    let mut answer = String::new();
+                    io::stdin().read_line(&mut answer).unwrap();
+                    if answer.trim().eq_ignore_ascii_case("Y") {
+                        break;
+                    }
+                }
+
+                write_crate(&rocrate, add_multiple_command.target_crate)
+            }
+            ModifyCommand::RemoveField(remove_field_command) => {
+                let mut rocrate = open_and_load_crate(&remove_field_command.target_crate);
+                rocrate.remove_dynamic_entity_property(
+                    &remove_field_command.id,
+                    &remove_field_command.field,
+                );
+
+                write_crate(&rocrate, remove_field_command.target_crate)
+            }
+        },
         CrateAction::Read(read_command) => match read_command {
             ReadCommand::Crate(read_crate_command) => {
                 let rocrate = open_and_load_crate(&read_crate_command.target_crate);
@@ -155,7 +129,11 @@ fn main() {
                         Ok(json_ld) => {
                             let mut table = json_to_table(&json!(&rocrate.graph)).into_table();
                             table.with(Style::modern_rounded());
-                            table.modify(Rows::new(1..), Width::truncate(79).suffix("..."));
+                            if read_crate_command.fit {
+                                table.modify(Rows::new(1..), Width::truncate(200).suffix("..."));
+                            } else {
+                                table.modify(Rows::new(1..), Width::truncate(79).suffix("..."));
+                            }
                             println!("{}", table)
                         }
                         Err(e) => eprintln!("Failed to display crate: {}", e),
@@ -165,7 +143,7 @@ fn main() {
             ReadCommand::Entity(read_entity_command) => {
                 let mut rocrate = open_and_load_crate(&read_entity_command.target_crate);
                 let id = &read_entity_command.id;
-                let index = rocrate.find_id_index(id);
+                let index = rocrate.find_entity_index(id);
 
                 if let Some(index) = index {
                     if let Some(graph_vector) = rocrate.graph.get_mut(index) {
@@ -173,11 +151,21 @@ fn main() {
                             println!("{:#?}", &graph_vector);
                         } else {
                             match to_string_pretty(&graph_vector) {
-                                Ok(json_ld) => {
+                                Ok(_json_ld) => {
                                     let mut table =
                                         json_to_table(&json!(&graph_vector)).into_table();
                                     table.with(Style::modern_rounded());
-                                    table.modify(Rows::new(1..), Width::truncate(79).suffix("..."));
+                                    if read_entity_command.fit {
+                                        table.modify(
+                                            Rows::new(1..),
+                                            Width::truncate(200).suffix("..."),
+                                        );
+                                    } else {
+                                        table.modify(
+                                            Rows::new(1..),
+                                            Width::truncate(79).suffix("..."),
+                                        );
+                                    }
                                     println!("{}", table)
                                 }
                                 Err(e) => eprintln!("Failed to display entity: {}", e),
@@ -190,7 +178,12 @@ fn main() {
                 let rocrate = open_and_load_crate(&read_fields_command.target_crate);
                 let values =
                     get_field_values_with_count(&rocrate.graph, &read_fields_command.field);
-                print_as_table(values, "Type".to_string(), "Count".to_string())
+                print_as_table(
+                    values,
+                    "@id",
+                    &read_fields_command.field.to_string(),
+                    "Count",
+                );
             }
             ReadCommand::Value(read_value_command) => {
                 let rocrate = open_and_load_crate(&read_value_command.target_crate);
@@ -199,8 +192,7 @@ fn main() {
                     &read_value_command.value,
                     read_value_command.location,
                 );
-                let data: Vec<(String, isize)> = vec![(read_value_command.value, values)];
-                print_as_table(data, "Value".to_string(), "Count".to_string())
+                print_as_table(values, "Object ID", "Value", "Count");
             }
         },
         CrateAction::Package(package_command) => match package_command {
@@ -228,8 +220,8 @@ fn main() {
 }
 
 /// Input requires target_crate file string
-fn open_and_load_crate(input: &String) -> RoCrate {
-    let target_crate = crate_path(&input);
+fn open_and_load_crate(input: &str) -> RoCrate {
+    let target_crate = crate_path(input);
     match read_crate(&target_crate, 1) {
         Ok(ro_crate) => {
             // Process ro_crate if read successfully
@@ -328,12 +320,8 @@ fn create_default_crate(mut rocrate: RoCrate) -> RoCrate {
     let description = metadata_descriptor::MetadataDescriptor {
         id: "ro-crate-metadata.json".to_string(),
         type_: DataType::Term("CreativeWork".to_string()),
-        conforms_to: Id::Id(IdValue {
-            id: "https://w3id.org/ro/crate/1.1".to_string(),
-        }),
-        about: Id::Id(IdValue {
-            id: "./".to_string(),
-        }),
+        conforms_to: Id::Id("https://w3id.org/ro/crate/1.1".to_string()),
+        about: Id::Id("./".to_string()),
         dynamic_entity: None,
     };
 
@@ -381,10 +369,10 @@ fn add_entity(mut rocrate: RoCrate, input: &AddCommand) -> RoCrate {
 }
 
 /// Adds a dynamic entity to a entity that's in the process of being made
-fn add_dynamic_entity() -> Option<HashMap<String, DynamicEntity>> {
-    let mut dynamic_entity: HashMap<String, DynamicEntity> = HashMap::new();
+fn add_dynamic_entity() -> Option<HashMap<String, EntityValue>> {
+    let mut dynamic_entity: HashMap<String, EntityValue> = HashMap::new();
 
-    let field_type = prommpt_for_types();
+    let field_type = prompt_for_types();
 
     let key = read_input("Enter Key:");
 
@@ -392,25 +380,25 @@ fn add_dynamic_entity() -> Option<HashMap<String, DynamicEntity>> {
         // string
         1 => {
             let value = read_input("Enter value:");
-            dynamic_entity.insert(key, DynamicEntity::EntityString(value));
+            dynamic_entity.insert(key, EntityValue::EntityString(value));
             Some(dynamic_entity)
         }
         2 => {
             let value = read_input("Enter value:");
-            dynamic_entity.insert(key, DynamicEntity::EntityId(Id::Id(IdValue { id: value })));
+            dynamic_entity.insert(key, EntityValue::EntityId(Id::Id(value)));
             Some(dynamic_entity)
         }
         3 => {
-            let mut id_vec: Vec<Id> = Vec::new();
+            let mut id_vec: Vec<String> = Vec::new();
             loop {
                 let value = read_input("Enter value {}:");
-                id_vec.push(Id::Id(IdValue { id: value }));
+                id_vec.push(value);
                 let value = read_input("Add more? (Y/N)");
                 if value == "N" {
                     break;
                 }
             }
-            dynamic_entity.insert(key, DynamicEntity::EntityIdVec(id_vec));
+            dynamic_entity.insert(key, EntityValue::EntityId(Id::IdArray(id_vec)));
             Some(dynamic_entity)
         }
         4 => {
@@ -418,7 +406,7 @@ fn add_dynamic_entity() -> Option<HashMap<String, DynamicEntity>> {
             let ivalue = parse_i64(value);
             match ivalue {
                 Ok(value) => {
-                    dynamic_entity.insert(key, DynamicEntity::Entityi64(value));
+                    dynamic_entity.insert(key, EntityValue::Entityi64(value));
                 }
                 Err(e) => println!("An error occurred: {}", e),
             }
@@ -430,7 +418,7 @@ fn add_dynamic_entity() -> Option<HashMap<String, DynamicEntity>> {
             let ivalue = parse_f64(value);
             match ivalue {
                 Ok(value) => {
-                    dynamic_entity.insert(key, DynamicEntity::Entityf64(value));
+                    dynamic_entity.insert(key, EntityValue::Entityf64(value));
                 }
                 Err(e) => println!("An error occurred: {}", e),
             }
@@ -442,7 +430,7 @@ fn add_dynamic_entity() -> Option<HashMap<String, DynamicEntity>> {
             let bvalue = parse_bool(value);
             match bvalue {
                 Ok(value) => {
-                    dynamic_entity.insert(key, DynamicEntity::EntityBool(Some(value)));
+                    dynamic_entity.insert(key, EntityValue::EntityBool(Some(value)));
                 }
                 Err(e) => println!("An error occurred: {}", e),
             }
@@ -487,7 +475,7 @@ fn parse_bool(value: String) -> Result<bool, String> {
     }
 }
 
-fn prommpt_for_types() -> u8 {
+fn prompt_for_types() -> u8 {
     loop {
         println!("Please select one of the following entity types to add");
         println!("1 - String");
@@ -516,26 +504,42 @@ fn delete_entity(mut rocrate: RoCrate, input: &DeleteCommand) -> RoCrate {
 
 /// NOTE: This is massively suboptimal but it's a very quick and easy way to just get the values
 /// without having to spend the effort to think of how to parse it all agian
-fn get_field_values_with_count<T: Serialize>(object: &T, field_name: &str) -> Vec<(String, isize)> {
+fn get_field_values_with_count<T: Serialize>(
+    object: &T,
+    field_name: &str,
+) -> Vec<(String, String, isize)> {
     let mut collected_values = HashMap::new();
     let json = serde_json::to_value(object).unwrap();
     collect_field_values_recursive(&json, field_name, &mut collected_values);
 
-    collected_values.into_iter().collect()
+    collected_values
+        .into_iter()
+        .map(|((id, value), count)| (id, value, count))
+        .collect()
 }
 
+/// Collects field values recursively, now including "@id" for each match.
 fn collect_field_values_recursive(
     json: &JsonValue,
     field_name: &str,
-    collected_values: &mut HashMap<String, isize>,
+    collected_values: &mut HashMap<(String, String), isize>, // (id, value) -> count
 ) {
     match json {
         JsonValue::Object(obj) => {
+            // Check if the object contains "@id"
+            let current_id = obj
+                .get("@id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
             for (key, value) in obj {
                 if key == field_name {
                     let value_str = value.to_string();
-                    *collected_values.entry(value_str).or_insert(0) += 1;
+                    let key = (current_id.clone(), value_str); // Store as tuple (id, type)
+                    *collected_values.entry(key).or_insert(0) += 1;
                 }
+                // Continue recursive search within the object
                 collect_field_values_recursive(value, field_name, collected_values);
             }
         }
@@ -549,62 +553,112 @@ fn collect_field_values_recursive(
 }
 
 /// For fun
-fn print_as_table(data: Vec<(String, isize)>, header_1: String, header_2: String) {
-    // Determine the maximum width of the first column
-    let max_width = data.iter().map(|(s, _)| s.len()).max().unwrap_or(0);
+fn print_as_table(
+    data: Vec<(String, String, isize)>,
+    header_1: &str,
+    header_2: &str,
+    header_3: &str,
+) {
+    // Determine the maximum width for each column
+    let max_width_id = data.iter().map(|(s, _, _)| s.len()).max().unwrap_or(0);
+    let max_width_type = data.iter().map(|(_, s, _)| s.len()).max().unwrap_or(0);
 
     // Print the header
-    println!("{:<width$} | {header_2}", header_1, width = max_width);
-    println!("{:-<width$}-|------", "", width = max_width);
+    println!(
+        "{:<width_id$} | {:<width_type$} | {}",
+        header_1,
+        header_2,
+        header_3,
+        width_id = max_width_id,
+        width_type = max_width_type
+    );
+    println!(
+        "{:-<width_id$}-|-{:-<width_type$}-|------",
+        "",
+        "",
+        width_id = max_width_id,
+        width_type = max_width_type
+    );
 
     // Print each row
-    for (item, count) in data {
-        println!("{:<width$} | {}", item, count, width = max_width);
+    for (id, value, count) in data {
+        println!(
+            "{:<width_id$} | {:<width_type$} | {}",
+            id,
+            value,
+            count,
+            width_id = max_width_id,
+            width_type = max_width_type
+        );
     }
 }
 
-fn search_and_print_struct<T: Serialize>(object: &T, search_value: &str, location: bool) -> isize {
+fn search_and_print_struct<T: Serialize>(
+    object: &T,
+    search_value: &str,
+    location: bool,
+) -> Vec<(String, String, isize)> {
     let json = serde_json::to_value(object).unwrap();
+    let mut occurrences = HashMap::new();
+    search_and_print_recursive(&json, search_value, &mut occurrences, location);
 
-    let occurrences = search_and_print_recursive(&json, search_value, 0, location);
+    // Convert occurrences to a vector of tuples for printing
     occurrences
+        .into_iter()
+        .map(|((id, value), count)| (id, value, count))
+        .collect()
 }
 
-/// Method for searching based upon untyped serde value
 fn search_and_print_recursive(
     json: &JsonValue,
     search_value: &str,
-    mut occurrences: isize,
+    occurrences: &mut HashMap<(String, String), isize>,
     location: bool,
-) -> isize {
+) {
     match json {
         JsonValue::Object(obj) => {
+            // Retrieve @id if it exists in the current object
+            let current_id = obj
+                .get("@id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
             for (_key, value) in obj {
+                // Check if this value matches the search_value
                 if value == search_value {
-                    occurrences += 1;
+                    let key = (current_id.clone(), search_value.to_string());
+                    *occurrences.entry(key).or_insert(0) += 1;
+
                     if location {
-                        println!("Found in object:\n{}\n", to_string_pretty(&json).unwrap());
+                        println!(
+                            "Found in object:\n{}\n",
+                            serde_json::to_string_pretty(&json).unwrap()
+                        );
                     }
-                    // Stop searching this branch after a match is found
                 }
-                occurrences =
-                    search_and_print_recursive(value, search_value, occurrences, location);
+                // Recursively search the object
+                search_and_print_recursive(value, search_value, occurrences, location);
             }
         }
         JsonValue::Array(arr) => {
             for item in arr {
-                occurrences = search_and_print_recursive(item, search_value, occurrences, location);
+                search_and_print_recursive(item, search_value, occurrences, location);
             }
         }
-        // For simple values, compare directly
         _ => {
+            // For simple values, compare directly
             if json == search_value {
-                occurrences += 1;
+                let key = ("N/A".to_string(), search_value.to_string());
+                *occurrences.entry(key).or_insert(0) += 1;
+
                 if location {
-                    println!("Found in value:\n{}\n", to_string_pretty(&json).unwrap());
+                    println!(
+                        "Found in value:\n{}\n",
+                        serde_json::to_string_pretty(&json).unwrap()
+                    );
                 }
             }
         }
     }
-    occurrences
 }

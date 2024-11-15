@@ -25,22 +25,16 @@
 //! let description = MetadataDescriptor {
 //!     id: "ro-crate-metadata.json".to_string(),
 //!     type_: DataType::Term("CreativeWork".to_string()),
-//!     conforms_to: Id::Id(IdValue {
-//!         id: "https://w3id.org/ro/crate/1.1".to_string(),
-//!     }),
-//!     about: Id::Id(IdValue {
-//!         id: "./".to_string(),
-//!     }),
+//!     conforms_to: Id::Id("https://w3id.org/ro/crate/1.1".to_string()),
+//!     about: Id::Id("./".to_string()),
 //!     dynamic_entity: None,
 //! };
 //!
 //! let root_data_entity = RootDataEntity {
 //!     id: "./".to_string(),
 //!     type_: DataType::Term("Dataset".to_string()),
-//!     date_published: Option::Some("2024".to_string()),
-//!     license: Some(License::Id(Id::Id(IdValue {
-//!         id: "MIT LICENSE".to_string(),
-//!     }))),
+//!     date_published: "2024".to_string(),
+//!     license: Some(License::Id(Id::Id("MIT LICENSE".to_string())),
 //!     dynamic_entity: None,
 //! };
 //! ```

@@ -25,7 +25,7 @@ pub struct DataEntity {
     /// Defined type, if file MUST be type 'File'
     pub type_: DataType,
     /// Additional metadata
-    pub dynamic_entity: Option<HashMap<String, DynamicEntity>>,
+    pub dynamic_entity: Option<HashMap<String, EntityValue>>,
 }
 
 /// Provides functionality for manipulating dynamic properties of a `DataEntity`.
@@ -33,12 +33,44 @@ pub struct DataEntity {
 /// This trait implementation allows for adding, modifying, and removing dynamic properties
 /// stored in the `dynamic_entity` field of `DataEntity`.
 impl DynamicEntityManipulation for DataEntity {
-    fn dynamic_entity(&mut self) -> &mut Option<HashMap<String, DynamicEntity>> {
+    fn dynamic_entity(&mut self) -> &mut Option<HashMap<String, EntityValue>> {
         &mut self.dynamic_entity
     }
 
-    fn dynamic_entity_immut(&self) -> &Option<HashMap<String, DynamicEntity>> {
+    fn dynamic_entity_immut(&self) -> &Option<HashMap<String, EntityValue>> {
         &self.dynamic_entity
+    }
+}
+
+impl DataEntity {
+    pub fn get_property_value(&self, property: &str) -> Option<(String, EntityValue)> {
+        // Check the `type` field if it matches the property.
+        match property {
+            "@type" => Some((
+                self.id.clone(),
+                EntityValue::EntityDataType(self.type_.clone()),
+            )),
+            _ => self
+                .search_properties_for_value(property)
+                .map(|value| (self.id.clone(), value)),
+        }
+    }
+    /// Searches through every value in the struct to find the key for a matching input value.
+    ///
+    /// # Arguments
+    /// * `target_value` - The value to search for, as an `EntityValue`.
+    ///
+    /// # Returns
+    /// An `Option<String>` containing the key if the value exists, or `None` otherwise.
+    pub fn find_value_details(&self, target_value: &EntityValue) -> Option<(String, String)> {
+        // Check dynamic fields
+        if let Some(dynamic_entity) = &self.dynamic_entity {
+            if let Some(key) = search_dynamic_entity_for_key(dynamic_entity, target_value) {
+                return Some((self.id.clone(), key));
+            }
+        }
+
+        None
     }
 }
 
@@ -59,7 +91,7 @@ impl fmt::Display for DataEntity {
 /// This allows `DataEntity` to be serialized with custom rules, especially for the
 /// dynamic properties in the `dynamic_entity` field.
 impl CustomSerialize for DataEntity {
-    fn dynamic_entity(&self) -> Option<&HashMap<String, DynamicEntity>> {
+    fn dynamic_entity(&self) -> Option<&HashMap<String, EntityValue>> {
         self.dynamic_entity.as_ref()
     }
 
@@ -115,14 +147,14 @@ impl<'de> Deserialize<'de> for DataEntity {
             {
                 let mut id = None;
                 let mut type_ = None;
-                let mut dynamic_entity: HashMap<String, DynamicEntity> = HashMap::new();
+                let mut dynamic_entity: HashMap<String, EntityValue> = HashMap::new();
 
                 while let Some(key) = map.next_key::<String>()? {
                     match key.as_str() {
                         "@id" => id = Some(map.next_value()?),
                         "@type" => type_ = Some(map.next_value()?),
                         _ => {
-                            let value: DynamicEntity = map.next_value()?;
+                            let value: EntityValue = map.next_value()?;
                             dynamic_entity.insert(key, value);
                         }
                     }
@@ -171,7 +203,7 @@ mod tests {
         entity.add_string_value("key".to_string(), "value".to_string());
         assert_eq!(
             entity.dynamic_entity().unwrap().get("key"),
-            Some(&DynamicEntity::EntityString("value".to_string()))
+            Some(&EntityValue::EntityString("value".to_string()))
         );
 
         // Removing a dynamic entity
@@ -230,7 +262,7 @@ mod tests {
         let deserialized: DataEntity = serde_json::from_str(json_data).unwrap();
         assert_eq!(
             deserialized.dynamic_entity.unwrap().get("key"),
-            Some(&DynamicEntity::EntityString("value".to_string()))
+            Some(&EntityValue::EntityString("value".to_string()))
         );
     }
 

@@ -16,24 +16,24 @@ use std::collections::HashMap;
 /// flexible structures, allowing for a varied and extensible set of metadata.
 ///
 /// # Note
-/// Additions need to be updated due to evolution of the DynamicEntity type. There
+/// Additions need to be updated due to evolution of the EntityValue type. There
 /// will be some redundency.
 pub trait DynamicEntityManipulation: Serialize {
     /// Gets a mutable reference to the dynamic entity's underlying HashMap.
-    fn dynamic_entity(&mut self) -> &mut Option<HashMap<String, DynamicEntity>>;
+    fn dynamic_entity(&mut self) -> &mut Option<HashMap<String, EntityValue>>;
 
     /// Gets an immutable reference to the dynamic entity's underlying HashMap.
-    fn dynamic_entity_immut(&self) -> &Option<HashMap<String, DynamicEntity>>;
+    fn dynamic_entity_immut(&self) -> &Option<HashMap<String, EntityValue>>;
 
     /// Adds dynamic fields to the entity
     ///
     /// # Arguments
-    /// * 'values' - A 'Hashmap' containing a key and a valid DynamicEntity type
-    fn add_dynamic_fields(&mut self, values: HashMap<String, DynamicEntity>) {
+    /// * 'values' - A 'Hashmap' containing a key and a valid EntityValue type
+    fn add_dynamic_fields(&mut self, values: HashMap<String, EntityValue>) {
         for (key, value) in values {
             match value {
-                DynamicEntity::EntityString(s) => self.add_string_value(key, s),
-                DynamicEntity::EntityId(id) => self.add_id_value(key, id),
+                EntityValue::EntityString(s) => self.add_string_value(key, s),
+                EntityValue::EntityId(id) => self.add_id_value(key, id),
                 _ => todo!(),
             }
         }
@@ -49,7 +49,7 @@ pub trait DynamicEntityManipulation: Serialize {
         // This will automatically create the HashMap if it doesn't exist
         self.dynamic_entity()
             .get_or_insert_with(HashMap::new)
-            .insert(key, DynamicEntity::EntityString(value));
+            .insert(key, EntityValue::EntityString(value));
     }
 
     /// Adds an identifier value to the dynamic entity.
@@ -60,7 +60,7 @@ pub trait DynamicEntityManipulation: Serialize {
     fn add_id_value(&mut self, key: String, value: Id) {
         self.dynamic_entity()
             .get_or_insert_with(HashMap::new)
-            .insert(key, DynamicEntity::EntityId(value));
+            .insert(key, EntityValue::EntityId(value));
     }
 
     /// Removes a field from the dynamic entity.
@@ -76,11 +76,11 @@ pub trait DynamicEntityManipulation: Serialize {
     /// Searches for a specific value within the dynamic entity.
     ///
     /// # Arguments
-    /// * `search_value` - The `DynamicEntity` value to search for.
+    /// * `search_value` - The `EntityValue` value to search for.
     ///
     /// # Returns
     /// `true` if the value is found, otherwise `false`.
-    fn search_value(&self, search_value: &DynamicEntity) -> bool {
+    fn search_value(&self, search_value: &EntityValue) -> bool {
         if let Some(dynamic_entity) = self.dynamic_entity_immut() {
             for (_key, value) in dynamic_entity.iter() {
                 if value == search_value {
@@ -88,7 +88,7 @@ pub trait DynamicEntityManipulation: Serialize {
                 }
             }
         }
-        return false;
+        false
     }
 
     /// Finds keys within the RO-Crate matching a specified key or retrieves all keys.
@@ -99,23 +99,53 @@ pub trait DynamicEntityManipulation: Serialize {
     ///
     /// # Returns
     /// A vector of strings containing the keys found.
-    fn search_keys(&self, search_key: &String, get_all: bool) -> Vec<String> {
+    fn search_properties_for_value(&self, search_property: &str) -> Option<EntityValue> {
+        /// Recursive function for traversing nested objects.
+        fn search_obj(
+            object: &HashMap<String, EntityValue>,
+            search_property: &str,
+        ) -> Option<EntityValue> {
+            for (key, value) in object.iter() {
+                if key == search_property {
+                    return Some(value.clone());
+                }
+                if let EntityValue::EntityObject(inner_object) = value {
+                    if let Some(result) = search_obj(inner_object, search_property) {
+                        return Some(result);
+                    }
+                }
+            }
+            None
+        }
+
+        // Search in the dynamic_entity field.
+        if let Some(dynamic_entity) = self.dynamic_entity_immut() {
+            for (key, value) in dynamic_entity.iter() {
+                if key == search_property {
+                    return Some(value.clone());
+                }
+                if let EntityValue::EntityObject(object) = value {
+                    if let Some(result) = search_obj(object, search_property) {
+                        return Some(result);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn get_all_keys(&self) -> Vec<String> {
         let mut key_vec: Vec<String> = Vec::new();
 
         /// recursive function for traversing nested objects.
         /// Should probably move out from nest
-        fn search_obj(
-            object: &HashMap<String, DynamicEntity>,
-            search_key: &String,
-            get_all: bool,
-        ) -> Vec<String> {
+        fn search_nested_object(object: &HashMap<String, EntityValue>) -> Vec<String> {
             let mut key_vec: Vec<String> = Vec::new();
             for (_key, value) in object.iter() {
-                if get_all || _key == search_key {
-                    key_vec.push(_key.clone()); // Cloning the key
-                }
-                if let DynamicEntity::EntityObject(inner_object) = value {
-                    let inner_keys = search_obj(inner_object, search_key, get_all);
+                key_vec.push(_key.clone());
+
+                if let EntityValue::EntityObject(inner_object) = value {
+                    let inner_keys = search_nested_object(inner_object);
                     if !inner_keys.is_empty() {
                         key_vec.extend(inner_keys);
                     }
@@ -126,15 +156,14 @@ pub trait DynamicEntityManipulation: Serialize {
 
         if let Some(dynamic_entity) = self.dynamic_entity_immut() {
             for (_key, value) in dynamic_entity.iter() {
-                if let DynamicEntity::EntityObject(object) = value {
-                    let obvec = search_obj(object, search_key, get_all);
+                if let EntityValue::EntityObject(object) = value {
+                    let obvec = search_nested_object(object);
                     if !obvec.is_empty() {
                         key_vec.extend(obvec);
                     }
                 }
-                if get_all {
-                    key_vec.push(_key.to_string());
-                }
+
+                key_vec.push(_key.to_string());
             }
         }
         key_vec
@@ -168,13 +197,13 @@ pub trait DynamicEntityManipulation: Serialize {
 
             for (key, value) in dynamic_entity.iter() {
                 match value {
-                    DynamicEntity::EntityString(s) if s == target_id => {
+                    EntityValue::EntityString(s) if s == target_id => {
                         keys_to_remove.push(key.clone());
                     }
-                    DynamicEntity::EntityId(Id::IdArray(id_values)) => {
-                        let filtered_values: Vec<IdValue> = id_values
+                    EntityValue::EntityId(Id::IdArray(id_values)) => {
+                        let filtered_values: Vec<String> = id_values
                             .iter()
-                            .filter(|id_val| id_val.id != target_id)
+                            .filter(|id_val| id_val != &target_id)
                             .cloned()
                             .collect();
 
@@ -182,14 +211,14 @@ pub trait DynamicEntityManipulation: Serialize {
                             updates.push((key.clone(), Id::IdArray(filtered_values)));
                         }
                     }
-                    DynamicEntity::EntityId(Id::Id(id_value)) if id_value.id == target_id => {
+                    EntityValue::EntityId(Id::Id(id_value)) if id_value == target_id => {
                         keys_to_remove.push(key.clone());
                     }
-                    DynamicEntity::Fallback(fallback_values) => {
+                    EntityValue::Fallback(fallback_values) => {
                         println!("Exploring fallback {:?}", fallback_values);
                         fallback_keys_to_modify.push(key.clone());
                     }
-                    // Handle other DynamicEntity types if necessary
+                    // Handle other EntityValue types if necessary
                     _ => {
                         //println!("Unknown type {:?}?", value);
                     }
@@ -198,8 +227,7 @@ pub trait DynamicEntityManipulation: Serialize {
 
             // Potentially depreciated need to test
             for key in fallback_keys_to_modify {
-                if let Some(DynamicEntity::Fallback(fallback_value)) = dynamic_entity.get_mut(&key)
-                {
+                if let Some(EntityValue::Fallback(fallback_value)) = dynamic_entity.get_mut(&key) {
                     if let Some(fallback_value) = fallback_value.as_mut() {
                         remove_matching_value_from_json(fallback_value, target_id);
                     }
@@ -208,7 +236,7 @@ pub trait DynamicEntityManipulation: Serialize {
 
             // For entity ID's in a vec
             for (key, updated_id) in updates {
-                if let Some(DynamicEntity::EntityId(id)) = dynamic_entity.get_mut(&key) {
+                if let Some(EntityValue::EntityId(id)) = dynamic_entity.get_mut(&key) {
                     *id = updated_id;
                 }
             }
@@ -246,33 +274,24 @@ pub trait DynamicEntityManipulation: Serialize {
     /// # Notes
     /// This function is essential for maintaining referential integrity within the RO-Crate when IDs of entities
     /// are changed. It ensures that all references to the updated entity reflect the new ID.
-    fn update_matching_id(&mut self, id_old: &str, id_new: &str) -> Option<()> {
+    fn update_matching_id(&mut self, id_old: &str, id_new: &str) -> Option<bool> {
         let mut updated = false;
 
         if let Some(dynamic_entity) = &mut self.dynamic_entity() {
             for (_key, value) in dynamic_entity.iter_mut() {
                 match value {
-                    DynamicEntity::EntityId(Id::IdArray(ids)) => {
-                        for id in ids {
-                            if id.id == id_old {
-                                id.id = id_new.to_string();
+                    EntityValue::EntityId(Id::IdArray(ids)) => {
+                        for id in ids.iter_mut() {
+                            if id == id_old {
+                                *id = id_new.to_string();
                                 updated = true;
                             }
                         }
                     }
-                    DynamicEntity::EntityId(Id::Id(id)) => {
-                        if id.id == id_old {
-                            id.id = id_new.to_string();
+                    EntityValue::EntityId(Id::Id(id)) => {
+                        if id == id_old {
+                            *id = id_new.to_string();
                             updated = true;
-                        }
-                    }
-                    DynamicEntity::EntityIdVec(ids) => {
-                        for _id in ids {
-                            //if id.id == id_old {
-                            //    id.id = id_new.to_string();
-                            //    updated = true;
-                            //}
-                            // TOOD:
                         }
                     }
                     _ => (),
@@ -281,7 +300,7 @@ pub trait DynamicEntityManipulation: Serialize {
         }
 
         if updated {
-            Some(())
+            Some(true)
         } else {
             None
         }
@@ -291,14 +310,14 @@ pub trait DynamicEntityManipulation: Serialize {
 /// Recursively removes matching values from fallback serailised json objects
 ///
 /// This allows for nested id's to be removed indefinitely from complicated json objects that don't conform
-/// to a statically defined DynamicEntity Type. Both single objects and array objects are searched.
+/// to a statically defined EntityValue Type. Both single objects and array objects are searched.
 ///
 /// # Arguments
 /// * `value` - A mutable reference to a serde_json `Value` that represents the JSON structure to be cleaned.
 /// * `target_value` - The value to be searched for and removed from the JSON structure.
 ///
 /// # Notes
-/// Potentially depreciated after DynamicEntity Type expansion
+/// Potentially depreciated after EntityValue Type expansion
 /// TODO: Need to test
 fn remove_matching_value_from_json(value: &mut Value, target_value: &str) {
     match value {
@@ -337,6 +356,25 @@ fn remove_matching_value_from_json(value: &mut Value, target_value: &str) {
     }
 }
 
+pub fn search_dynamic_entity_for_key(
+    dynamic_entity: &HashMap<String, EntityValue>,
+    target_value: &EntityValue,
+) -> Option<String> {
+    for (key, value) in dynamic_entity.iter() {
+        if value == target_value {
+            return Some(key.clone());
+        }
+
+        // If the value is a nested object, search recursively
+        if let EntityValue::EntityObject(inner_object) = value {
+            if let Some(inner_key) = search_dynamic_entity_for_key(inner_object, target_value) {
+                return Some(format!("{}.{}", key, inner_key));
+            }
+        }
+    }
+
+    None
+}
 /// A trait for custom serialization of complex data structures.
 ///
 /// `CustomSerialize` extends the standard `Serialize` trait to provide additional
@@ -345,7 +383,7 @@ fn remove_matching_value_from_json(value: &mut Value, target_value: &str) {
 /// # Note
 /// This is utilised by both DataEntity and ContextualEntity
 pub trait CustomSerialize: Serialize {
-    fn dynamic_entity(&self) -> Option<&HashMap<String, DynamicEntity>>;
+    fn dynamic_entity(&self) -> Option<&HashMap<String, EntityValue>>;
     fn id(&self) -> &String;
     fn type_(&self) -> &DataType;
 
@@ -376,20 +414,20 @@ mod tests {
     struct TestEntity {
         pub id: String,
         pub type_: DataType,
-        pub dynamic_entity: Option<HashMap<String, DynamicEntity>>,
+        pub dynamic_entity: Option<HashMap<String, EntityValue>>,
     }
 
     impl DynamicEntityManipulation for TestEntity {
-        fn dynamic_entity(&mut self) -> &mut Option<HashMap<String, DynamicEntity>> {
+        fn dynamic_entity(&mut self) -> &mut Option<HashMap<String, EntityValue>> {
             &mut self.dynamic_entity
         }
-        fn dynamic_entity_immut(&self) -> &Option<HashMap<String, DynamicEntity>> {
+        fn dynamic_entity_immut(&self) -> &Option<HashMap<String, EntityValue>> {
             &self.dynamic_entity
         }
     }
 
     impl CustomSerialize for TestEntity {
-        fn dynamic_entity(&self) -> Option<&HashMap<String, DynamicEntity>> {
+        fn dynamic_entity(&self) -> Option<&HashMap<String, EntityValue>> {
             self.dynamic_entity.as_ref()
         }
 
@@ -422,7 +460,7 @@ mod tests {
         entity.add_string_value("key1".to_string(), "value1".to_string());
         assert_eq!(
             entity.dynamic_entity.unwrap().get("key1").unwrap(),
-            &DynamicEntity::EntityString("value1".to_string())
+            &EntityValue::EntityString("value1".to_string())
         );
     }
 
@@ -433,7 +471,7 @@ mod tests {
             type_: DataType::Term("test_type".to_string()),
             dynamic_entity: Some(HashMap::from([(
                 "key1".to_string(),
-                DynamicEntity::EntityString("value1".to_string()),
+                EntityValue::EntityString("value1".to_string()),
             )])),
         };
 
@@ -449,11 +487,11 @@ mod tests {
             dynamic_entity: Some(HashMap::from([
                 (
                     "key1".to_string(),
-                    DynamicEntity::EntityString("value1".to_string()),
+                    EntityValue::EntityString("value1".to_string()),
                 ),
                 (
                     "key2".to_string(),
-                    DynamicEntity::EntityString("value1".to_string()),
+                    EntityValue::EntityString("value1".to_string()),
                 ),
             ])),
         };
@@ -469,7 +507,7 @@ mod tests {
             type_: DataType::Term("test_type".to_string()),
             dynamic_entity: Some(HashMap::from([(
                 "key1".to_string(),
-                DynamicEntity::EntityString("value1".to_string()),
+                EntityValue::EntityString("value1".to_string()),
             )])),
         };
 

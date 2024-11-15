@@ -1,8 +1,8 @@
 //! Defines the Root data entity for RO-Crates
 
-use crate::ro_crate::constraints::DynamicEntity;
+use crate::ro_crate::constraints::EntityValue;
 use crate::ro_crate::constraints::{DataType, License};
-use crate::ro_crate::modify::DynamicEntityManipulation;
+use crate::ro_crate::modify::{search_dynamic_entity_for_key, DynamicEntityManipulation};
 use serde::ser::SerializeMap;
 use serde::{
     de::{self, MapAccess, Visitor},
@@ -10,6 +10,8 @@ use serde::{
 };
 use std::collections::HashMap;
 use std::fmt;
+
+use super::constraints::Id;
 
 // The Root data entity struct.
 //
@@ -39,7 +41,7 @@ pub struct RootDataEntity {
     pub license: License,
     // Optional Hashmap to enable key/value pair addition depending on crate
     // information.
-    pub dynamic_entity: Option<HashMap<String, DynamicEntity>>,
+    pub dynamic_entity: Option<HashMap<String, EntityValue>>,
 }
 
 /// Implements the 'Display' trait for RootDataEntity to enable pretty printing
@@ -52,20 +54,84 @@ impl fmt::Display for RootDataEntity {
         )
     }
 }
+impl RootDataEntity {
+    pub fn add_entity_to_partof(&mut self, id_target: String) {
+        let dynamic_entity = self.dynamic_entity.get_or_insert_with(HashMap::new);
+
+        match dynamic_entity.get_mut("hasPart") {
+            // Checks to see if array already present and if the id is already
+            // in that array
+            Some(EntityValue::EntityId(Id::IdArray(id_array))) => {
+                if !id_array.iter().any(|id| id == &id_target) {
+                    id_array.push(id_target);
+                }
+            }
+            // Insert a new IdArray with the provided `id` as the first element if `hasPart` does not exist or is not an `IdArray`
+            _ => {
+                dynamic_entity.insert(
+                    "hasPart".to_string(),
+                    EntityValue::EntityId(Id::IdArray(vec![id_target])),
+                );
+            }
+        }
+    }
+    pub fn get_property_value(&self, property: &str) -> Option<(String, EntityValue)> {
+        // Check the `type` field if it matches the property.
+        match property {
+            "@type" => Some((
+                self.id.clone(),
+                EntityValue::EntityDataType(self.type_.clone()),
+            )),
+            "name" => Some((
+                self.id.clone(),
+                EntityValue::EntityString(self.name.clone()),
+            )),
+            "description" => Some((
+                self.id.clone(),
+                EntityValue::EntityString(self.description.clone()),
+            )),
+            "license" => Some((
+                self.id.clone(),
+                EntityValue::EntityLicense(self.license.clone()),
+            )),
+            _ => self
+                .search_properties_for_value(property)
+                .map(|value| (self.id.clone(), value)),
+        }
+    }
+
+    /// Searches through every value in the struct to find the key for a matching input value.
+    ///
+    /// # Arguments
+    /// * `target_value` - The value to search for, as an `EntityValue`.
+    ///
+    /// # Returns
+    /// An `Option<String>` containing the key if the value exists, or `None` otherwise.
+    pub fn find_value_details(&self, target_value: &EntityValue) -> Option<(String, String)> {
+        // Check dynamic fields
+        if let Some(dynamic_entity) = &self.dynamic_entity {
+            if let Some(key) = search_dynamic_entity_for_key(dynamic_entity, target_value) {
+                return Some((self.id.clone(), key));
+            }
+        }
+
+        None
+    }
+}
 
 impl DynamicEntityManipulation for RootDataEntity {
     /// Implements modification of dynamic entity
-    fn dynamic_entity(&mut self) -> &mut Option<HashMap<String, DynamicEntity>> {
+    fn dynamic_entity(&mut self) -> &mut Option<HashMap<String, EntityValue>> {
         &mut self.dynamic_entity
     }
     /// Allows immutable dynamic entities to be used
-    fn dynamic_entity_immut(&self) -> &Option<HashMap<String, DynamicEntity>> {
+    fn dynamic_entity_immut(&self) -> &Option<HashMap<String, EntityValue>> {
         &self.dynamic_entity
     }
 }
 
 impl CustomSerialize for RootDataEntity {
-    fn dynamic_entity(&self) -> Option<&HashMap<String, DynamicEntity>> {
+    fn dynamic_entity(&self) -> Option<&HashMap<String, EntityValue>> {
         self.dynamic_entity.as_ref()
     }
 
@@ -105,7 +171,7 @@ impl Serialize for RootDataEntity {
 
 // Custom serailiser for root entity.
 pub trait CustomSerialize: Serialize {
-    fn dynamic_entity(&self) -> Option<&HashMap<String, DynamicEntity>>;
+    fn dynamic_entity(&self) -> Option<&HashMap<String, EntityValue>>;
     fn id(&self) -> &String;
     fn type_(&self) -> &DataType;
     fn name(&self) -> &String;
@@ -160,7 +226,7 @@ impl<'de> Deserialize<'de> for RootDataEntity {
                 let mut description = None;
                 let mut date_published = None;
                 let mut license = None;
-                let mut dynamic_entity: HashMap<String, DynamicEntity> = HashMap::new();
+                let mut dynamic_entity: HashMap<String, EntityValue> = HashMap::new();
 
                 while let Some(key) = map.next_key::<String>()? {
                     match key.as_str() {
@@ -171,7 +237,7 @@ impl<'de> Deserialize<'de> for RootDataEntity {
                         "datePublished" => date_published = map.next_value()?,
                         "license" => license = map.next_value()?,
                         _ => {
-                            let value: DynamicEntity = map.next_value()?;
+                            let value: EntityValue = map.next_value()?;
                             dynamic_entity.insert(key, value);
                         }
                     }

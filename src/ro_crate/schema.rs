@@ -1,6 +1,6 @@
 //! Validation logic for matching keys to valid context
 
-use crate::ro_crate::constraints::{Id, IdValue, License};
+use crate::ro_crate::constraints::{Id, License};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
@@ -17,9 +17,9 @@ pub struct RoCrateJSONLDContext {
     pub id: String,
     pub name: Vec<String>,
     pub version: String,
-    pub url: IdValue,
+    pub url: Id,
     #[serde(rename = "schemaVersion")]
-    pub schema_version: IdValue,
+    pub schema_version: Id,
     #[serde(rename = "isBasedOn")]
     pub is_based_on: Id,
     pub license: License,

@@ -3,7 +3,7 @@
 use ::rocraters::ro_crate::contextual_entity::ContextualEntity;
 use ::rocraters::ro_crate::data_entity::DataEntity;
 use ::rocraters::ro_crate::{
-    constraints::{DataType, DynamicEntity, Id, IdValue, License},
+    constraints::{DataType, EntityValue, Id, License},
     metadata_descriptor::MetadataDescriptor,
     root::RootDataEntity,
 };
@@ -18,7 +18,7 @@ use std::collections::HashMap;
 pub trait EntityTrait {
     fn id(&self) -> &str;
     fn data_type(&self) -> &DataType;
-    fn dynamic_entity(&self) -> &Option<HashMap<String, DynamicEntity>>;
+    fn dynamic_entity(&self) -> &Option<HashMap<String, EntityValue>>;
 }
 
 impl EntityTrait for DataEntity {
@@ -30,7 +30,7 @@ impl EntityTrait for DataEntity {
         &self.type_
     }
 
-    fn dynamic_entity(&self) -> &Option<HashMap<String, DynamicEntity>> {
+    fn dynamic_entity(&self) -> &Option<HashMap<String, EntityValue>> {
         &self.dynamic_entity
     }
 }
@@ -44,7 +44,7 @@ impl EntityTrait for ContextualEntity {
         &self.type_
     }
 
-    fn dynamic_entity(&self) -> &Option<HashMap<String, DynamicEntity>> {
+    fn dynamic_entity(&self) -> &Option<HashMap<String, EntityValue>> {
         &self.dynamic_entity
     }
 }
@@ -72,7 +72,7 @@ pub fn base_entity_to_pydict<T: EntityTrait>(py: Python, entity: &T) -> PyResult
     // Directly add dynamic_entity entries to the base dictionary
     if let Some(dynamic_entity) = entity.dynamic_entity() {
         for (key, value) in dynamic_entity.iter() {
-            // Convert each DynamicEntity to a PyObject and insert it directly into py_dict
+            // Convert each EntityValue to a PyObject and insert it directly into py_dict
             py_dict.set_item(key, convert_dynamic_entity_to_pyobject(py, value))?;
         }
     }
@@ -108,7 +108,7 @@ pub fn root_entity_to_pydict(py: Python, entity: &RootDataEntity) -> PyResult<Py
     // Directly add dynamic_entity entries to the base dictionary
     if let Some(dynamic_entity) = &entity.dynamic_entity {
         for (key, value) in dynamic_entity.iter() {
-            // Convert each DynamicEntity to a PyObject and insert it directly into py_dict
+            // Convert each EntityValue to a PyObject and insert it directly into py_dict
             py_dict.set_item(key, convert_dynamic_entity_to_pyobject(py, value))?;
         }
     }
@@ -149,7 +149,7 @@ pub fn metadata_descriptor_to_pydict(
     // Directly add dynamic_entity entries to the base dictionary
     if let Some(dynamic_entity) = &descriptor.dynamic_entity {
         for (key, value) in dynamic_entity.iter() {
-            // Convert each DynamicEntity to a PyObject and insert it directly into py_dict
+            // Convert each EntityValue to a PyObject and insert it directly into py_dict
             py_dict.set_item(key, convert_dynamic_entity_to_pyobject(py, value))?;
         }
     }
@@ -161,13 +161,13 @@ pub fn metadata_descriptor_to_pydict(
 pub fn convert_license_to_pyobject(py: Python, license_opt: &License) -> PyObject {
     match license_opt {
         License::Id(id_enum) => match id_enum {
-            Id::Id(id_value) => PyString::new_bound(py, &id_value.id).into_py(py),
+            Id::Id(id_value) => PyString::new_bound(py, id_value).into_py(py),
             Id::IdArray(id_values) => {
                 let py_list = PyList::new_bound(
                     py,
                     id_values
                         .iter()
-                        .map(|id_val| PyString::new_bound(py, &id_val.id)),
+                        .map(|id_val| PyString::new_bound(py, id_val)),
                 );
                 py_list.into()
             }
@@ -177,38 +177,42 @@ pub fn convert_license_to_pyobject(py: Python, license_opt: &License) -> PyObjec
 }
 
 /// Converts dynamic entities into pyobjects for dict representation
-pub fn convert_dynamic_entity_to_pyobject(py: Python, value: &DynamicEntity) -> PyObject {
+pub fn convert_dynamic_entity_to_pyobject(py: Python, value: &EntityValue) -> PyObject {
     match value {
-        DynamicEntity::EntityString(s) => PyString::new_bound(py, s).into(),
-        DynamicEntity::EntityVecString(vec) => {
+        EntityValue::EntityString(s) => PyString::new_bound(py, s).into(),
+        EntityValue::EntityVecString(vec) => {
             let py_list = PyList::new_bound(py, vec.iter().map(|s| PyString::new_bound(py, s)));
             py_list.into()
         }
-        DynamicEntity::EntityId(id) => convert_id_to_pyobject(py, id).unwrap(),
-        DynamicEntity::EntityIdVec(ids) => {
-            let py_list = PyList::new_bound(
-                py,
-                ids.iter().map(|id| convert_id_to_pyobject(py, id).unwrap()),
-            );
-            py_list.into()
-        }
-        DynamicEntity::EntityBool(b) => {
+        EntityValue::EntityId(id) => convert_id_to_pyobject(py, id).unwrap(),
+        EntityValue::EntityLicense(license) => match license {
+            License::Id(id) => convert_id_to_pyobject(py, id).unwrap(),
+            License::Description(s) => PyString::new_bound(py, s).into(),
+        },
+        EntityValue::EntityDataType(data_type) => match data_type {
+            DataType::Term(s) => PyString::new_bound(py, s).into(),
+            DataType::TermArray(vec) => {
+                let py_list = PyList::new_bound(py, vec.iter().map(|s| PyString::new_bound(py, s)));
+                py_list.into()
+            }
+        },
+        EntityValue::EntityBool(b) => {
             match b {
                 Some(value) => PyBool::new_bound(py, *value).into_py(py), // If it's a bool, convert it
                 None => py.None().into_py(py), // If it's None, keep it as None in Python
             }
         }
-        DynamicEntity::Entityi64(num) => (*num).into_py(py),
-        DynamicEntity::Entityf64(num) => PyFloat::new_bound(py, *num).into(),
-        DynamicEntity::EntityVeci64(vec) => {
+        EntityValue::Entityi64(num) => (*num).into_py(py),
+        EntityValue::Entityf64(num) => PyFloat::new_bound(py, *num).into(),
+        EntityValue::EntityVeci64(vec) => {
             let py_list = PyList::new_bound(py, vec.iter().map(|&num| (num).into_py(py)));
             py_list.into()
         }
-        DynamicEntity::EntityVecf64(vec) => {
+        EntityValue::EntityVecf64(vec) => {
             let py_list = PyList::new_bound(py, vec.iter().map(|&num| PyFloat::new_bound(py, num)));
             py_list.into()
         }
-        DynamicEntity::EntityVec(vec) => {
+        EntityValue::EntityVec(vec) => {
             let py_list = PyList::new_bound(
                 py,
                 vec.iter()
@@ -216,7 +220,7 @@ pub fn convert_dynamic_entity_to_pyobject(py: Python, value: &DynamicEntity) -> 
             );
             py_list.into()
         }
-        DynamicEntity::EntityObject(map) => {
+        EntityValue::EntityObject(map) => {
             let py_dict = PyDict::new_bound(py);
             for (key, val) in map {
                 py_dict
@@ -225,7 +229,7 @@ pub fn convert_dynamic_entity_to_pyobject(py: Python, value: &DynamicEntity) -> 
             }
             py_dict.into()
         }
-        DynamicEntity::EntityVecObject(vec) => {
+        EntityValue::EntityVecObject(vec) => {
             let py_list = PyList::new_bound(
                 py,
                 vec.iter().map(|map| {
@@ -240,10 +244,10 @@ pub fn convert_dynamic_entity_to_pyobject(py: Python, value: &DynamicEntity) -> 
             );
             py_list.to_object(py) // Convert the PyList to PyObject
         }
-        DynamicEntity::NestedDynamicEntity(boxed_entity) => {
+        EntityValue::NestedDynamicEntity(boxed_entity) => {
             convert_dynamic_entity_to_pyobject(py, boxed_entity)
         }
-        DynamicEntity::Fallback(value_option) => {
+        EntityValue::Fallback(value_option) => {
             // Convert serde_json::Value to PyObject
             if let Some(value) = value_option {
                 // Convert serde_json::Value to PyObject when there's a value
@@ -281,7 +285,7 @@ fn convert_id_to_pyobject(py: Python, id: &Id) -> PyResult<PyObject> {
     match id {
         Id::Id(id_value) => {
             let py_dict = PyDict::new_bound(py);
-            py_dict.set_item("id", PyString::new_bound(py, &id_value.id))?;
+            py_dict.set_item("id", PyString::new_bound(py, id_value))?;
             Ok(py_dict.into_py(py))
         }
         Id::IdArray(id_values) => {
@@ -290,7 +294,7 @@ fn convert_id_to_pyobject(py: Python, id: &Id) -> PyResult<PyObject> {
                 .map(|id_val| {
                     let py_dict = PyDict::new_bound(py);
                     py_dict
-                        .set_item("id", PyString::new_bound(py, &id_val.id))
+                        .set_item("id", PyString::new_bound(py, id_val))
                         .expect("Failed to set 'id' key");
                     py_dict.into_py(py)
                 })
@@ -318,14 +322,14 @@ impl<'source> FromPyObject<'source> for DataEntityWrapper {
         let type_ = create_data_type_from_dict(py_dict)?;
 
         // Initialize an empty HashMap to hold dynamic_entity entries
-        let mut dynamic_entity_map: HashMap<String, DynamicEntity> = HashMap::new();
+        let mut dynamic_entity_map: HashMap<String, EntityValue> = HashMap::new();
 
         // Iterate over the dictionary, excluding "id" and "type" keys
         for (key, value) in py_dict.into_iter() {
             let key_str: String = key.extract()?; // Extract key as String
             if key_str != "id" && key_str != "type" {
                 let dynamic_entity = convert_pyobject_to_dynamic_entity(py, value)?;
-                // Convert value to DynamicEntity and insert into the map
+                // Convert value to EntityValue and insert into the map
                 dynamic_entity_map.insert(key_str, dynamic_entity);
             }
         }
@@ -360,14 +364,14 @@ impl<'source> FromPyObject<'source> for ContextualEntityWrapper {
         let type_ = create_data_type_from_dict(py_dict)?;
 
         // Initialize an empty HashMap to hold dynamic_entity entries
-        let mut dynamic_entity_map: HashMap<String, DynamicEntity> = HashMap::new();
+        let mut dynamic_entity_map: HashMap<String, EntityValue> = HashMap::new();
 
         // Iterate over the dictionary, excluding "id" and "type" keys
         for (key, value) in py_dict.into_iter() {
             let key_str: String = key.extract()?; // Extract key as String
             if key_str != "id" && key_str != "type" {
                 let dynamic_entity = convert_pyobject_to_dynamic_entity(py, value)?;
-                // Convert value to DynamicEntity and insert into the map
+                // Convert value to EntityValue and insert into the map
                 dynamic_entity_map.insert(key_str, dynamic_entity);
             }
         }
@@ -421,7 +425,7 @@ impl<'source> FromPyObject<'source> for RootDataEntityWrapper {
         };
 
         // Initialize an empty HashMap to hold dynamic_entity entries
-        let mut dynamic_entity_map: HashMap<String, DynamicEntity> = HashMap::new();
+        let mut dynamic_entity_map: HashMap<String, EntityValue> = HashMap::new();
 
         // Iterate over the dictionary, excluding "id" and "type" keys
         for (key, value) in py_dict.into_iter() {
@@ -434,7 +438,7 @@ impl<'source> FromPyObject<'source> for RootDataEntityWrapper {
                 && key_str != "license"
             {
                 let dynamic_entity = convert_pyobject_to_dynamic_entity(py, value)?;
-                // Convert value to DynamicEntity and insert into the map
+                // Convert value to EntityValue and insert into the map
                 dynamic_entity_map.insert(key_str, dynamic_entity);
             }
         }
@@ -485,7 +489,7 @@ impl<'source> FromPyObject<'source> for MetadataDescriptorWrapper {
         };
 
         // Initialize an empty HashMap to hold dynamic_entity entries
-        let mut dynamic_entity_map: HashMap<String, DynamicEntity> = HashMap::new();
+        let mut dynamic_entity_map: HashMap<String, EntityValue> = HashMap::new();
 
         // Iterate over the dictionary, excluding "id" and "type" keys
         for (key, value) in py_dict.into_iter() {
@@ -493,7 +497,7 @@ impl<'source> FromPyObject<'source> for MetadataDescriptorWrapper {
             if key_str != "id" && key_str != "type" && key_str != "conformsTo" && key_str != "about"
             {
                 let dynamic_entity = convert_pyobject_to_dynamic_entity(py, value)?;
-                // Convert value to DynamicEntity and insert into the map
+                // Convert value to EntityValue and insert into the map
                 dynamic_entity_map.insert(key_str, dynamic_entity);
             }
         }
@@ -555,21 +559,17 @@ fn convert_dict_to_id(_py: Python, input: &PyAny) -> PyResult<Id> {
     // Converts to pydidct then checks id
     if let Ok(py_dict) = input.downcast::<PyDict>() {
         if let Ok(id_str) = py_dict.get_item("id") {
-            return Ok(Id::Id(IdValue {
-                id: id_str.unwrap().to_string(),
-            }));
+            return Ok(Id::Id(id_str.unwrap().to_string()));
         }
     }
 
     // Check if input is a list of objects each with "id"
     if let Ok(py_list) = input.downcast::<PyList>() {
-        let mut id_values: Vec<IdValue> = Vec::new();
+        let mut id_values: Vec<String> = Vec::new();
         for item in py_list {
             if let Ok(py_dict) = item.downcast::<PyDict>() {
                 if let Ok(id_str) = py_dict.get_item("id") {
-                    id_values.push(IdValue {
-                        id: id_str.unwrap().to_string(),
-                    });
+                    id_values.push(id_str.unwrap().to_string());
                 } else {
                     return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
                         "List items must be dictionaries with an 'id' key",
@@ -589,63 +589,63 @@ fn convert_dict_to_id(_py: Python, input: &PyAny) -> PyResult<Id> {
 }
 
 // converts a PyObject to any required dynamic entity
-fn convert_pyobject_to_dynamic_entity(py: Python, obj: &PyAny) -> PyResult<DynamicEntity> {
+fn convert_pyobject_to_dynamic_entity(py: Python, obj: &PyAny) -> PyResult<EntityValue> {
     // String
     if let Ok(s) = obj.extract::<String>() {
-        return Ok(DynamicEntity::EntityString(s));
+        return Ok(EntityValue::EntityString(s));
     }
     // Vec<String>
     if let Ok(vec_str) = obj.extract::<Vec<String>>() {
-        return Ok(DynamicEntity::EntityVecString(vec_str));
+        return Ok(EntityValue::EntityVecString(vec_str));
     }
     // Boolean
     if let Ok(b) = obj.extract::<bool>() {
-        return Ok(DynamicEntity::EntityBool(Some(b)));
+        return Ok(EntityValue::EntityBool(Some(b)));
     }
     // i64
     if let Ok(i) = obj.extract::<i64>() {
-        return Ok(DynamicEntity::Entityi64(i));
+        return Ok(EntityValue::Entityi64(i));
     }
     // f64
     if let Ok(f) = obj.extract::<f64>() {
-        return Ok(DynamicEntity::Entityf64(f));
+        return Ok(EntityValue::Entityf64(f));
     }
     // Vec<i64>
     if let Ok(vec_i64) = obj.extract::<Vec<i64>>() {
-        return Ok(DynamicEntity::EntityVeci64(vec_i64));
+        return Ok(EntityValue::EntityVeci64(vec_i64));
     }
     // Vec<f64>
     if let Ok(vec_f64) = obj.extract::<Vec<f64>>() {
-        return Ok(DynamicEntity::EntityVecf64(vec_f64));
+        return Ok(EntityValue::EntityVecf64(vec_f64));
     }
     // Id or Vec<Id>
     if let Ok(id) = convert_dict_to_id(py, obj) {
-        return Ok(DynamicEntity::EntityId(id));
+        return Ok(EntityValue::EntityId(id));
     }
 
     // Check if the object is None
     if obj.is_none() {
         // Directly return if obj is Python None
-        return Ok(DynamicEntity::EntityString("None".to_string()));
+        return Ok(EntityValue::EntityString("None".to_string()));
     }
-    // Vec<DynamicEntity>
+    // Vec<EntityValue>
     if let Ok(list) = obj.extract::<&PyList>() {
         let mut vec = Vec::new();
         for item in list {
             let entity = convert_pyobject_to_dynamic_entity(py, item)?;
             vec.push(entity);
         }
-        return Ok(DynamicEntity::EntityVec(vec));
+        return Ok(EntityValue::EntityVec(vec));
     }
-    // HashMap<String, DynamicEntity> or Vec<HashMap<String, DynamicEntity>>
+    // HashMap<String, EntityValue> or Vec<HashMap<String, EntityValue>>
     if let Ok(dict) = obj.extract::<&PyDict>() {
-        let mut map: HashMap<String, DynamicEntity> = HashMap::new();
+        let mut map: HashMap<String, EntityValue> = HashMap::new();
         for (k, v) in dict {
             let key: String = k.extract()?;
-            let value: DynamicEntity = convert_pyobject_to_dynamic_entity(py, v)?;
+            let value: EntityValue = convert_pyobject_to_dynamic_entity(py, v)?;
             map.insert(key, value);
         }
-        Ok(DynamicEntity::EntityObject(map))
+        Ok(EntityValue::EntityObject(map))
     } else {
         Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
             "Data type unavailable",

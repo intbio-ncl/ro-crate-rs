@@ -150,7 +150,7 @@ pub fn validate_crate_keys(rocrate: &RoCrate) -> ValidationResult {
         Ok(crate_metadata) => {
             let crate_context: Vec<String> = crate_metadata.context.keys().cloned().collect();
             let custom_context = rocrate.get_context_items();
-            let vals = RoCrate::get_all_property_values(rocrate);
+            let vals = RoCrate::get_all_properties(rocrate);
 
             // Convert vec1 and vec2 to HashSets for efficient lookup
             let set1: HashSet<_> = crate_context.into_iter().collect();

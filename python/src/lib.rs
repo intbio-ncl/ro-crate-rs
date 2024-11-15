@@ -3,11 +3,12 @@
 mod utils;
 extern crate chrono;
 use ::rocraters::ro_crate::constraints::*;
+use ::rocraters::ro_crate::graph_vector::GraphVector;
 use ::rocraters::ro_crate::metadata_descriptor::MetadataDescriptor;
 use ::rocraters::ro_crate::root::RootDataEntity;
 use ::rocraters::ro_crate::{
     read::{read_crate, read_crate_obj},
-    rocrate::{ContextItem, GraphVector, RoCrate, RoCrateContext},
+    rocrate::{ContextItem, RoCrate, RoCrateContext},
     write::{write_crate as rs_write_crate, zip_crate as rs_zip_crate},
 };
 use chrono::prelude::*;
@@ -95,7 +96,7 @@ impl PyRoCrate {
 
     /// Gets a specified entity based upon ID
     fn get_entity(&mut self, py: Python, id: &str) -> PyResult<PyObject> {
-        match self.inner.find_id(id) {
+        match self.inner.get_entity(id) {
             Some(GraphVector::DataEntity(data_entity)) => {
                 utils::base_entity_to_pydict(py, data_entity)
             }
@@ -128,7 +129,7 @@ impl PyRoCrate {
         let id = data_entity.id.clone();
         let update = GraphVector::DataEntity(data_entity);
 
-        self.inner.overwite_by_id(&id, update);
+        self.inner.overwrite_by_id(&id, update);
 
         Ok(())
     }
@@ -146,7 +147,7 @@ impl PyRoCrate {
         let id = contextual_entity.id.clone();
         let update = GraphVector::ContextualEntity(contextual_entity);
 
-        self.inner.overwite_by_id(&id, update);
+        self.inner.overwrite_by_id(&id, update);
 
         Ok(())
     }
@@ -164,7 +165,7 @@ impl PyRoCrate {
         let id = root_entity.id.clone();
         let update = GraphVector::RootDataEntity(root_entity);
 
-        self.inner.overwite_by_id(&id, update);
+        self.inner.overwrite_by_id(&id, update);
 
         Ok(())
     }
@@ -182,7 +183,7 @@ impl PyRoCrate {
         let id = descriptor.id.clone();
         let update = GraphVector::MetadataDescriptor(descriptor);
 
-        self.inner.overwite_by_id(&id, update);
+        self.inner.overwrite_by_id(&id, update);
 
         Ok(())
     }
@@ -264,12 +265,8 @@ impl Default for PyRoCrate {
         let description = MetadataDescriptor {
             id: "ro-crate-metadata.json".to_string(),
             type_: DataType::Term("CreativeWork".to_string()),
-            conforms_to: Id::Id(IdValue {
-                id: "https://w3id.org/ro/crate/1.1".to_string(),
-            }),
-            about: Id::Id(IdValue {
-                id: "./".to_string(),
-            }),
+            conforms_to: Id::Id("https://w3id.org/ro/crate/1.1".to_string()),
+            about: Id::Id("./".to_string()),
             dynamic_entity: None,
         };
 
@@ -281,9 +278,9 @@ impl Default for PyRoCrate {
             name: format!("Default Crate: {time}"),
             description: "Default crate description".to_string(),
             date_published: Utc::now().to_rfc3339().to_string(),
-            license: License::Id(Id::Id(IdValue {
-                id: "https://creativecommons.org/licenses/by-nc/4.0/deed.en".to_string(),
-            })),
+            license: License::Id(Id::Id(
+                "https://creativecommons.org/licenses/by-nc/4.0/deed.en".to_string(),
+            )),
             dynamic_entity: None,
         };
         rocrate

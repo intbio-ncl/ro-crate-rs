@@ -303,18 +303,14 @@ fn update_zip_ids(rocrate: &mut RoCrate, id: PathBuf, zip_id: &str) {
     let id_str = id.to_str().unwrap_or_default();
 
     // Try updating based on a direct match
-    if rocrate.update_id_recursive(id_str, zip_id).is_some() {
-        return;
-    }
+    rocrate.update_id_recursive(id_str, zip_id);
 
     // Handle Windows extended-length path prefixes (\\?\)
     if id_str.starts_with(r"\\?\") {
         let stripped_id = &id_str[4..];
 
         // Attempt to update using the stripped path
-        if rocrate.update_id_recursive(stripped_id, zip_id).is_some() {
-            return;
-        }
+        rocrate.update_id_recursive(stripped_id, zip_id);
 
         // Handle paths with '\\' by replacing them with a single '\'
         if id_str.contains("\\\\") {

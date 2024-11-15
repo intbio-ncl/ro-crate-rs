@@ -3,7 +3,7 @@
 //! This describes the crate as a whole, specifying it as a versioned crate and
 //! the location of the root data entity
 
-use crate::ro_crate::constraints::DynamicEntity;
+use crate::ro_crate::constraints::EntityValue;
 use crate::ro_crate::constraints::{DataType, Id};
 use crate::ro_crate::modify::*;
 use serde::ser::SerializeMap;
@@ -31,7 +31,7 @@ pub struct MetadataDescriptor {
     /// Should reference the root data entity buy using `./`
     pub about: Id,
     /// Optional dynamic entity for further population of key:value pairs
-    pub dynamic_entity: Option<HashMap<String, DynamicEntity>>,
+    pub dynamic_entity: Option<HashMap<String, EntityValue>>,
 }
 
 /// Custom display formatting for `MetadataDescriptor`
@@ -46,11 +46,49 @@ impl fmt::Display for MetadataDescriptor {
 }
 
 impl DynamicEntityManipulation for MetadataDescriptor {
-    fn dynamic_entity(&mut self) -> &mut Option<HashMap<String, DynamicEntity>> {
+    fn dynamic_entity(&mut self) -> &mut Option<HashMap<String, EntityValue>> {
         &mut self.dynamic_entity
     }
-    fn dynamic_entity_immut(&self) -> &Option<HashMap<String, DynamicEntity>> {
+    fn dynamic_entity_immut(&self) -> &Option<HashMap<String, EntityValue>> {
         &self.dynamic_entity
+    }
+}
+
+impl MetadataDescriptor {
+    pub fn get_property_value(&self, property: &str) -> Option<(String, EntityValue)> {
+        // Check the `type` field if it matches the property.
+        match property {
+            "@type" => Some((
+                self.id.clone(),
+                EntityValue::EntityDataType(self.type_.clone()),
+            )),
+            "conformsTo" => Some((
+                self.id.clone(),
+                EntityValue::EntityId(self.conforms_to.clone()),
+            )),
+            "about" => Some((self.id.clone(), EntityValue::EntityId(self.about.clone()))),
+            _ => self
+                .search_properties_for_value(property)
+                .map(|value| (self.id.clone(), value)),
+        }
+    }
+
+    /// Searches through every value in the struct to find the key for a matching input value.
+    ///
+    /// # Arguments
+    /// * `target_value` - The value to search for, as an `EntityValue`.
+    ///
+    /// # Returns
+    /// An `Option<String>` containing the key if the value exists, or `None` otherwise.
+    pub fn find_value_details(&self, target_value: &EntityValue) -> Option<(String, String)> {
+        // Check dynamic fields
+        if let Some(dynamic_entity) = &self.dynamic_entity {
+            if let Some(key) = search_dynamic_entity_for_key(dynamic_entity, target_value) {
+                return Some((self.id.clone(), key));
+            }
+        }
+
+        None
     }
 }
 
@@ -59,7 +97,7 @@ impl DynamicEntityManipulation for MetadataDescriptor {
 /// This implementation provides custom serialization logic for `MetadataDescriptor`,
 /// enabling serialization of both its static and dynamic fields.
 impl CustomSerialize for MetadataDescriptor {
-    fn dynamic_entity(&self) -> Option<&HashMap<String, DynamicEntity>> {
+    fn dynamic_entity(&self) -> Option<&HashMap<String, EntityValue>> {
         self.dynamic_entity.as_ref()
     }
 
@@ -101,7 +139,7 @@ impl Serialize for MetadataDescriptor {
 /// that contain a mix of static fields (like `id`, `type_`, etc.) and a flexible
 /// collection of dynamic properties (like a `HashMap` for additional data).
 pub trait CustomSerialize: Serialize {
-    fn dynamic_entity(&self) -> Option<&HashMap<String, DynamicEntity>>;
+    fn dynamic_entity(&self) -> Option<&HashMap<String, EntityValue>>;
     fn id(&self) -> &String;
     fn type_(&self) -> &DataType;
     fn conforms_to(&self) -> &Id;
@@ -162,7 +200,7 @@ impl<'de> Deserialize<'de> for MetadataDescriptor {
                 let mut type_ = None;
                 let mut conforms_to = None;
                 let mut about = None;
-                let mut dynamic_entity: HashMap<String, DynamicEntity> = HashMap::new();
+                let mut dynamic_entity: HashMap<String, EntityValue> = HashMap::new();
 
                 // Iterating through the map
                 while let Some(key) = map.next_key::<String>()? {
@@ -172,7 +210,7 @@ impl<'de> Deserialize<'de> for MetadataDescriptor {
                         "conformsTo" => conforms_to = Some(map.next_value()?),
                         "about" => about = Some(map.next_value()?),
                         _ => {
-                            let value: DynamicEntity = map.next_value()?;
+                            let value: EntityValue = map.next_value()?;
                             dynamic_entity.insert(key, value);
                         }
                     }
@@ -203,7 +241,6 @@ impl<'de> Deserialize<'de> for MetadataDescriptor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ro_crate::constraints::IdValue;
 
     // Test for creating a MetadataDescriptor instance
     #[test]
@@ -211,29 +248,15 @@ mod tests {
         let metadata = MetadataDescriptor {
             id: "metadata_id".to_string(),
             type_: DataType::Term("MetadataType".to_string()),
-            conforms_to: Id::Id(IdValue {
-                id: "conformsTo_id".to_string(),
-            }),
-            about: Id::Id(IdValue {
-                id: "about_id".to_string(),
-            }),
+            conforms_to: Id::Id("conformsTo_id".to_string()),
+            about: Id::Id("about_id".to_string()),
             dynamic_entity: Some(HashMap::new()),
         };
 
         assert_eq!(metadata.id, "metadata_id");
         assert!(matches!(metadata.type_, DataType::Term(ref t) if t == "MetadataType"));
-        assert_eq!(
-            metadata.conforms_to,
-            Id::Id(IdValue {
-                id: "conformsTo_id".to_string()
-            })
-        );
-        assert_eq!(
-            metadata.about,
-            Id::Id(IdValue {
-                id: "about_id".to_string()
-            })
-        );
+        assert_eq!(metadata.conforms_to, Id::Id("conformsTo_id".to_string()));
+        assert_eq!(metadata.about, Id::Id("about_id".to_string()));
         assert!(metadata.dynamic_entity.unwrap().is_empty());
     }
 
@@ -243,12 +266,8 @@ mod tests {
         let mut metadata = MetadataDescriptor {
             id: "metadata_id".to_string(),
             type_: DataType::Term("MetadataType".to_string()),
-            conforms_to: Id::Id(IdValue {
-                id: "conformsTo_id".to_string(),
-            }),
-            about: Id::Id(IdValue {
-                id: "about_id".to_string(),
-            }),
+            conforms_to: Id::Id("conformsTo_id".to_string()),
+            about: Id::Id("about_id".to_string()),
             dynamic_entity: Some(HashMap::new()),
         };
 
@@ -256,7 +275,7 @@ mod tests {
         metadata.add_string_value("key1".to_string(), "value1".to_string());
         assert_eq!(
             metadata.dynamic_entity.as_ref().unwrap().get("key1"),
-            Some(&DynamicEntity::EntityString("value1".to_string()))
+            Some(&EntityValue::EntityString("value1".to_string()))
         );
 
         // Removing a dynamic entity
@@ -275,12 +294,8 @@ mod tests {
         let metadata = MetadataDescriptor {
             id: "metadata_id".to_string(),
             type_: DataType::Term("MetadataType".to_string()),
-            conforms_to: Id::Id(IdValue {
-                id: "conformsTo_id".to_string(),
-            }),
-            about: Id::Id(IdValue {
-                id: "about_id".to_string(),
-            }),
+            conforms_to: Id::Id("conformsTo_id".to_string()),
+            about: Id::Id("about_id".to_string()),
             dynamic_entity: Some(HashMap::new()),
         };
 
@@ -308,16 +323,9 @@ mod tests {
         assert!(matches!(deserialized.type_, DataType::Term(ref t) if t == "MetadataType"));
         assert_eq!(
             deserialized.conforms_to,
-            Id::Id(IdValue {
-                id: "conformsTo_id".to_string()
-            })
+            Id::Id("conformsTo_id".to_string())
         );
-        assert_eq!(
-            deserialized.about,
-            Id::Id(IdValue {
-                id: "about_id".to_string()
-            })
-        );
+        assert_eq!(deserialized.about, Id::Id("about_id".to_string()));
     }
 
     // Test deserialization error with missing fields

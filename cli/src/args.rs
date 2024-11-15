@@ -131,8 +131,6 @@ pub struct DeleteCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum ModifyCommand {
-    /// Add a string value to an entity
-    AddString(AddStringCommand),
     /// Add a ID to an entity
     AddIdValue(AddIdValueCommand),
     /// Add a list of ID's to an entity
@@ -143,23 +141,6 @@ pub enum ModifyCommand {
     RemoveField(RemoveFieldCommand),
 }
 
-#[derive(Debug, Args)]
-pub struct AddStringCommand {
-    /// Target crate
-    #[clap(
-        short,
-        long,
-        required = false,
-        default_value = "ro-crate-metadata.json"
-    )]
-    pub target_crate: String,
-    /// Input ID to add to
-    pub id: String,
-    /// Key to add
-    pub key: String,
-    /// Value to add
-    pub value: String,
-}
 #[derive(Debug, Args)]
 pub struct AddIdValueCommand {
     /// Target crate
@@ -261,6 +242,9 @@ pub struct ReadCrateCommand {
     /// Raw struct data
     #[clap(short, long)]
     pub raw_struct: bool,
+    /// Prints full view without trimming
+    #[clap(short, long)]
+    pub fit: bool,
 }
 
 /// TODO: Add a field to recursively show all linked ids
@@ -279,6 +263,9 @@ pub struct ReadEntityCommand {
     /// Raw struct data
     #[clap(short, long)]
     pub raw_struct: bool,
+    /// Prints full view without trimming
+    #[clap(short, long)]
+    pub fit: bool,
 }
 
 #[derive(Debug, Args)]

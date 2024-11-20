@@ -62,7 +62,7 @@ pub enum RoCrateContext {
 ///
 /// - `EmbeddedContext`: A map containing definitions directly. This is for defining terms right within the crate, making it self-contained.
 ///
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(untagged)]
 pub enum ContextItem {
     /// A URI string for referencing external JSON-LD contexts
@@ -70,6 +70,62 @@ pub enum ContextItem {
     /// Directly embedded context definitions, ensureing crate protability by using a vector of
     /// hash maps for term definitions
     EmbeddedContext(HashMap<String, String>),
+}
+
+impl RoCrateContext {
+    /// Adds a new context to the `RoCrateContext`.
+    pub fn add_context(&mut self, new_context: ContextItem) {
+        match self {
+            RoCrateContext::ReferenceContext(current) => {
+                // Convert to `ExtendedContext` if necessary
+                *self = RoCrateContext::ExtendedContext(vec![
+                    ContextItem::ReferenceItem(current.clone()),
+                    new_context,
+                ]);
+            }
+            RoCrateContext::ExtendedContext(contexts) => {
+                // Add the new item to the extended context
+                contexts.push(new_context);
+            }
+            RoCrateContext::EmbeddedContext(embedded_contexts) => {
+                // Merge new key-value pairs into the existing embedded context
+                if let ContextItem::EmbeddedContext(new_map) = new_context {
+                    embedded_contexts.push(new_map);
+                }
+            }
+        }
+    }
+
+    /// Removes a context item from the `RoCrateContext`.
+    pub fn remove_context(&mut self, target: &ContextItem) -> Result<(), String> {
+        match self {
+            RoCrateContext::ReferenceContext(_) => Err(
+                "ReferenceContext cannot be removed as the crate requires a context.".to_string(),
+            ),
+            RoCrateContext::ExtendedContext(contexts) => {
+                let initial_len = contexts.len();
+                contexts.retain(|item| item != target);
+                if contexts.len() < initial_len {
+                    Ok(())
+                } else {
+                    Err("Context item not found in ExtendedContext.".to_string())
+                }
+            }
+            RoCrateContext::EmbeddedContext(embedded_contexts) => {
+                if let ContextItem::EmbeddedContext(target_map) = target {
+                    let initial_len = embedded_contexts.len();
+                    embedded_contexts.retain(|map| map != target_map);
+                    if embedded_contexts.len() < initial_len {
+                        Ok(())
+                    } else {
+                        Err("Target map not found in EmbeddedContext.".to_string())
+                    }
+                } else {
+                    Err("Invalid target type for EmbeddedContext.".to_string())
+                }
+            }
+        }
+    }
 }
 
 /// This allows direct manipulation of each node of the GraphVector
@@ -93,20 +149,17 @@ impl RoCrate {
         match &self.context {
             RoCrateContext::EmbeddedContext(context) => {
                 for map in context {
-                    for (key, _value) in map {
+                    for key in map.keys() {
                         valid_context.push(key.to_string());
                     }
                 }
             }
             RoCrateContext::ExtendedContext(context) => {
                 for map in context {
-                    match map {
-                        ContextItem::EmbeddedContext(context) => {
-                            for (key, _value) in context {
-                                valid_context.push(key.to_string());
-                            }
+                    if let ContextItem::EmbeddedContext(context) = map {
+                        for key in context.keys() {
+                            valid_context.push(key.to_string());
                         }
-                        _ => (),
                     }
                 }
             }
@@ -245,6 +298,7 @@ impl RoCrate {
         };
     }
 
+    /// Gets all properties found within RO-Crate
     pub fn get_all_properties(&self) -> Vec<String> {
         let mut properties: Vec<String> = Vec::new();
         for graph_vector in &self.graph {
@@ -256,6 +310,7 @@ impl RoCrate {
         properties
     }
 
+    /// Gets all the values of a specific property from within the RO-Crate
     pub fn get_all_property_values(&self, property: &str) -> Vec<(String, EntityValue)> {
         let mut property_values: Vec<(String, EntityValue)> = Vec::new();
         for graph_vector in &self.graph {
@@ -267,6 +322,7 @@ impl RoCrate {
         property_values
     }
 
+    /// Gets ID and Key of the specific value searched
     pub fn get_specific_value(&self, value: &str) -> Vec<(String, String)> {
         let mut property_values: Vec<(String, String)> = Vec::new();
         for graph_vector in &self.graph {
@@ -278,9 +334,8 @@ impl RoCrate {
         property_values
     }
 
+    /// Overwrites an entity with another entity by ID
     pub fn overwrite_by_id(&mut self, id: &str, entity: GraphVector) -> bool {
-        println!("id: {}", id);
-        println!("Entity: {:?}", entity);
         if let Some(index) = self.find_entity_index(id) {
             self.graph[index] = entity;
             true
@@ -289,6 +344,7 @@ impl RoCrate {
         }
     }
 
+    /// Adds a new key:value pair to a entity based on ID
     pub fn add_dynamic_entity_property(
         &mut self,
         id: &str,
@@ -302,6 +358,7 @@ impl RoCrate {
         }
     }
 
+    /// Removes a key:value pair of an entity based on its ID
     pub fn remove_dynamic_entity_property(&mut self, id: &str, property: &str) -> bool {
         if let Some(index) = self.find_entity_index(id) {
             self.graph[index].remove_dynamic_entity_field(property);

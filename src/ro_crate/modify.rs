@@ -134,6 +134,7 @@ pub trait DynamicEntityManipulation: Serialize {
         None
     }
 
+    /// Get all keys containing within a dynamic_entity
     fn get_all_keys(&self) -> Vec<String> {
         let mut key_vec: Vec<String> = Vec::new();
 
@@ -356,6 +357,7 @@ fn remove_matching_value_from_json(value: &mut Value, target_value: &str) {
     }
 }
 
+/// Returns key from dynamic_entity
 pub fn search_dynamic_entity_for_key(
     dynamic_entity: &HashMap<String, EntityValue>,
     target_value: &EntityValue,
@@ -368,7 +370,7 @@ pub fn search_dynamic_entity_for_key(
         // If the value is a nested object, search recursively
         if let EntityValue::EntityObject(inner_object) = value {
             if let Some(inner_key) = search_dynamic_entity_for_key(inner_object, target_value) {
-                return Some(format!("{}.{}", key, inner_key));
+                return Some(inner_key);
             }
         }
     }

@@ -79,7 +79,7 @@ impl GraphVector {
         }
     }
 
-    /// Get entity
+    /// Get mutable entity
     pub fn get_entity_mutable(&mut self, id: &str) -> Option<&mut GraphVector> {
         match self {
             GraphVector::MetadataDescriptor(entity) if id == entity.id => Some(self),
@@ -89,11 +89,8 @@ impl GraphVector {
             _ => None,
         }
     }
-    /// Retrieves a list of all entity IDs within the RO-Crate.
-    ///
-    /// This method compiles a list of the IDs of all entities contained within the RO-Crate. It is useful
-    /// for operations that need to process or reference every entity in the crate, such as data validation
-    /// or integrity checks.
+
+    /// Gets ID of target entity
     pub fn get_id(&self) -> &String {
         match self {
             GraphVector::MetadataDescriptor(entity) => &entity.id,
@@ -103,6 +100,7 @@ impl GraphVector {
         }
     }
 
+    /// Updates the ID of target entity
     pub fn update_id(&mut self, new_id: String) {
         match self {
             GraphVector::MetadataDescriptor(entity) => entity.id = new_id,
@@ -112,6 +110,7 @@ impl GraphVector {
         };
     }
 
+    /// Searches through entity and updates any IDs that match old with new
     pub fn update_id_link(&mut self, old_id: &str, new_id: &str) {
         match self {
             GraphVector::MetadataDescriptor(entity) => entity.update_matching_id(old_id, new_id),
@@ -121,6 +120,7 @@ impl GraphVector {
         };
     }
 
+    /// Gets the schema type of the entity
     pub fn get_type(&self) -> &DataType {
         match self {
             GraphVector::MetadataDescriptor(entity) => &entity.type_,
@@ -130,6 +130,7 @@ impl GraphVector {
         }
     }
 
+    /// Adds a type to the entity
     pub fn add_type(&mut self, new_type: String) {
         match self {
             GraphVector::MetadataDescriptor(entity) => entity.type_.add_type(new_type),
@@ -139,6 +140,7 @@ impl GraphVector {
         }
     }
 
+    /// Removes a type from entity if there is a match
     pub fn remove_type(&mut self, remove_type: String) -> Result<DataType, String> {
         match self {
             GraphVector::MetadataDescriptor(entity) => entity.type_.remove_type(remove_type),
@@ -188,8 +190,8 @@ impl GraphVector {
         };
     }
 
-    /// Adds new information to an entity identified by ID. The new info is given as a
-    /// map (key-value pairs) and is added to the entity's dynamic_entity hashmap.
+    /// Adds new information or updates already present key in an entity identified by ID.
+    /// The new info is given as a map (key-value pairs) and is added to the entity's dynamic_entity hashmap.
     pub fn update_dynamic_entity_field(&mut self, key: String, values: EntityValue) {
         match self {
             GraphVector::MetadataDescriptor(descriptor) => {
@@ -215,6 +217,7 @@ impl GraphVector {
         };
     }
 
+    /// Returns id and value of a specific property within the entity
     pub fn get_specific_property(&self, property: &str) -> Option<(String, EntityValue)> {
         match self {
             GraphVector::MetadataDescriptor(entity) => entity.get_property_value(property),
@@ -261,6 +264,7 @@ impl GraphVector {
         properties
     }
 
+    /// Returns id and property of a specific value within the entity
     pub fn get_specific_value(&self, value: &str) -> Option<(String, String)> {
         if let Some(entity_value) = EntityValue::parse(value) {
             match self {

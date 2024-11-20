@@ -55,6 +55,7 @@ impl fmt::Display for RootDataEntity {
     }
 }
 impl RootDataEntity {
+    /// Adds the ID of an entity to the part of vec of the RootDataEntity
     pub fn add_entity_to_partof(&mut self, id_target: String) {
         let dynamic_entity = self.dynamic_entity.get_or_insert_with(HashMap::new);
 
@@ -75,6 +76,8 @@ impl RootDataEntity {
             }
         }
     }
+
+    /// Gets value and id of specific property
     pub fn get_property_value(&self, property: &str) -> Option<(String, EntityValue)> {
         // Check the `type` field if it matches the property.
         match property {

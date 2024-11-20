@@ -47,6 +47,7 @@ impl fmt::Display for ContextualEntity {
 }
 
 impl ContextualEntity {
+    /// Gets id and value of a specific property
     pub fn get_property_value(&self, property: &str) -> Option<(String, EntityValue)> {
         // Check the `type` field if it matches the property.
         match property {

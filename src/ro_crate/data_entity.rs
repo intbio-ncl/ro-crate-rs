@@ -43,6 +43,7 @@ impl DynamicEntityManipulation for DataEntity {
 }
 
 impl DataEntity {
+    /// Gets ID and value of specific target property
     pub fn get_property_value(&self, property: &str) -> Option<(String, EntityValue)> {
         // Check the `type` field if it matches the property.
         match property {

@@ -1,5 +1,5 @@
 {
-  "@context": " https://w3id.org/ro/crate/1.1/context",
+  "@context": "https://w3id.org/ro/crate/1.1/context",
   "@graph": [
     {
       "@id": "ro-crate-metadata.json",
@@ -14,20 +14,14 @@
     {
       "@id": "./",
       "@type": "Dataset",
+      "name": "Example",
+      "description": "Example Ro-Crate for using python library",
       "datePublished": "2017",
       "license": {
         "@id": "https://creativecommons.org/licenses/by-nc-sa/3.0/au/"
       },
-      "hasPart": [
-        {
-          "@id": "output/data_file.txt"
-        },
-        {
-          "@id": "this_is_not_a_file.txt"
-        }
-      ],
       "author": {
-        "@id": "#johndoe"
+        "@id": "#JaneDoe"
       }
     },
     {
@@ -36,7 +30,7 @@
       "name": "Data file name"
     },
     {
-      "@id": "#JohnDoe",
+      "@id": "#JaneDoe",
       "@type": "Person"
     },
     {

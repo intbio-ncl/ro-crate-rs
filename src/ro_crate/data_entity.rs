@@ -18,7 +18,7 @@ use std::fmt;
 /// a specific type (`type_`), and a set of dynamic properties (`dynamic_entity`).
 /// This struct is used to handle Data entities that have a predefined structure along with
 /// additional properties that may vary.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DataEntity {
     /// URI to data
     pub id: String,

@@ -19,7 +19,7 @@ use std::fmt;
 /// `MetadataDescriptor` is designed to encapsulate metadata information for an ro-crate.
 /// It includes the fields that MUST be in included - `id`, `type_`, `conforms_to`, `about`,
 /// and a set of dynamic properties for descriptive extension.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MetadataDescriptor {
     /// ID that MUST be `ro-crate-metadata.json`
     pub id: String,

@@ -14,7 +14,7 @@ use std::fmt;
 
 /// Defines a contextual entity - an entity without a local
 /// or remote data file that is essential for crate undestanding
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ContextualEntity {
     /// Can be a URI but must be some form of local unique identifier for the current
     /// crate. If a local, should prefix with # (e.g {"@id": "#alice"}) or a blank

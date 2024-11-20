@@ -223,13 +223,8 @@ fn main() {
 fn open_and_load_crate(input: &str) -> RoCrate {
     let target_crate = crate_path(input);
     match read_crate(&target_crate, 1) {
-        Ok(ro_crate) => {
-            // Process ro_crate if read successfully
-            // ...
-            ro_crate
-        }
+        Ok(ro_crate) => ro_crate,
         Err(e) => {
-            // Handle the error
             eprintln!("Error processing crate: {:?}", e);
             std::process::exit(1)
         }
@@ -251,7 +246,7 @@ fn create_rocrate_with_context(context_type: ContextType) -> RoCrate {
 
             // Get the primary context (probably ro-crate spec)
             println!("Please primary context (default to ro-crate spac (1)):");
-            io::stdout().flush().unwrap(); // Make sure 'Enter key' is printed before input
+            io::stdout().flush().unwrap();
             let mut answer = String::new();
             io::stdin().read_line(&mut answer).unwrap();
 
@@ -302,12 +297,12 @@ fn loop_input(mut key_value_pairs: HashMap<String, String>) -> HashMap<String, S
         }
 
         print!("Enter key: ");
-        io::stdout().flush().unwrap(); // Make sure 'Enter key' is printed before input
+        io::stdout().flush().unwrap();
         let mut key = String::new();
         io::stdin().read_line(&mut key).unwrap();
 
         print!("Enter value: ");
-        io::stdout().flush().unwrap(); // Make sure 'Enter value' is printed before input
+        io::stdout().flush().unwrap();
         let mut value = String::new();
         io::stdin().read_line(&mut value).unwrap();
 
@@ -486,7 +481,7 @@ fn prompt_for_types() -> u8 {
         println!("6 - A boolean (true/false)");
 
         let mut answer = String::new();
-        io::stdout().flush().unwrap(); // Ensure prompt is displayed before input
+        io::stdout().flush().unwrap();
         io::stdin().read_line(&mut answer).unwrap();
 
         match answer.trim().parse::<u8>() {
@@ -522,7 +517,7 @@ fn get_field_values_with_count<T: Serialize>(
 fn collect_field_values_recursive(
     json: &JsonValue,
     field_name: &str,
-    collected_values: &mut HashMap<(String, String), isize>, // (id, value) -> count
+    collected_values: &mut HashMap<(String, String), isize>,
 ) {
     match json {
         JsonValue::Object(obj) => {
@@ -536,7 +531,7 @@ fn collect_field_values_recursive(
             for (key, value) in obj {
                 if key == field_name {
                     let value_str = value.to_string();
-                    let key = (current_id.clone(), value_str); // Store as tuple (id, type)
+                    let key = (current_id.clone(), value_str);
                     *collected_values.entry(key).or_insert(0) += 1;
                 }
                 // Continue recursive search within the object

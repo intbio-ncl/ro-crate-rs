@@ -21,7 +21,7 @@ use super::constraints::Id;
 // # Note
 // Should update the type_ and id to follow requirements for future unless spec
 // change.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RootDataEntity {
     // A string that SHOULD be ./ and MUST end with /
     pub id: String,

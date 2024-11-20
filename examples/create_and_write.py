@@ -24,8 +24,10 @@ root = {
     "id": "./",
     "type": "Dataset",
     "datePublished": "2017",
+    "name": "Example",
+    "description": "Example Ro-Crate for using python library",
     "license": {"id": "https://creativecommons.org/licenses/by-nc-sa/3.0/au/"},
-    "author": {"id": "#johndoe"},
+    "author": {"id": "#JohnDoe"},
 }
 # Data entity
 data = {"id": "output/data_file.txt", "type": "Dataset", "name": "Data file name"}
@@ -52,24 +54,26 @@ crate.write()
 
 
 # Now that a new crate is written, we can open it again!
-crate = read("ro-crate-metadata.json", 1)
+crate = read("ro-crate-metadata.json", 0)
+# print(f"Example of crate created and read in \n {crate}")
 
 # Update the data entity and make modification
 data_target = crate.get_entity("output/data_file.txt")
+# print(data_target)
 data_target["description"] = "A text file dataset containing information"
 
-print(f"This is the loaded and modified data_file entity \n {data_target}")
+# print(f"This is the loaded and modified data_file entity \n {data_target}")
 
 crate.update_data(data_target)
 
-print(f"This is now the updated, in memory, crate: \n {crate}")
+# print(f"This is now the updated, in memory, crate: \n {crate}")
 
 # Update the contextual entity and make modification
 contextual_target = crate.get_entity("#JohnDoe")
 contextual_target.update({"id": "#JaneDoe"})
 
 crate.update_contextual(contextual_target)
-print(f"Example of a modified entity id that will save as a new entity: \n {crate}")
+# print(f"Example of a modified entity id that will save as a new entity: \n {crate}")
 
 # To delete a key:value
 data_target.pop("description")
@@ -80,12 +84,13 @@ crate.update_data(data_target)
 
 # To delete an entity - this immediately updates the crate object
 crate.delete_entity("#JaneDoe", True)
+crate.replace_id("#JohnDoe", "#JaneDoe")
 
+# print(crate)
 crate.write()
 
 # Final example of modified crate
 crate = read("ro-crate-metadata.json", 1)
-print(crate)
 
 # Zip the crate to get all data
-zip("ro-crate-metadata.json", 1)
+# zip("ro-crate-metadata.json", True, 2)

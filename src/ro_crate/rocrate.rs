@@ -279,6 +279,8 @@ impl RoCrate {
     }
 
     pub fn overwrite_by_id(&mut self, id: &str, entity: GraphVector) -> bool {
+        println!("id: {}", id);
+        println!("Entity: {:?}", entity);
         if let Some(index) = self.find_entity_index(id) {
             self.graph[index] = entity;
             true

@@ -24,7 +24,7 @@ use url::Url;
 /// - `ContextualEntity`: Represents a contextual entity that provides context for the data entities and the crate.
 /// - `MetadataDescriptor`: Contains metadata about the crate itself or its entities.
 /// - `RootDataEntity`: The root data entity, representing the crate's primary content.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum GraphVector {
     DataEntity(DataEntity),
     ContextualEntity(ContextualEntity),

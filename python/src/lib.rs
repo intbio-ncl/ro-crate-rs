@@ -127,9 +127,12 @@ impl PyRoCrate {
         let data_entity_wrapper: utils::DataEntityWrapper = py_obj.extract(py)?;
         let data_entity = data_entity_wrapper.0; // Access the inner DataEntity
         let id = data_entity.id.clone();
-        let update = GraphVector::DataEntity(data_entity);
+        let update = GraphVector::DataEntity(data_entity.clone());
 
-        self.inner.overwrite_by_id(&id, update);
+        if !self.inner.overwrite_by_id(&id, update) {
+            let add = GraphVector::DataEntity(data_entity);
+            self.inner.graph.push(add)
+        };
 
         Ok(())
     }
@@ -145,9 +148,12 @@ impl PyRoCrate {
         let contextual_entity_wrapper: utils::ContextualEntityWrapper = py_obj.extract(py)?;
         let contextual_entity = contextual_entity_wrapper.0; // Access the inner DataEntity
         let id = contextual_entity.id.clone();
-        let update = GraphVector::ContextualEntity(contextual_entity);
+        let update = GraphVector::ContextualEntity(contextual_entity.clone());
 
-        self.inner.overwrite_by_id(&id, update);
+        if !self.inner.overwrite_by_id(&id, update) {
+            let add = GraphVector::ContextualEntity(contextual_entity);
+            self.inner.graph.push(add);
+        };
 
         Ok(())
     }
@@ -163,9 +169,12 @@ impl PyRoCrate {
         let root_entity_wrapper: utils::RootDataEntityWrapper = py_obj.extract(py)?;
         let root_entity = root_entity_wrapper.0; // Access the inner DataEntity
         let id = root_entity.id.clone();
-        let update = GraphVector::RootDataEntity(root_entity);
+        let update = GraphVector::RootDataEntity(root_entity.clone());
 
-        self.inner.overwrite_by_id(&id, update);
+        if !self.inner.overwrite_by_id(&id, update) {
+            let add = GraphVector::RootDataEntity(root_entity);
+            self.inner.graph.push(add);
+        };
 
         Ok(())
     }
@@ -181,10 +190,12 @@ impl PyRoCrate {
         let descriptor_wrapper: utils::MetadataDescriptorWrapper = py_obj.extract(py)?;
         let descriptor = descriptor_wrapper.0; // Access the inner DataEntity
         let id = descriptor.id.clone();
-        let update = GraphVector::MetadataDescriptor(descriptor);
+        let update = GraphVector::MetadataDescriptor(descriptor.clone());
 
-        self.inner.overwrite_by_id(&id, update);
-
+        if !self.inner.overwrite_by_id(&id, update) {
+            let add = GraphVector::MetadataDescriptor(descriptor);
+            self.inner.graph.push(add);
+        }
         Ok(())
     }
 

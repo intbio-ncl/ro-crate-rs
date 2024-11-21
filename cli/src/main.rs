@@ -28,12 +28,16 @@ fn main() {
 
     match args.crate_action {
         CrateAction::Init(init_command) => {
-            if init_command.default {
+            if init_command.minimal {
                 let mut rocrate = RoCrate::default();
+                rocrate = create_default_crate(rocrate);
+                write_crate(&rocrate, "ro-crate-metadata.json".to_string());
+                return;
+            }
+
+            if init_command.default {
+                let rocrate = RoCrate::default();
                 println!("{:?}", rocrate);
-                if init_command.minimal {
-                    rocrate = create_default_crate(rocrate);
-                }
 
                 write_crate(&rocrate, "ro-crate-metadata.json".to_string())
             } else {

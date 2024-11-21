@@ -41,6 +41,7 @@ pub struct InitCommand {
     pub default: bool,
     /// Type of context
     #[clap(required_unless_present = "default")]
+    #[clap(required_unless_present = "minimal")]
     #[clap(short, long, name="context", help=CONTEXT_HELP)]
     pub context_type: Option<ContextType>,
     /// Initialise with default minimal entites or leave empty

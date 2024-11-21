@@ -1,28 +1,104 @@
-# .github/workflows/release.yml
+name: Release Rust CLI
 
 on:
   push:
+    branches: [ "main" ]
+    tags:     
+      - '*'
+  pull_request:
+    branches: [ "main" ]
+  workflow_run:
+    workflows:
+      - Rust
+    types:
+      - completed
+  workflow_run:
+    workflows:
+      - Rust
+    types:
+      - completed
 
 jobs:
-  release:
-    name: release ${{ matrix.target }}
-    runs-on: ubuntu-latest
+  build-and-release:
     strategy:
-      fail-fast: false
       matrix:
         include:
-          - target: x86_64-pc-windows-gnu
+          - platform: windows
+            rust_target: x86_64-pc-windows-gnu
             archive: zip
-          - target: x86_64-unknown-linux-musl
-            archive: tar.gz tar.xz tar.zst
-          - target: x86_64-apple-darwin
+            runs-on: ubuntu-latest
+          - platform: linux-tar-gz
+            rust_target: x86_64-unknown-linux-musl
+            archive: tar.gz
+            runs-on: ubuntu-latest
+          - platform: linux-tar-xz
+            rust_target: x86_64-unknown-linux-musl
+            archive: tar.xz
+            runs-on: ubuntu-latest
+          - platform: linux-tar-zst
+            rust_target: x86_64-unknown-linux-musl
+            archive: tar.zst
+            runs-on: ubuntu-latest
+          - platform: macos
+            rust_target: x86_64-apple-darwin
             archive: zip
+            runs-on: macos-latest
+
+    runs-on: ${{ matrix.runs-on }}
+
     steps:
-      - uses: actions/checkout@master
-      - name: Compile and release
-        uses: rust-build/rust-build.action@v1.4.5
+      # Checkout the repository
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Install Rust
+      - name: Install Rust
+        run: |
+          rustup install stable
+          rustup target add ${{ matrix.rust_target }}
+
+      # Build CLI tool
+      - name: Build CLI tool
+        run: |
+          if [[ "${{ matrix.runs-on }}" == "macos-latest" ]]; then
+            cd cli && cargo build --release --target=${{ matrix.rust_target }}
+          else
+            cargo install cross
+            cd cli && cross build --release --target=${{ matrix.rust_target }}
+          fi
+          cd ../ && mkdir -p dist/${{ matrix.platform }}
+
+      # Package the binary
+      - name: Package Binary
+        run: |
+          BINARY=target/${{ matrix.rust_target }}/release/rocraters
+          WIN_BINARY=target/${{ matrix.rust_target }}/release/rocraters.exe
+          ARCHIVE=dist/${{ matrix.platform }}/rocraters-${{ matrix.rust_target }}.${{ matrix.archive }}
+          if [[ "${{ matrix.archive }}" == "zip" ]]; then
+            if [[ "${{ matrix.platform }}" == "windows" ]]; then 
+              zip -j $ARCHIVE $WIN_BINARY
+            else 
+              zip -j $ARCHIVE $BINARY
+            fi
+          elif [[ "${{ matrix.archive }}" == "tar.gz" ]]; then
+            tar -czvf $ARCHIVE -C target/${{ matrix.rust_target }}/release rocraters
+          elif [[ "${{ matrix.archive }}" == "tar.xz" ]]; then
+            tar -cJvf $ARCHIVE -C target/${{ matrix.rust_target }}/release rocraters
+          elif [[ "${{ matrix.archive }}" == "tar.zst" ]]; then
+            tar --zstd -cvf $ARCHIVE -C target/${{ matrix.rust_target }}/release rocraters
+          fi
+
+      # Upload artifacts
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rocraters-${{ matrix.platform }}-${{ matrix.archive }}
+          path: dist/${{ matrix.platform }}/*
+    
+      - name: Create GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dist/${{ matrix.platform }}/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          RUSTTARGET: ${{ matrix.target }}
-          ARCHIVE_TYPES: ${{ matrix.archive }}

@@ -7,6 +7,11 @@ on:
       - '*'
   pull_request:
     branches: [ "main" ]
+  workflow_run:
+    workflows:
+      - Rust
+    types:
+      - completed
 
 env: 
   PACKAGE_NAME: rocraters

@@ -1,4 +1,4 @@
-use crate::ro_crate::constraints::{DataType, EntityValue};
+use crate::ro_crate::constraints::{DataType, EntityValue, Id};
 use crate::ro_crate::contextual_entity::ContextualEntity;
 use crate::ro_crate::data_entity::DataEntity;
 use crate::ro_crate::metadata_descriptor::MetadataDescriptor;
@@ -97,6 +97,15 @@ impl GraphVector {
             GraphVector::RootDataEntity(entity) => &entity.id,
             GraphVector::DataEntity(entity) => &entity.id,
             GraphVector::ContextualEntity(entity) => &entity.id,
+        }
+    }
+
+    pub fn get_linked_ids(&self) -> Vec<Id> {
+        match self {
+            GraphVector::MetadataDescriptor(entity) => entity.get_linked_ids(),
+            GraphVector::RootDataEntity(entity) => entity.get_linked_ids(),
+            GraphVector::DataEntity(entity) => entity.get_linked_ids(),
+            GraphVector::ContextualEntity(entity) => entity.get_linked_ids(),
         }
     }
 

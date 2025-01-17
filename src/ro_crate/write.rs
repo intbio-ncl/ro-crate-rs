@@ -115,7 +115,12 @@ fn write_crate_to_zip(
 /// let crate_path = Path::new("/path/to/ro-crate-directory/ro-crate-metadata.json");
 /// zip_crate(crate_path, false)?;
 /// ```
-pub fn zip_crate(crate_path: &Path, external: bool, validation_level: i8) -> Result<(), ZipError> {
+pub fn zip_crate(
+    crate_path: &Path,
+    external: bool,
+    validation_level: i8,
+    flatten: bool,
+) -> Result<(), ZipError> {
     // After prepping create the initial zip file
     let zip_paths = construct_paths(crate_path).unwrap();
 
@@ -124,10 +129,8 @@ pub fn zip_crate(crate_path: &Path, external: bool, validation_level: i8) -> Res
     // Opens target crate ready for update
     let mut rocrate = read_crate(&zip_paths.absolute_path, validation_level).unwrap();
 
-    let _ = directory_walk(&mut rocrate, &zip_paths, &mut zip_data);
+    let _ = directory_walk(&mut rocrate, &zip_paths, &mut zip_data, flatten);
 
-    // TODO: Known issue, this zip external logic needs to be executed before
-    // you walk the directory, since this looks at the rocrate and determines
     if external {
         zip_data = zip_crate_external(&mut rocrate, zip_data, &zip_paths)?
     }
@@ -187,6 +190,7 @@ fn directory_walk(
     rocrate: &mut RoCrate,
     zip_paths: &RoCrateZipPaths,
     zip_data: &mut RoCrateZip,
+    flatten: bool,
 ) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
     let mut data_vec: Vec<PathBuf> = Vec::new();
     let contained = get_noncontained_data_entites(rocrate, zip_paths, true);
@@ -199,6 +203,7 @@ fn directory_walk(
     // Consider only files, not directories
     {
         let path = entry.path();
+        let file_name: String;
 
         if path == zip_paths.zip_file_name {
             continue;
@@ -208,17 +213,27 @@ fn directory_walk(
             continue;
         }
 
-        let file_name = path
-            .file_name()
-            .ok_or(ZipError::FileNameNotFound)?
-            .to_str()
-            .ok_or(ZipError::FileNameConversionFailed)?;
+        if flatten {
+            file_name = path
+                .file_name()
+                .ok_or(ZipError::FileNameNotFound)?
+                .to_str()
+                .ok_or(ZipError::FileNameConversionFailed)?
+                .to_string();
+        } else {
+            file_name = path
+                .strip_prefix(&zip_paths.root_path)
+                .map_err(ZipError::PathError)?
+                .to_str()
+                .ok_or(ZipError::FileNameConversionFailed)?
+                .to_string();
+        }
 
         let mut file = fs::File::open(path).map_err(ZipError::IoError)?;
 
         zip_data
             .zip
-            .start_file(file_name, zip_data.options)
+            .start_file(&file_name, zip_data.options)
             .map_err(|e| ZipError::ZipOperationError(e.to_string()))?;
 
         // Once copy the absolute path and relative path needs to be checked
@@ -233,7 +248,7 @@ fn directory_walk(
             Ok(_) => {
                 for (key, value) in &contained {
                     if abs_path == value.clone() {
-                        rocrate.update_id_recursive(key, file_name)
+                        rocrate.update_id_recursive(key, &file_name)
                     }
                 }
             }
@@ -562,7 +577,7 @@ mod write_crate_tests {
     fn test_zip_crate_basic() {
         let path = fixture_path("test_experiment/_ro-crate-metadata-minimal.json");
 
-        let zipped = zip_crate(&path, false, 0);
+        let zipped = zip_crate(&path, false, 0, false);
         println!("{:?}", zipped);
     }
 
@@ -570,7 +585,7 @@ mod write_crate_tests {
     fn test_zip_crate_external_full() {
         let path = fixture_path("test_experiment/_ro-crate-metadata-minimal.json");
 
-        let zipped = zip_crate(&path, true, 0);
+        let zipped = zip_crate(&path, true, 0, false);
         println!("{:?}", zipped);
     }
 
@@ -631,7 +646,8 @@ mod write_crate_tests {
         );
         */
 
-        let directory_contents = directory_walk(&mut rocrate, &zip_paths, &mut zip_data).unwrap();
+        let directory_contents =
+            directory_walk(&mut rocrate, &zip_paths, &mut zip_data, false).unwrap();
 
         let test_vec: Vec<PathBuf> = vec![
             PathBuf::from("/home/matt/dev/ial/ro-crate-rs/tests/fixtures/test_experiment/data.csv"),

@@ -216,6 +216,9 @@ pub struct ZipCrateCommand {
     // Copy and include external reachable data files
     #[clap(short, long, default_value_t = true)]
     pub external: bool,
+    // Flatten contents to remove folder stucture in zip
+    #[clap(short, long, default_value_t = false)]
+    pub flatten: bool,
 }
 
 #[derive(Debug, Subcommand)]

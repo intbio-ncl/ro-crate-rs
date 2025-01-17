@@ -12,8 +12,9 @@ use data_entity::DataEntity;
 use json_to_table::json_to_table;
 use read::{crate_path, read_crate};
 use rocraters::ro_crate::graph_vector::GraphVector;
+use rocraters::ro_crate::read::parse_zip;
 use rocraters::ro_crate::rocrate::{ContextItem, RoCrate, RoCrateContext};
-use rocraters::ro_crate::{constraints, data_entity, metadata_descriptor, read, root, write};
+use rocraters::ro_crate::{self, constraints, data_entity, metadata_descriptor, read, root, write};
 use serde_json::Value as JsonValue;
 use serde_json::{json, to_string_pretty};
 use std::collections::HashMap;
@@ -54,12 +55,22 @@ fn main() {
             }
         }
         CrateAction::Add(add_command) => {
+            if add_command.target_crate.ends_with("zip") {
+                println!("Cannot update Zip");
+                return;
+            }
+
             let mut rocrate = open_and_load_crate(&add_command.target_crate);
             rocrate = add_entity(rocrate, &add_command);
 
             write_crate(&rocrate, add_command.target_crate)
         }
         CrateAction::Delete(delete_command) => {
+            if delete_command.target_crate.ends_with("zip") {
+                println!("Cannot update Zip");
+                return;
+            }
+
             let mut rocrate = open_and_load_crate(&delete_command.target_crate);
 
             rocrate = delete_entity(rocrate, &delete_command);
@@ -68,6 +79,10 @@ fn main() {
         }
         CrateAction::Modify(modify_command) => match modify_command {
             ModifyCommand::AddIdValue(add_id_value_command) => {
+                if add_id_value_command.target_crate.ends_with("zip") {
+                    println!("Cannot update Zip");
+                    return;
+                }
                 let mut rocrate = open_and_load_crate(&add_id_value_command.target_crate);
                 let mut values: HashMap<String, EntityValue> = HashMap::new();
                 values.insert(
@@ -80,6 +95,11 @@ fn main() {
                 write_crate(&rocrate, add_id_value_command.target_crate)
             }
             ModifyCommand::AddIdVecValues(add_id_vec_values_command) => {
+                if add_id_vec_values_command.target_crate.ends_with("zip") {
+                    println!("Cannot update Zip");
+                    return;
+                }
+
                 let mut rocrate = open_and_load_crate(&add_id_vec_values_command.target_crate);
                 let mut values: HashMap<String, EntityValue> = HashMap::new();
                 let mut id_vec: Vec<String> = Vec::new();
@@ -96,6 +116,11 @@ fn main() {
                 write_crate(&rocrate, add_id_vec_values_command.target_crate)
             }
             ModifyCommand::AddMultiple(add_multiple_command) => {
+                if add_multiple_command.target_crate.ends_with("zip") {
+                    println!("Cannot update Zip");
+                    return;
+                }
+
                 let mut rocrate = open_and_load_crate(&add_multiple_command.target_crate);
                 let id = &add_multiple_command.id;
 
@@ -113,6 +138,11 @@ fn main() {
                 write_crate(&rocrate, add_multiple_command.target_crate)
             }
             ModifyCommand::RemoveField(remove_field_command) => {
+                if remove_field_command.target_crate.ends_with("zip") {
+                    println!("Cannot update Zip");
+                    return;
+                }
+
                 let mut rocrate = open_and_load_crate(&remove_field_command.target_crate);
                 rocrate.remove_dynamic_entity_property(
                     &remove_field_command.id,
@@ -127,7 +157,11 @@ fn main() {
                 let rocrate = open_and_load_crate(&read_crate_command.target_crate);
 
                 if read_crate_command.raw_struct {
-                    println!("{:#?}", rocrate)
+                    println!("{:#?}", rocrate);
+                    return;
+                }
+                if read_crate_command.json {
+                    println!("{}", to_string_pretty(&rocrate).unwrap());
                 } else {
                     match to_string_pretty(&rocrate) {
                         Ok(json_ld) => {
@@ -151,6 +185,11 @@ fn main() {
 
                 if let Some(index) = index {
                     if let Some(graph_vector) = rocrate.graph.get_mut(index) {
+                        if read_entity_command.json {
+                            println!("{}", to_string_pretty(&graph_vector).unwrap());
+                            return;
+                        }
+
                         if read_entity_command.raw_struct {
                             println!("{:#?}", &graph_vector);
                         } else {
@@ -182,12 +221,17 @@ fn main() {
                 let rocrate = open_and_load_crate(&read_fields_command.target_crate);
                 let values =
                     get_field_values_with_count(&rocrate.graph, &read_fields_command.field);
-                print_as_table(
-                    values,
-                    "@id",
-                    &read_fields_command.field.to_string(),
-                    "Count",
-                );
+
+                if read_fields_command.json {
+                    println!("{}", to_string_pretty(&values).unwrap());
+                } else {
+                    print_as_table(
+                        values,
+                        "@id",
+                        &read_fields_command.field.to_string(),
+                        "Count",
+                    );
+                }
             }
             ReadCommand::Value(read_value_command) => {
                 let rocrate = open_and_load_crate(&read_value_command.target_crate);
@@ -196,7 +240,11 @@ fn main() {
                     &read_value_command.value,
                     read_value_command.location,
                 );
-                print_as_table(values, "Object ID", "Value", "Count");
+                if read_value_command.json {
+                    println!("{}", to_string_pretty(&values).unwrap());
+                } else {
+                    print_as_table(values, "Object ID", "Value", "Count");
+                }
             }
         },
         CrateAction::Package(package_command) => match package_command {
@@ -225,12 +273,22 @@ fn main() {
 
 /// Input requires target_crate file string
 fn open_and_load_crate(input: &str) -> RoCrate {
-    let target_crate = crate_path(input);
-    match read_crate(&target_crate, 1) {
-        Ok(ro_crate) => ro_crate,
-        Err(e) => {
-            eprintln!("Error processing crate: {:?}", e);
-            std::process::exit(1)
+    if input.ends_with(".zip") {
+        match parse_zip(input, 0) {
+            Ok(ro_crate) => ro_crate,
+            Err(e) => {
+                eprintln!("Error processing crate: {:?}", e);
+                std::process::exit(1)
+            }
+        }
+    } else {
+        let target_crate = crate_path(input);
+        match read_crate(&target_crate, 1) {
+            Ok(ro_crate) => ro_crate,
+            Err(e) => {
+                eprintln!("Error processing crate: {:?}", e);
+                std::process::exit(1)
+            }
         }
     }
 }

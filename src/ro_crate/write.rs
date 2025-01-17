@@ -6,7 +6,7 @@
 use crate::ro_crate::read::read_crate;
 use crate::ro_crate::rocrate::RoCrate;
 use dirs;
-use std::error::Error;
+use std::collections::HashMap;
 use std::fmt;
 use std::fs::{self, File};
 use std::io::{self, Write};
@@ -124,13 +124,12 @@ pub fn zip_crate(crate_path: &Path, external: bool, validation_level: i8) -> Res
     // Opens target crate ready for update
     let mut rocrate = read_crate(&zip_paths.absolute_path, validation_level).unwrap();
 
-    let zipped_files = directory_walk(&zip_paths, &mut zip_data);
-    println!("{:?}", zipped_files);
+    let _ = directory_walk(&mut rocrate, &zip_paths, &mut zip_data);
 
     // TODO: Known issue, this zip external logic needs to be executed before
     // you walk the directory, since this looks at the rocrate and determines
     if external {
-        zip_data = zip_crate_external(&mut rocrate, zip_data, &zip_paths.absolute_path)?
+        zip_data = zip_crate_external(&mut rocrate, zip_data, &zip_paths)?
     }
 
     let _ = write_crate_to_zip(&rocrate, "ro-crate-metadata.json".to_string(), zip_data);
@@ -138,7 +137,7 @@ pub fn zip_crate(crate_path: &Path, external: bool, validation_level: i8) -> Res
     Ok(())
 }
 
-struct RoCrateZipPaths {
+pub struct RoCrateZipPaths {
     absolute_path: PathBuf,
     root_path: PathBuf,
     zip_file_name: PathBuf,
@@ -185,10 +184,12 @@ pub struct RoCrateZip {
 /// described in the ro-crate-metadata itself as per spec, it absolutely should
 /// get everything that is within the crate
 fn directory_walk(
+    rocrate: &mut RoCrate,
     zip_paths: &RoCrateZipPaths,
     zip_data: &mut RoCrateZip,
 ) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
     let mut data_vec: Vec<PathBuf> = Vec::new();
+    let contained = get_noncontained_data_entites(rocrate, zip_paths, true);
 
     for entry in WalkDir::new(&zip_paths.root_path)
         .min_depth(0)
@@ -198,49 +199,48 @@ fn directory_walk(
     // Consider only files, not directories
     {
         let path = entry.path();
-        println!("Entry path: {:?}", path);
 
         if path == zip_paths.zip_file_name {
-            println!("Hit source file name: {:?}", path);
             continue;
         }
 
         if path == zip_paths.absolute_path {
-            println!("Hit ro-metadata-file: {:?}", path);
             continue;
         }
 
-        let relative_path = path
-            .strip_prefix(&zip_paths.root_path)
-            .map_err(ZipError::from)?;
-        println!("Relative Path: {:?}", relative_path);
-
-        let relative_path_str = relative_path
+        let file_name = path
+            .file_name()
+            .ok_or(ZipError::FileNameNotFound)?
             .to_str()
             .ok_or(ZipError::FileNameConversionFailed)?;
-
-        println!("Relative path string: {}", relative_path_str);
 
         let mut file = fs::File::open(path).map_err(ZipError::IoError)?;
 
         zip_data
             .zip
-            .start_file(relative_path_str, zip_data.options)
+            .start_file(file_name, zip_data.options)
             .map_err(|e| ZipError::ZipOperationError(e.to_string()))?;
-
-        io::copy(&mut file, &mut zip_data.zip).map_err(ZipError::IoError)?;
 
         // Once copy the absolute path and relative path needs to be checked
         let abs_path = get_absolute_path(path).unwrap();
-        println!("Abs path check {:?}", abs_path);
         if abs_path.is_file() {
-            data_vec.push(abs_path);
+            data_vec.push(abs_path.clone());
         };
 
-        // TODO: Doesn't work - I need to update the rocrate with the relative paths of all the
-        // absolute paths,
-        //update_zip_ids(rocrate, abs_path, relative_path_str);
+        let copy_result = io::copy(&mut file, &mut zip_data.zip).map_err(ZipError::IoError);
+
+        match copy_result {
+            Ok(_) => {
+                for (key, value) in &contained {
+                    if abs_path == value.clone() {
+                        rocrate.update_id_recursive(key, file_name)
+                    }
+                }
+            }
+            Err(_e) => println!("problem"),
+        }
     }
+    println!("0 | Rocrate: {:?}", rocrate);
     Ok(data_vec)
 }
 
@@ -312,33 +312,25 @@ impl From<std::path::StripPrefixError> for ZipError {
 pub fn zip_crate_external(
     rocrate: &mut RoCrate,
     mut zip_data: RoCrateZip,
-    crate_path: &Path,
+    crate_path: &RoCrateZipPaths,
 ) -> Result<RoCrateZip, ZipError> {
-    // Get all IDs for the target crate
-    // Assumed that all data entities are discrete objects, and that not file
-    // has been referenced without being described
-    let mut ids = rocrate.get_all_ids();
-    println!("IDs prior to pop: {:?}", ids);
-
-    // Pop all non-urls and remove root/ metadata descriptor
-    ids.retain(|id| is_not_url(id));
-    println!("IDs after pop: {:?}", ids);
-
-    let noncontained = get_noncontained_paths(ids, crate_path);
+    // This parses all the IDs and generates a list of paths that are not
+    // contained within the crate itself.
+    let noncontained = get_noncontained_data_entites(rocrate, crate_path, false);
 
     // if noncontained is not empty, means data entities are external
     // therefore we need to package them
     if !noncontained.is_empty() {
-        for external in noncontained {
+        for (id, path) in noncontained {
             // norels = path to file, then we use external path to get folder then add basename
-            let file_name = external
+            let file_name = path
                 .file_name()
                 .ok_or(ZipError::FileNameNotFound)?
                 .to_str()
                 .ok_or(ZipError::FileNameConversionFailed)?;
             let zip_entry_name = format!("external/{}", file_name);
 
-            let mut file = fs::File::open(&external).map_err(ZipError::IoError)?;
+            let mut file = fs::File::open(&path).map_err(ZipError::IoError)?;
 
             zip_data
                 .zip
@@ -348,7 +340,7 @@ pub fn zip_crate_external(
             let copy_result = io::copy(&mut file, &mut zip_data.zip).map_err(ZipError::IoError);
             match copy_result {
                 Ok(_) => {
-                    update_zip_ids(rocrate, external, &zip_entry_name);
+                    rocrate.update_id_recursive(&id, &zip_entry_name);
                 }
                 Err(e) => return Err(e),
             }
@@ -357,44 +349,25 @@ pub fn zip_crate_external(
 
     Ok(zip_data)
 }
-/// Updates the identifiers of entities within an RO-Crate to match their new paths in a zip archive.
-///
-/// This function is essential when packaging an RO-Crate and its associated files into a zip archive.
-/// It ensures that all references to data entities within the crate reflect their new locations within
-/// the archive. The function handles various path formats, including extended-length paths on Windows.
-///
-/// # Arguments
-/// * `rocrate` - A mutable reference to the RO-Crate being updated.
-/// * `id` - The original filesystem path of the entity.
-/// * `zip_id` - The new identifier for the entity within the zip archive.
-///
-/// # Note
-/// The function includes specific checks for path anomalies, such as Windows extended-length path prefixes.
-/// It currently focuses only on Windows extended-length path prefixes and needs to be updated in
-/// line with new ids.
-fn update_zip_ids(rocrate: &mut RoCrate, id: PathBuf, zip_id: &str) {
-    let id_str = id.to_str().unwrap_or_default();
-    println!("ID String that is updating: {}", id_str);
 
-    // Try updating based on a direct match
-    rocrate.update_id_recursive(id_str, zip_id);
+/// Gets all the described data entities of a crate and filters for
+/// files that are not in the crate structure
+fn get_noncontained_data_entites(
+    rocrate: &mut RoCrate,
+    crate_path: &RoCrateZipPaths,
+    inverse: bool,
+) -> HashMap<String, PathBuf> {
+    // Get all IDs for the target crate
+    // Assumed that all data entities are discrete objects, and that not file
+    // has been referenced without being described
+    let mut ids = rocrate.get_all_ids();
 
-    // Handle Windows extended-length path prefixes (\\?\)
-    if id_str.starts_with(r"\\?\") {
-        let stripped_id = &id_str[4..];
-        println!("ID to be stripped: {}, Strip ID: {}", id_str, stripped_id);
+    // Pop all non-urls and remove root/ metadata descriptor
+    ids.retain(|id| is_not_url(id));
 
-        // Attempt to update using the stripped path
-        rocrate.update_id_recursive(stripped_id, zip_id);
-
-        // Handle paths with '\\' by replacing them with a single '\'
-        if id_str.contains("\\\\") {
-            println!("Doubled windows path {}", id_str);
-            let normalized_id = stripped_id.replace("\\\\", "\\");
-            rocrate.update_id_recursive(&normalized_id, zip_id);
-        }
-    }
+    get_noncontained_paths(ids, &crate_path.root_path, inverse)
 }
+
 /// Identifies file paths that are not relative to the given RO-Crate directory.
 ///
 /// When preparing an RO-Crate for zipping, it's important to include all related files, even those
@@ -404,14 +377,16 @@ fn update_zip_ids(rocrate: &mut RoCrate, id: PathBuf, zip_id: &str) {
 /// * `ids` - A vector of strings representing the IDs (paths) to check.
 /// * `crate_dir` - The base directory of the RO-Crate.
 ///
-/// # Returns
-/// A vector of `PathBuf` objects representing files that are outside the crate's base directory.
-fn get_noncontained_paths(ids: Vec<&String>, crate_dir: &Path) -> Vec<PathBuf> {
-    let mut nonrels: Vec<PathBuf> = Vec::new();
+fn get_noncontained_paths(
+    ids: Vec<&String>,
+    crate_dir: &Path,
+    inverse: bool,
+) -> HashMap<String, PathBuf> {
+    let mut nonrels: HashMap<String, PathBuf> = HashMap::new();
 
     // Get the absolute path of the crate directory
     let rocrate_path = get_absolute_path(crate_dir).unwrap();
-    println!("Absolute path to crate directory: {:?}", rocrate_path);
+    println!("crate path {:?} and target id {:?}", rocrate_path, ids);
 
     // Iterate over all the ids, check if the paths are relative to the crate.
     // EVERYTHING NEEDS TO BE WITHIN THE CRATE
@@ -420,56 +395,41 @@ fn get_noncontained_paths(ids: Vec<&String>, crate_dir: &Path) -> Vec<PathBuf> {
         if id.starts_with('#') {
             continue;
         }
-        println!("1 | ID: {}", id);
 
         // Resolve the absolute path of the current ID
         if let Some(path) = get_absolute_path(Path::new(id)) {
-            println!("2 | Absolute Path: {:?}", path);
             // Check if the path exists
             if path.exists() {
-                println!("3 | Path exists: {:?}", path);
+                println!("Absolute path: {:?}", path);
                 // Check if the path is outside the base crate directory
-                if is_outside_base_folder(&rocrate_path, &path) {
-                    println!("4 | Path exists outside: {:?}", &path);
-                    nonrels.push(path);
-                } else {
-                    println!("5 | is inside of crate! {:?}", &path);
+                if is_outside_base_folder(&rocrate_path, &path) && !inverse {
+                    nonrels.insert(id.to_string(), path);
+                } else if inverse {
+                    nonrels.insert(id.to_string(), path);
                 }
             }
         } else {
-            // Attempt to canonicalize the path
-            // Attempt to canonicalize the path
-            // Attempt to canonicalize the path
             let path = match Path::new(id).canonicalize() {
                 Ok(resolved) => Ok(resolved),
-                Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                    println!("Path not found, attempting to resolve tilde: {:?}", id);
-                    Ok(resolve_tilde_path(id))
-                }
-                Err(e) => {
-                    println!("Unexpected error while resolving path {:?}: {}", id, e);
-                    Err(e) // Return the error for further handling
-                }
+                Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(resolve_tilde_path(id)),
+                Err(e) => Err(e),
             };
 
             let resolved_path = rocrate_path.join(path.unwrap()).canonicalize();
-
-            println!("resolved path: {:?}", resolved_path);
+            println!("Resolved path: {:?}", resolved_path);
             match resolved_path {
                 Ok(abs_path) => {
                     if abs_path.exists() {
-                        println!("6 | Rebuilt path and found ID: {:?}", id);
-                        if is_outside_base_folder(&rocrate_path, &abs_path) {
-                            println!("7 | Found outside of based folder: {:?}", &abs_path);
-                            nonrels.push(abs_path)
-                        } else {
-                            println!("8 | Not outside of crate folder!! {:?}", &abs_path);
+                        if is_outside_base_folder(&rocrate_path, &abs_path) && !inverse {
+                            nonrels.insert(id.to_string(), abs_path);
+                        } else if inverse {
+                            nonrels.insert(id.to_string(), abs_path);
                         }
                     } else {
-                        println!("8 | Failed to resolve ID: {:?}", id);
+                        //println!("8 | Failed to resolve ID: {:?}", id);
                     }
                 }
-                Err(e) => println!("{}", e),
+                Err(_e) => {} //println!("{}", e),
             }
         }
     }
@@ -652,7 +612,26 @@ mod write_crate_tests {
             options: FileOptions::default().compression_method(zip::CompressionMethod::Deflated),
         };
 
-        let directory_contents = directory_walk(&zip_paths, &mut zip_data).unwrap();
+        let path = fixture_path("test_experiment/_ro-crate-metadata-minimal.json");
+
+        let mut rocrate = read_crate(&path, 0).unwrap();
+        /*
+        let mut contained: HashMap<String, PathBuf> = HashMap::new();
+        contained.insert(
+            "../external.txt".to_string(),
+            cwd.join(PathBuf::from("tests/fixtures/external.txt")),
+        );
+        contained.insert(
+            cwd.display().to_string() + "/tests/fixtures/test_experiment/data.csv",
+            cwd.join(PathBuf::from("tests/fixtures/test_experiment/data.csv")),
+        );
+        contained.insert(
+            "text_1.txt".to_string(),
+            cwd.join(PathBuf::from("tests/fixtures/test_experiment/text_1.txt")),
+        );
+        */
+
+        let directory_contents = directory_walk(&mut rocrate, &zip_paths, &mut zip_data).unwrap();
 
         let test_vec: Vec<PathBuf> = vec![
             PathBuf::from("/home/matt/dev/ial/ro-crate-rs/tests/fixtures/test_experiment/data.csv"),
@@ -752,6 +731,7 @@ mod write_crate_tests {
         let crate_path = cwd.join(PathBuf::from("tests/fixtures/test_experiment"));
 
         path_types.insert("../invalid.json", true); // Windows File Path
+        path_types.insert("../external.txt", true); // Windows File Path
         path_types.insert("./data.csv", false); // macOS File Path
         path_types.insert("./text_1.txt", false); // Linux Absolute Path
         path_types.insert("text_1.txt", false); // Linux Absolute Path
@@ -780,7 +760,7 @@ mod write_crate_tests {
             let target = key.to_string();
             input_vec.push(&target);
 
-            let test = get_noncontained_paths(input_vec.clone(), &crate_path);
+            let test = get_noncontained_paths(input_vec.clone(), &crate_path, false);
             if test.is_empty() {
                 println!("Test is empty for relative ID: {}", key);
                 assert_eq!(value, false)
@@ -792,7 +772,7 @@ mod write_crate_tests {
     }
 
     #[test]
-    fn test_zip_crate_external() {
+    fn test_zip_crate_external_func() {
         let cwd = env::current_dir().unwrap();
         let path = fixture_path("test_experiment/_ro-crate-metadata-minimal.json");
 
@@ -810,6 +790,6 @@ mod write_crate_tests {
             options: FileOptions::default().compression_method(zip::CompressionMethod::Deflated),
         };
 
-        let zipped = zip_crate_external(&mut rocrate, zip_data, &zip_paths.absolute_path);
+        let _zipped = zip_crate_external(&mut rocrate, zip_data, &zip_paths);
     }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "rocraters-python"
-version = "0.4.2"
+version = "0.4.3"
 edition = "2021"
 authors = ["Matt Burridge <m.burridge1@newcastle.ac.uk>"]
 description = "Lightweight Python library for RO-Crate manipulation implemented in Rust"

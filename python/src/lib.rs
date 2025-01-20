@@ -5,6 +5,7 @@ extern crate chrono;
 use ::rocraters::ro_crate::constraints::*;
 use ::rocraters::ro_crate::graph_vector::GraphVector;
 use ::rocraters::ro_crate::metadata_descriptor::MetadataDescriptor;
+use ::rocraters::ro_crate::read::parse_zip;
 use ::rocraters::ro_crate::root::RootDataEntity;
 use ::rocraters::ro_crate::{
     read::{read_crate, read_crate_obj},
@@ -252,12 +253,21 @@ fn read_obj(obj: &str, validation_level: i8) -> PyResult<PyRoCrate> {
         .map_err(|e| PyIOError::new_err(format!("Failed to read crate: {:#?}", e)))?;
     Ok(PyRoCrate::from(rocrate))
 }
+/// Reads a Zip of a crate into memory allowing manipulation
+///
+/// Useful for understanding large archives
+#[pyfunction]
+fn read_zip(obj: &str, validation_level: i8) -> PyResult<PyRoCrate> {
+    let rocrate = parse_zip(obj, validation_level)
+        .map_err(|e| PyIOError::new_err(format!("Failed to read crate: {:#?}", e)))?;
+    Ok(PyRoCrate::from(rocrate))
+}
 
 /// Targets a ro-crate and zips directory contents
 #[pyfunction]
-fn zip(crate_path: &str, external: bool, validation_level: i8) -> PyResult<()> {
+fn zip(crate_path: &str, external: bool, validation_level: i8, flatten: bool) -> PyResult<()> {
     let path = Path::new(crate_path).to_path_buf();
-    let _ = rs_zip_crate(&path, external, validation_level);
+    let _ = rs_zip_crate(&path, external, validation_level, flatten);
     Ok(())
 }
 
@@ -313,6 +323,7 @@ fn rocraters(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<PyRoCrateContext>()?;
     m.add_function(wrap_pyfunction!(read, m)?)?;
     m.add_function(wrap_pyfunction!(read_obj, m)?)?;
+    m.add_function(wrap_pyfunction!(read_zip, m)?)?;
     m.add_function(wrap_pyfunction!(zip, m)?)?;
     Ok(())
 }

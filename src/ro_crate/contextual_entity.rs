@@ -77,6 +77,50 @@ impl ContextualEntity {
 
         None
     }
+    pub fn get_linked_ids(&self) -> Vec<Id> {
+        let mut ids = Vec::new();
+
+
+        // Check for Id in the dynamic entity
+        if let Some(dynamic_entity) = &self.dynamic_entity {
+            for value in dynamic_entity.values() {
+                Self::extract_ids_from_entity_value(value, &mut ids);
+            }
+        }
+
+        ids
+    }
+
+    /// Recursive helper to extract `Id` values from `EntityValue`.
+    fn extract_ids_from_entity_value(value: &EntityValue, ids: &mut Vec<Id>) {
+        match value {
+            EntityValue::EntityId(id) => {
+                ids.push(id.clone());
+            }
+            EntityValue::EntityVec(vec) => {
+                for v in vec {
+                    Self::extract_ids_from_entity_value(v, ids);
+                }
+            }
+            EntityValue::EntityObject(map) => {
+                for v in map.values() {
+                    Self::extract_ids_from_entity_value(v, ids);
+                }
+            }
+            EntityValue::EntityVecObject(vec_map) => {
+                for map in vec_map {
+                    for v in map.values() {
+                        Self::extract_ids_from_entity_value(v, ids);
+                    }
+                }
+            }
+            EntityValue::NestedDynamicEntity(nested_value) => {
+                Self::extract_ids_from_entity_value(nested_value, ids);
+            }
+            _ => {}
+        }
+    }
+
 }
 
 /// Enables custom serialisation of known struct fields

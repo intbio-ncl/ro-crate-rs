@@ -7,7 +7,9 @@ use serde_json;
 use std::collections::HashSet;
 use std::fs;
 use std::io;
+use std::io::Read;
 use std::path::{Path, PathBuf};
+use zip::ZipArchive;
 
 /// Reads and deserialises an RO-Crate from a specified file path.
 ///
@@ -211,6 +213,34 @@ impl CrateValidation {
     }
 }
 
+/// Extracts an ro-crate-metadata.json file from a zipped ro-crate
+pub fn parse_zip(zip_path: &str, validation_level: i8) -> Result<RoCrate, CrateReadError> {
+    // 1. Open the .zip file
+    let file = fs::File::open(zip_path).unwrap();
+    let mut archive = ZipArchive::new(file).unwrap();
+
+    // 2. Retrieve the file by name
+    let mut file_in_zip = archive.by_name("ro-crate-metadata.json").unwrap();
+
+    // 3. Read the file contents into memory
+    let mut buffer = Vec::new();
+    file_in_zip.read_to_end(&mut buffer)?;
+
+    match serde_json::from_slice::<RoCrate>(&buffer) {
+        Ok(rocrate) => {
+            if validation_level == 0 {
+                Ok(rocrate)
+            } else {
+                match validity_wrapper(&rocrate, validation_level) {
+                    Ok(_) => Ok(rocrate),
+                    Err(e) => Err(e),
+                }
+            }
+        }
+        Err(e) => Err(CrateReadError::from(e)),
+    }
+}
+
 pub enum ValidationResult {
     Valid,
     Invalid(CrateValidation),
@@ -239,6 +269,12 @@ mod tests {
 
         let crate_result = read_crate(&path, 2);
         assert!(crate_result.is_ok());
+    }
+
+    #[test]
+    fn test_parse_zip() {
+        let zip = parse_zip("tests/fixtures/test_experiment/test_experiment.zip", 0);
+        assert!(zip.is_ok());
     }
 
     #[test]

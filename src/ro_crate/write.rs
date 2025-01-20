@@ -5,6 +5,8 @@
 
 use crate::ro_crate::read::read_crate;
 use crate::ro_crate::rocrate::RoCrate;
+use dirs;
+use std::collections::HashMap;
 use std::fmt;
 use std::fs::{self, File};
 use std::io::{self, Write};
@@ -60,19 +62,27 @@ pub fn write_crate(rocrate: &RoCrate, name: String) {
 fn write_crate_to_zip(
     rocrate: &RoCrate,
     name: String,
-    zip: &mut ZipWriter<File>,
-    options: FileOptions,
+    mut zip_data: RoCrateZip,
 ) -> Result<(), ZipError> {
     // Attempt to serialize the RoCrate object to a pretty JSON string
     let json_ld = serde_json::to_string_pretty(&rocrate)
         .map_err(|e| ZipError::ZipOperationError(e.to_string()))?;
 
     // Start a new file in the zip archive with the given name and options
-    zip.start_file(name, options)
+    zip_data
+        .zip
+        .start_file(name, zip_data.options)
         .map_err(|e| ZipError::ZipOperationError(e.to_string()))?;
 
     // Write the serialized JSON data to the file in the zip archive
-    zip.write_all(json_ld.as_bytes())
+    zip_data
+        .zip
+        .write_all(json_ld.as_bytes())
+        .map_err(|e| ZipError::ZipOperationError(e.to_string()))?;
+
+    zip_data
+        .zip
+        .finish()
         .map_err(|e| ZipError::ZipOperationError(e.to_string()))?;
 
     // If everything succeeded, return Ok(())
@@ -105,29 +115,87 @@ fn write_crate_to_zip(
 /// let crate_path = Path::new("/path/to/ro-crate-directory/ro-crate-metadata.json");
 /// zip_crate(crate_path, false)?;
 /// ```
-pub fn zip_crate(crate_path: &Path, external: bool, validation_level: i8) -> Result<(), ZipError> {
-    // TODO: add multile options for walking/compression e.g follow symbolic links etc.
-    let crate_abs = get_absolute_path(crate_path).unwrap();
-    let root = crate_abs.parent().unwrap();
+pub fn zip_crate(
+    crate_path: &Path,
+    external: bool,
+    validation_level: i8,
+    flatten: bool,
+) -> Result<(), ZipError> {
+    // After prepping create the initial zip file
+    let zip_paths = construct_paths(crate_path).unwrap();
 
-    let zip_file_base_name = root
+    let mut zip_data = build_zip(&zip_paths).unwrap();
+
+    // Opens target crate ready for update
+    let mut rocrate = read_crate(&zip_paths.absolute_path, validation_level).unwrap();
+
+    let _ = directory_walk(&mut rocrate, &zip_paths, &mut zip_data, flatten);
+
+    if external {
+        zip_data = zip_crate_external(&mut rocrate, zip_data, &zip_paths)?
+    }
+
+    let _ = write_crate_to_zip(&rocrate, "ro-crate-metadata.json".to_string(), zip_data);
+
+    Ok(())
+}
+
+pub struct RoCrateZipPaths {
+    absolute_path: PathBuf,
+    root_path: PathBuf,
+    zip_file_name: PathBuf,
+}
+
+fn construct_paths(crate_path: &Path) -> Result<RoCrateZipPaths, Box<dyn std::error::Error>> {
+    // TODO: add multile options for walking/compression e.g follow symbolic links etc.
+    let absolute_path = get_absolute_path(crate_path).unwrap();
+    let root_path = absolute_path.parent().unwrap().to_path_buf();
+
+    let zip_file_base_name = root_path
         .file_name()
         .ok_or(ZipError::FileNameNotFound)?
         .to_str()
         .ok_or(ZipError::FileNameConversionFailed)?;
 
-    let zip_file_name = root.join(format!("{}.zip", zip_file_base_name));
+    let zip_file_name = root_path.join(format!("{}.zip", zip_file_base_name));
 
-    let file = File::create(&zip_file_name).map_err(ZipError::IoError)?;
-    let mut zip = ZipWriter::new(file);
+    Ok(RoCrateZipPaths {
+        absolute_path,
+        root_path,
+        zip_file_name,
+    })
+}
+
+fn build_zip(path_information: &RoCrateZipPaths) -> Result<RoCrateZip, Box<dyn std::error::Error>> {
+    let file = File::create(&path_information.zip_file_name).map_err(ZipError::IoError)?;
+    let zip = ZipWriter::new(file);
 
     // Can change this to deflated for standard compression
     let options = FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
-    // Opens target crate ready for update
-    let mut rocrate = read_crate(&crate_abs.to_path_buf(), validation_level).unwrap();
+    Ok(RoCrateZip { zip, options })
+}
 
-    for entry in WalkDir::new(root)
+pub struct RoCrateZip {
+    zip: ZipWriter<File>,
+    options: FileOptions,
+}
+
+/// Sole focus must be on present data
+/// As defined by the ro-crate-metadata file, it looks at the root and then
+/// every file within it belongs to the crate. Whilst not everything is
+/// described in the ro-crate-metadata itself as per spec, it absolutely should
+/// get everything that is within the crate
+fn directory_walk(
+    rocrate: &mut RoCrate,
+    zip_paths: &RoCrateZipPaths,
+    zip_data: &mut RoCrateZip,
+    flatten: bool,
+) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
+    let mut data_vec: Vec<PathBuf> = Vec::new();
+    let contained = get_noncontained_data_entites(rocrate, zip_paths, true);
+
+    for entry in WalkDir::new(&zip_paths.root_path)
         .min_depth(0)
         .into_iter()
         .filter_map(|e| e.ok())
@@ -135,46 +203,60 @@ pub fn zip_crate(crate_path: &Path, external: bool, validation_level: i8) -> Res
     // Consider only files, not directories
     {
         let path = entry.path();
+        let file_name: String;
 
-        if path == zip_file_name {
+        if path == zip_paths.zip_file_name {
             continue;
         }
 
-        let relative_path = path.strip_prefix(root).map_err(ZipError::from)?;
+        if path == zip_paths.absolute_path {
+            continue;
+        }
 
-        let relative_path_str = relative_path
-            .to_str()
-            .ok_or(ZipError::FileNameConversionFailed)?;
+        if flatten {
+            file_name = path
+                .file_name()
+                .ok_or(ZipError::FileNameNotFound)?
+                .to_str()
+                .ok_or(ZipError::FileNameConversionFailed)?
+                .to_string();
+        } else {
+            file_name = path
+                .strip_prefix(&zip_paths.root_path)
+                .map_err(ZipError::PathError)?
+                .to_str()
+                .ok_or(ZipError::FileNameConversionFailed)?
+                .to_string();
+        }
 
         let mut file = fs::File::open(path).map_err(ZipError::IoError)?;
-        zip.start_file(relative_path_str, options)
+
+        zip_data
+            .zip
+            .start_file(&file_name, zip_data.options)
             .map_err(|e| ZipError::ZipOperationError(e.to_string()))?;
-        io::copy(&mut file, &mut zip).map_err(ZipError::IoError)?;
 
         // Once copy the absolute path and relative path needs to be checked
         let abs_path = get_absolute_path(path).unwrap();
+        if abs_path.is_file() {
+            data_vec.push(abs_path.clone());
+        };
 
-        // I need to update the rocrate with the relative paths of all the
-        update_zip_ids(&mut rocrate, abs_path, relative_path_str);
-        // absolute paths,
+        let copy_result = io::copy(&mut file, &mut zip_data.zip).map_err(ZipError::IoError);
+
+        match copy_result {
+            Ok(_) => {
+                for (key, value) in &contained {
+                    if abs_path == value.clone() {
+                        rocrate.update_id_recursive(key, &file_name)
+                    }
+                }
+            }
+            Err(_e) => println!("problem"),
+        }
     }
-
-    // TODO: Known issue, this zip external logic needs to be executed before
-    // you walk the directory, since this looks at the rocrate and determines
-    if external {
-        zip = zip_crate_external(&mut rocrate, &crate_abs, zip, options)?
-    }
-    let _ = write_crate_to_zip(
-        &rocrate,
-        "ro-crate-metadata.json".to_string(),
-        &mut zip,
-        options,
-    );
-
-    zip.finish()
-        .map_err(|e| ZipError::ZipOperationError(e.to_string()))?;
-
-    Ok(())
+    println!("0 | Rocrate: {:?}", rocrate);
+    Ok(data_vec)
 }
 
 #[derive(Debug)]
@@ -244,81 +326,63 @@ impl From<std::path::StripPrefixError> for ZipError {
 /// encapsulating any errors that occurred during the operation.
 pub fn zip_crate_external(
     rocrate: &mut RoCrate,
-    crate_path: &Path,
-    mut zip: ZipWriter<File>,
-    options: FileOptions,
-) -> Result<ZipWriter<File>, ZipError> {
-    // Get all IDs for the target crate
-    let mut ids = rocrate.get_all_ids();
+    mut zip_data: RoCrateZip,
+    crate_path: &RoCrateZipPaths,
+) -> Result<RoCrateZip, ZipError> {
+    // This parses all the IDs and generates a list of paths that are not
+    // contained within the crate itself.
+    let noncontained = get_noncontained_data_entites(rocrate, crate_path, false);
 
-    // Pop all non-urls
-    ids.retain(|id| is_not_url(id));
-    let nonrels = get_nonrelative_paths(&ids, crate_path);
-
-    // if nonrels is not empty, means data entities are external
+    // if noncontained is not empty, means data entities are external
     // therefore we need to package them
-    if !nonrels.is_empty() {
-        for external in nonrels {
+    if !noncontained.is_empty() {
+        for (id, path) in noncontained {
             // norels = path to file, then we use external path to get folder then add basename
-            let file_name = external
+            let file_name = path
                 .file_name()
                 .ok_or(ZipError::FileNameNotFound)?
                 .to_str()
                 .ok_or(ZipError::FileNameConversionFailed)?;
             let zip_entry_name = format!("external/{}", file_name);
 
-            let mut file = fs::File::open(&external).map_err(ZipError::IoError)?;
+            let mut file = fs::File::open(&path).map_err(ZipError::IoError)?;
 
-            zip.start_file(&zip_entry_name, options)
+            zip_data
+                .zip
+                .start_file(&zip_entry_name, zip_data.options)
                 .map_err(|e| ZipError::ZipOperationError(e.to_string()))?;
 
-            let copy_result = io::copy(&mut file, &mut zip).map_err(ZipError::IoError);
+            let copy_result = io::copy(&mut file, &mut zip_data.zip).map_err(ZipError::IoError);
             match copy_result {
                 Ok(_) => {
-                    update_zip_ids(rocrate, external, &zip_entry_name);
+                    rocrate.update_id_recursive(&id, &zip_entry_name);
                 }
                 Err(e) => return Err(e),
             }
         }
     }
 
-    Ok(zip)
+    Ok(zip_data)
 }
-/// Updates the identifiers of entities within an RO-Crate to match their new paths in a zip archive.
-///
-/// This function is essential when packaging an RO-Crate and its associated files into a zip archive.
-/// It ensures that all references to data entities within the crate reflect their new locations within
-/// the archive. The function handles various path formats, including extended-length paths on Windows.
-///
-/// # Arguments
-/// * `rocrate` - A mutable reference to the RO-Crate being updated.
-/// * `id` - The original filesystem path of the entity.
-/// * `zip_id` - The new identifier for the entity within the zip archive.
-///
-/// # Note
-/// The function includes specific checks for path anomalies, such as Windows extended-length path prefixes.
-/// It currently focuses only on Windows extended-length path prefixes and needs to be updated in
-/// line with new ids.
-fn update_zip_ids(rocrate: &mut RoCrate, id: PathBuf, zip_id: &str) {
-    let id_str = id.to_str().unwrap_or_default();
 
-    // Try updating based on a direct match
-    rocrate.update_id_recursive(id_str, zip_id);
+/// Gets all the described data entities of a crate and filters for
+/// files that are not in the crate structure
+fn get_noncontained_data_entites(
+    rocrate: &mut RoCrate,
+    crate_path: &RoCrateZipPaths,
+    inverse: bool,
+) -> HashMap<String, PathBuf> {
+    // Get all IDs for the target crate
+    // Assumed that all data entities are discrete objects, and that not file
+    // has been referenced without being described
+    let mut ids = rocrate.get_all_ids();
 
-    // Handle Windows extended-length path prefixes (\\?\)
-    if id_str.starts_with(r"\\?\") {
-        let stripped_id = &id_str[4..];
+    // Pop all non-urls and remove root/ metadata descriptor
+    ids.retain(|id| is_not_url(id));
 
-        // Attempt to update using the stripped path
-        rocrate.update_id_recursive(stripped_id, zip_id);
-
-        // Handle paths with '\\' by replacing them with a single '\'
-        if id_str.contains("\\\\") {
-            let normalized_id = stripped_id.replace("\\\\", "\\");
-            rocrate.update_id_recursive(&normalized_id, zip_id);
-        }
-    }
+    get_noncontained_paths(ids, &crate_path.root_path, inverse)
 }
+
 /// Identifies file paths that are not relative to the given RO-Crate directory.
 ///
 /// When preparing an RO-Crate for zipping, it's important to include all related files, even those
@@ -328,15 +392,19 @@ fn update_zip_ids(rocrate: &mut RoCrate, id: PathBuf, zip_id: &str) {
 /// * `ids` - A vector of strings representing the IDs (paths) to check.
 /// * `crate_dir` - The base directory of the RO-Crate.
 ///
-/// # Returns
-/// A vector of `PathBuf` objects representing files that are outside the crate's base directory.
-fn get_nonrelative_paths(ids: &Vec<&String>, crate_dir: &Path) -> Vec<PathBuf> {
-    let mut nonrels: Vec<PathBuf> = Vec::new();
+fn get_noncontained_paths(
+    ids: Vec<&String>,
+    crate_dir: &Path,
+    inverse: bool,
+) -> HashMap<String, PathBuf> {
+    let mut nonrels: HashMap<String, PathBuf> = HashMap::new();
 
     // Get the absolute path of the crate directory
     let rocrate_path = get_absolute_path(crate_dir).unwrap();
+    println!("crate path {:?} and target id {:?}", rocrate_path, ids);
 
     // Iterate over all the ids, check if the paths are relative to the crate.
+    // EVERYTHING NEEDS TO BE WITHIN THE CRATE
     for id in ids.iter() {
         // Skip IDs that are fragment references (i.e., starting with '#')
         if id.starts_with('#') {
@@ -347,15 +415,53 @@ fn get_nonrelative_paths(ids: &Vec<&String>, crate_dir: &Path) -> Vec<PathBuf> {
         if let Some(path) = get_absolute_path(Path::new(id)) {
             // Check if the path exists
             if path.exists() {
+                println!("Absolute path: {:?}", path);
                 // Check if the path is outside the base crate directory
-                if is_outside_base_folder(&rocrate_path, &path) {
-                    nonrels.push(path);
+                if is_outside_base_folder(&rocrate_path, &path) && !inverse {
+                    nonrels.insert(id.to_string(), path);
+                } else if inverse {
+                    nonrels.insert(id.to_string(), path);
                 }
+            }
+        } else {
+            println!("ID: {:?}", id);
+            let path = match Path::new(id).canonicalize() {
+                Ok(resolved) => Ok(resolved),
+                Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(resolve_tilde_path(id)),
+                Err(e) => Err(continue),
+            };
+            println!("Pre Resolved path: {:?}", path);
+            let resolved_path = rocrate_path.join(path.unwrap()).canonicalize();
+            println!("Resolved path: {:?}", resolved_path);
+            match resolved_path {
+                Ok(abs_path) => { 
+                    println!("Can confirm: {:?}", abs_path);
+                    if abs_path.exists() {
+                        println!("Exists: {:?}", abs_path);
+                        if is_outside_base_folder(&rocrate_path, &abs_path) && !inverse {
+                            nonrels.insert(id.to_string(), abs_path);
+                        } else if inverse {
+                            nonrels.insert(id.to_string(), abs_path);
+                        }
+                    } else {
+                        //println!("8 | Failed to resolve ID: {:?}", id);
+                    }
+                }
+                Err(_e) => {} //println!("{}", e),
             }
         }
     }
 
     nonrels
+}
+
+fn resolve_tilde_path(path: &str) -> PathBuf {
+    if let Some(home_dir) = dirs::home_dir() {
+        if path.starts_with("~") {
+            return home_dir.join(path.strip_prefix("~/").unwrap_or(""));
+        }
+    }
+    Path::new(path).to_path_buf()
 }
 /// Converts a relative path to an absolute one, if possible.
 ///
@@ -396,9 +502,14 @@ fn is_not_url(path: &str) -> bool {
     let is_normal_file_path = path.starts_with(r"\\") // UNC path
         || path.chars().next().map(|c| c.is_alphabetic() && path.chars().nth(1) == Some(':')).unwrap_or(false) // Drive letter, e.g., C:\
         || path.starts_with('/') // Unix-style path
-        || path.starts_with('.'); // Relative path
+        || path.starts_with('.') // Relative path
+        || path.starts_with("file:");
 
     // If it looks like a file path, return true early
+    if path.contains("ro-crate-metadata.json") || path == "./" {
+        return false;
+    }
+
     if is_extended_windows_path || is_normal_file_path {
         return true;
     }
@@ -426,6 +537,7 @@ fn is_not_url(path: &str) -> bool {
 /// ```
 fn is_outside_base_folder(base_folder: &Path, file_path: &Path) -> bool {
     // Compare the given file path with the base folder path
+    println!("Base folder: {:?} | file path {:?}", base_folder, file_path);
     !file_path.starts_with(base_folder)
 }
 
@@ -433,6 +545,8 @@ fn is_outside_base_folder(base_folder: &Path, file_path: &Path) -> bool {
 mod write_crate_tests {
     use super::*;
     use crate::ro_crate::read::read_crate;
+    use std::collections::HashMap;
+    use std::env;
     use std::fs;
     use std::path::Path;
     use std::path::PathBuf;
@@ -456,9 +570,257 @@ mod write_crate_tests {
         // Read the file content and verify if it matches the expected JSON
         let file_content = fs::read_to_string(file_name).expect("Failed to read file");
         let expected_json = serde_json::to_string_pretty(&rocrate).expect("Failed to serialize");
+        println!("{}", file_content);
         assert_eq!(file_content.trim_end(), expected_json);
 
         // Clean up: Remove the created file after the test
         fs::remove_file(file_name).expect("Failed to remove test file");
+    }
+
+    #[test]
+    fn test_zip_crate_basic() {
+        let path = fixture_path("test_experiment/_ro-crate-metadata-minimal.json");
+
+        let zipped = zip_crate(&path, false, 0, false);
+        println!("{:?}", zipped);
+    }
+
+    #[test]
+    fn test_zip_crate_external_full() {
+        let path = fixture_path("test_experiment/_ro-crate-metadata-minimal.json");
+
+        let zipped = zip_crate(&path, true, 0, false);
+        println!("{:?}", zipped);
+    }
+
+    #[test]
+    fn test_construct_paths() {
+        let cwd = env::current_dir().unwrap();
+        let path = fixture_path("test_experiment/_ro-crate-metadata-minimal.json").canonicalize().unwrap();
+
+        let paths = construct_paths(&path).unwrap();
+
+        assert_eq!(paths.absolute_path, cwd.join(&path));
+        assert_eq!(
+            paths.root_path,
+            cwd.join(PathBuf::from("tests/fixtures/test_experiment")).canonicalize().unwrap()
+        );
+        assert_eq!(
+            paths.zip_file_name,
+            cwd.join(PathBuf::from(
+                "tests/fixtures/test_experiment/test_experiment.zip"
+            ).canonicalize().unwrap())
+        );
+    }
+
+    #[test]
+    fn test_directory_walk() {
+        let cwd = env::current_dir().unwrap();
+        let path = fixture_path("test_experiment/_ro-crate-metadata-minimal.json");
+
+        let zip_paths = RoCrateZipPaths {
+            absolute_path: cwd.join(&path),
+            root_path: cwd.join(PathBuf::from("tests/fixtures/test_experiment")),
+            zip_file_name: cwd.join(PathBuf::from(
+                "tests/fixtures/test_experiment/test_experiment.zip",
+            )),
+        };
+
+        let mut zip_data = RoCrateZip {
+            zip: ZipWriter::new(File::create(&zip_paths.zip_file_name).unwrap()),
+            options: FileOptions::default().compression_method(zip::CompressionMethod::Deflated),
+        };
+
+        let path = fixture_path("test_experiment/_ro-crate-metadata-minimal.json");
+
+        let mut rocrate = read_crate(&path, 0).unwrap();
+        /*
+        let mut contained: HashMap<String, PathBuf> = HashMap::new();
+        contained.insert(
+            "../external.txt".to_string(),
+            cwd.join(PathBuf::from("tests/fixtures/external.txt")),
+        );
+        contained.insert(
+            cwd.display().to_string() + "/tests/fixtures/test_experiment/data.csv",
+            cwd.join(PathBuf::from("tests/fixtures/test_experiment/data.csv")),
+        );
+        contained.insert(
+            "text_1.txt".to_string(),
+            cwd.join(PathBuf::from("tests/fixtures/test_experiment/text_1.txt")),
+        );
+        */
+
+        let directory_contents =
+            directory_walk(&mut rocrate, &zip_paths, &mut zip_data, false).unwrap();
+
+        let test_vec: Vec<PathBuf> = vec![
+            cwd.join(PathBuf::from("tests/fixtures/test_experiment/data.csv").canonicalize().unwrap()),
+            cwd.join(PathBuf::from(
+                "tests/fixtures/test_experiment/text_1.txt",
+            ).canonicalize().unwrap()),
+        ];
+
+        assert_eq!(directory_contents, test_vec);
+    }
+
+    #[test]
+    fn test_is_not_url() {
+        let mut url_types: HashMap<&str, bool> = HashMap::new();
+
+        // A highly expansive and overkill URL/file path fixture generated with
+        // GPT
+        // URLs (false)
+        url_types.insert("http://example.com", false); // HTTP
+        url_types.insert("https://example.com", false); // HTTPS
+        url_types.insert("ftp://ftp.example.com", false); // FTP
+        url_types.insert("sftp://example.com", false); // SFTP
+        url_types.insert("ws://example.com/socket", false); // WS
+        url_types.insert("wss://example.com/socket", false); // WSS
+        url_types.insert("data:text/html,<html>Hello!</html>", false); // DATA
+        url_types.insert("blob:https://example.com/uuid", false); // BLOB
+        url_types.insert("mailto:someone@example.com?subject=Hello", false); // MAILTO
+        url_types.insert("tel:+1234567890", false); // TEL
+        url_types.insert("sms:+1234567890?body=Hello", false); // SMS
+        url_types.insert("jdbc:mysql://localhost:3306/database", false); // JDBC
+        url_types.insert("urn:uuid:123e4567-e89b-12d3-a456-426614174000", false); // URN
+        url_types.insert("ldap://example.com:389/dc=example,dc=com", false); // LDAP
+        url_types.insert("ssh://user@server.com", false); // SSH
+        url_types.insert("rtsp://media.example.com/video", false); // RTSP
+        url_types.insert("mms://stream.example.com", false); // MMS
+        url_types.insert("magnet:?xt=urn:btih:hash1234", false); // MAGNET
+        url_types.insert("geo:37.7749,-122.4194", false); // GEO
+        url_types.insert(
+            "bitcoin:1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa?amount=0.01",
+            false,
+        ); // BITCOIN
+        url_types.insert("ipfs://bafybeic3cphk4a", false); // IPFS
+        url_types.insert("irc://irc.libera.chat/#rust", false); // IRC
+        url_types.insert("git://github.com/user/repo.git", false); // GIT
+        url_types.insert("telnet://192.168.1.1", false); // TELNET
+        url_types.insert("news:comp.lang.rust", false); // NEWS
+        url_types.insert("about:blank", false); // ABOUT
+        url_types.insert("chrome://settings/", false); // CHROME
+        url_types.insert("javascript:alert('Hello')", false); // JAVASCRIPT
+        url_types.insert("s3://bucket-name/object-key", false); // AWS S3 Object
+        url_types.insert("gs://bucket-name/object-key", false); // Google Cloud Storage Object
+        url_types.insert("azure://container-name/blob-name", false); // Azure Blob Storage
+        url_types.insert("swift://container-name/object-name", false); // OpenStack Swift Object
+        url_types.insert("wasabi://bucket-name/object-key", false); // Wasabi Object Storage
+        url_types.insert("minio://bucket-name/object-key", false); // MinIO Object Storage
+        url_types.insert("aliyun://bucket-name/object-key", false); // Alibaba Cloud OSS
+        url_types.insert("digitalocean://bucket-name/object-key", false); // DigitalOcean Spaces
+        url_types.insert("ibmcloud://bucket-name/object-key", false); // IBM Cloud Object Storage
+        url_types.insert("backblaze://bucket-name/object-key", false); // Backblaze B2 Storage
+        url_types.insert("rackspace://container-name/object-name", false); // Rackspace Cloud Files
+        url_types.insert("oracle://bucket-name/object-key", false); // Oracle Cloud Object Storage
+        
+
+        // Fragment ref
+        url_types.insert("#test", true); // Fragment ref
+        url_types.insert("main.nf#main/FAMOSAB_WRROCMETATEST:WRROCMETATEST:FASTP", true);
+
+        // File Paths (true)
+        url_types.insert("file:///C:/Windows/System32/drivers/etc/hosts", true); // Windows File Path
+        url_types.insert("file:///Users/user/Documents/notes.txt", true); // macOS File Path
+        url_types.insert("/home/user/Documents/report.pdf", true); // Linux Absolute Path
+        url_types.insert("C:\\Users\\User\\Downloads\\file.txt", true); // Windows Backslash Path
+        url_types.insert("../relative/path/to/file.txt", true); // Relative Path
+        url_types.insert("./current/directory/file.txt", true); // Current Directory Path
+        url_types.insert("/var/log/syslog", true); // Unix Log File
+        url_types.insert("~/.ssh/config", true); // Unix Home Directory
+        url_types.insert("~/Documents/resume.docx", true); // Unix Home Directory Expanded
+        url_types.insert("/mnt/data/project/files", true); // Mounted Drive Path
+        url_types.insert("E:\\Music\\playlist.m3u", true); // External Drive on Windows
+        url_types.insert("\\\\network\\share\\folder\\file.txt", true); // UNC Path on Windows
+        url_types.insert("/etc/nginx/nginx.conf", true); // Configuration File Path
+        url_types.insert("/opt/app/bin/start.sh", true); // Unix Application Path
+        url_types.insert("/dev/null", true); // Unix Special Device Path
+        url_types.insert("C:/Program Files/App/app.exe", true); // Windows Program Path
+        url_types.insert("/usr/local/bin/script", true); // Unix Local Bin Path
+        url_types.insert("D:/Projects/Code/main.rs", true); // Windows Drive Path
+
+        for (key, value) in url_types {
+            let test = is_not_url(key);
+            println!("Func result: {}, testing: {}, {}", test, key, value);
+            assert_eq!(test, value);
+        }
+    }
+
+    
+    fn user_root_unix(mut path_types: HashMap<&str, bool>) -> HashMap<&str, bool> {
+        if !cfg!(windows) {
+            path_types.insert("~/.cargo/env", true); // Relative Path
+            path_types.insert("/var/log/syslog", true); // Windows Backslash Path
+        }
+        path_types
+    }
+
+    #[test]
+    fn test_get_noncontained_paths() {
+        let mut path_types: HashMap<&str, bool> = HashMap::new();
+        let cwd = env::current_dir().unwrap();
+        let crate_path = cwd.join(PathBuf::from("tests/fixtures/test_experiment"));
+
+        path_types.insert("../invalid.json", true); // Windows File Path
+        path_types.insert("../external.txt", true); // Windows File Path
+        path_types.insert("./data.csv", false); // macOS File Path
+        path_types.insert("./text_1.txt", false); // Linux Absolute Path
+        path_types.insert("text_1.txt", false); // Linux Absolute Path
+        path_types.insert("#fragment", false); // Relative Path
+
+       path_types = user_root_unix(path_types); //Check tilde paths
+
+        // abs path but not relative
+        let abs_not = cwd
+            .join(PathBuf::from("README.md"))
+            .to_str()
+            .unwrap()
+            .to_string();
+        path_types.insert(&abs_not, true);
+
+        // abs path rel
+        let abs_is = cwd
+            .join(crate_path.join(PathBuf::from("data.csv")))
+            .to_str()
+            .unwrap()
+            .to_string();
+        path_types.insert(&abs_is, false);
+
+        for (key, value) in path_types {
+            let mut input_vec: Vec<&String> = Vec::new();
+            let target = key.to_string();
+            input_vec.push(&target);
+
+            let test = get_noncontained_paths(input_vec.clone(), &crate_path, false);
+            if test.is_empty() {
+                println!("Test is empty for relative ID: {}", key);
+                assert_eq!(value, false)
+            } else {
+                println!("Test is successful for relative ID: {}", key);
+                assert_eq!(value, true)
+            }
+        }
+    }
+
+    #[test]
+    fn test_zip_crate_external_func() {
+        let cwd = env::current_dir().unwrap();
+        let path = fixture_path("test_experiment/_ro-crate-metadata-minimal.json");
+
+        let mut rocrate = read_crate(&path, 0).unwrap();
+        let zip_paths = RoCrateZipPaths {
+            absolute_path: cwd.join(&path),
+            root_path: cwd.join(PathBuf::from("tests/fixtures/test_experiment")),
+            zip_file_name: cwd.join(PathBuf::from(
+                "tests/fixtures/test_experiment/test_experiment.zip",
+            )),
+        };
+
+        let zip_data = RoCrateZip {
+            zip: ZipWriter::new(File::create(&zip_paths.zip_file_name).unwrap()),
+            options: FileOptions::default().compression_method(zip::CompressionMethod::Deflated),
+        };
+
+        let _zipped = zip_crate_external(&mut rocrate, zip_data, &zip_paths);
     }
 }

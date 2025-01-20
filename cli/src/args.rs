@@ -216,6 +216,9 @@ pub struct ZipCrateCommand {
     // Copy and include external reachable data files
     #[clap(short, long, default_value_t = true)]
     pub external: bool,
+    // Flatten contents to remove folder stucture in zip
+    #[clap(short, long, default_value_t = false)]
+    pub flatten: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -246,6 +249,9 @@ pub struct ReadCrateCommand {
     /// Prints full view without trimming
     #[clap(short, long)]
     pub fit: bool,
+    /// Prints as json
+    #[clap(short, long)]
+    pub json: bool,
 }
 
 /// TODO: Add a field to recursively show all linked ids
@@ -267,6 +273,9 @@ pub struct ReadEntityCommand {
     /// Prints full view without trimming
     #[clap(short, long)]
     pub fit: bool,
+    /// Prints as json
+    #[clap(short, long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]
@@ -281,6 +290,9 @@ pub struct ReadFieldsCommand {
     pub target_crate: String,
     /// Field to search for
     pub field: String,
+    /// Prints as json
+    #[clap(short, long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]
@@ -298,6 +310,9 @@ pub struct ReadValueCommand {
     /// Show the object location
     #[clap(short, long)]
     pub location: bool,
+    /// Prints as json
+    #[clap(short, long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Subcommand)]

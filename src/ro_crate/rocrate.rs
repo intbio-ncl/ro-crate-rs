@@ -7,6 +7,7 @@
 //! This should definitly be split up in future implementations
 
 use crate::ro_crate::constraints::EntityValue;
+use crate::ro_crate::context::{ContextItem, RoCrateContext};
 use crate::ro_crate::graph_vector::GraphVector;
 use crate::ro_crate::modify::DynamicEntityManipulation;
 use serde::{Deserialize, Serialize};
@@ -36,96 +37,6 @@ pub struct RoCrate {
     /// format, allowing for easy machine processing and interoperability.
     #[serde(rename = "@graph")]
     pub graph: Vec<GraphVector>,
-}
-
-/// Defines the JSON-LD contexts in an RO-Crate, facilitating flexible context specification.
-///
-/// This enum models the `@context` field's variability in RO-Crates, enabling the use of external URLs,
-/// combination of contexts, or embedded definitions directly within the crate. It supports:
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(untagged)]
-pub enum RoCrateContext {
-    /// A URI string for referencing external JSON-LD contexts (default should be
-    /// ro-crate context).
-    ReferenceContext(String),
-    /// A combination of contexts for extended or customized vocabularies, represented as a list of items.
-    ExtendedContext(Vec<ContextItem>),
-    /// Directly embedded context definitions, ensuring crate portability by using a vector of hash maps for term definitions.    
-    EmbeddedContext(Vec<HashMap<String, String>>),
-}
-
-/// Represents elements in the `@context` of an RO-Crate, allowing for different ways to define terms.
-///
-/// There are two types of items:
-///
-/// - `ReferenceItem`: A URL string that links to an external context definition. It's like a reference to a standard set of terms used across different crates.
-///
-/// - `EmbeddedContext`: A map containing definitions directly. This is for defining terms right within the crate, making it self-contained.
-///
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[serde(untagged)]
-pub enum ContextItem {
-    /// A URI string for referencing external JSON-LD contexts
-    ReferenceItem(String),
-    /// Directly embedded context definitions, ensureing crate protability by using a vector of
-    /// hash maps for term definitions
-    EmbeddedContext(HashMap<String, String>),
-}
-
-impl RoCrateContext {
-    /// Adds a new context to the `RoCrateContext`.
-    pub fn add_context(&mut self, new_context: ContextItem) {
-        match self {
-            RoCrateContext::ReferenceContext(current) => {
-                // Convert to `ExtendedContext` if necessary
-                *self = RoCrateContext::ExtendedContext(vec![
-                    ContextItem::ReferenceItem(current.clone()),
-                    new_context,
-                ]);
-            }
-            RoCrateContext::ExtendedContext(contexts) => {
-                // Add the new item to the extended context
-                contexts.push(new_context);
-            }
-            RoCrateContext::EmbeddedContext(embedded_contexts) => {
-                // Merge new key-value pairs into the existing embedded context
-                if let ContextItem::EmbeddedContext(new_map) = new_context {
-                    embedded_contexts.push(new_map);
-                }
-            }
-        }
-    }
-
-    /// Removes a context item from the `RoCrateContext`.
-    pub fn remove_context(&mut self, target: &ContextItem) -> Result<(), String> {
-        match self {
-            RoCrateContext::ReferenceContext(_) => Err(
-                "ReferenceContext cannot be removed as the crate requires a context.".to_string(),
-            ),
-            RoCrateContext::ExtendedContext(contexts) => {
-                let initial_len = contexts.len();
-                contexts.retain(|item| item != target);
-                if contexts.len() < initial_len {
-                    Ok(())
-                } else {
-                    Err("Context item not found in ExtendedContext.".to_string())
-                }
-            }
-            RoCrateContext::EmbeddedContext(embedded_contexts) => {
-                if let ContextItem::EmbeddedContext(target_map) = target {
-                    let initial_len = embedded_contexts.len();
-                    embedded_contexts.retain(|map| map != target_map);
-                    if embedded_contexts.len() < initial_len {
-                        Ok(())
-                    } else {
-                        Err("Target map not found in EmbeddedContext.".to_string())
-                    }
-                } else {
-                    Err("Invalid target type for EmbeddedContext.".to_string())
-                }
-            }
-        }
-    }
 }
 
 /// This allows direct manipulation of each node of the GraphVector

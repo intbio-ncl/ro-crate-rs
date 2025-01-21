@@ -1,4 +1,8 @@
-{ "@context": "https://w3id.org/ro/crate/1.1/context", 
+{ "@context": [ 
+    "https://w3id.org/ro/crate/1.1/context",
+    {"education": "https://criminalcharacters.com/vocab#education",
+     "interests": "https://w3id.org/ro/terms/criminalcharacters#interests"}
+  ], 
   "@graph": [
 
  {
@@ -14,8 +18,7 @@
     "datePublished": "2017",
     "name": "Data files associated with the manuscript:Effects of facilitated family case conferencing for ...",
     "description": "Palliative care planning for nursing home residents with advanced dementia ...",
-    "license": {"@id": "https://creativecommons.org/licenses/by-nc-sa/3.0/au/"},
-    "value": None
+    "license": {"@id": "https://creativecommons.org/licenses/by-nc-sa/3.0/au/"}
  },
  {
   "@id": "https://creativecommons.org/licenses/by-nc-sa/3.0/au/",

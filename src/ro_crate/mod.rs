@@ -5,6 +5,7 @@
 //! the serde and serde-json library
 
 pub mod constraints;
+pub mod context;
 pub mod contextual_entity;
 pub mod data_entity;
 pub mod graph_vector;

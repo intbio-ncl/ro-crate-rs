@@ -193,14 +193,16 @@ pub enum EntityValue {
     EntityString(String),
     EntityVecString(Vec<String>),
     EntityId(Id),
-    EntityLicense(License),
     Entityi64(i64),
     Entityf64(f64),
     EntityVeci64(Vec<i64>),
     EntityVecf64(Vec<f64>),
+    EntityLicense(License),
     EntityDataType(DataType),
     // Option to capture nulls before nesting
-    EntityBool(Option<bool>),
+    EntityNull(Option<bool>),
+    EntityBool(bool),
+    EntityNone(Option<String>),
     EntityVec(Vec<EntityValue>),
     EntityObject(HashMap<String, EntityValue>),
     EntityVecObject(Vec<HashMap<String, EntityValue>>),
@@ -225,6 +227,8 @@ impl fmt::Display for EntityValue {
             EntityValue::EntityObject(object) => write!(f, "EntityObject({:?})", object),
             EntityValue::EntityVecObject(objects) => write!(f, "EntityVecObject({:?})", objects),
             EntityValue::NestedDynamicEntity(value) => write!(f, "NestedDynamicEntity({})", value),
+            EntityValue::EntityNull(value) => write!(f, "EntityNull: {:?}", value),
+            EntityValue::EntityNone(value) => write!(f, "EntityNone: {:?}", value),
             EntityValue::Fallback(value) => write!(f, "Fallback({:?})", value),
         }
     }
@@ -257,7 +261,7 @@ impl EntityValue {
 
         // Handle boolean values
         if let Ok(parsed) = serde_json::from_str::<bool>(input) {
-            return Some(EntityValue::EntityBool(Some(parsed)));
+            return Some(EntityValue::EntityBool(parsed));
         }
 
         // Handle arrays of strings
@@ -351,9 +355,9 @@ mod tests {
 
     #[test]
     fn test_dynamic_entity_bool() {
-        let entity = EntityValue::EntityBool(Some(true));
+        let entity = EntityValue::EntityBool(true);
         match entity {
-            EntityValue::EntityBool(Some(value)) => assert!(value),
+            EntityValue::EntityBool(value) => assert!(value),
             _ => panic!("EntityBool variant expected"),
         }
     }

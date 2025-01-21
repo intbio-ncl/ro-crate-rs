@@ -3,33 +3,35 @@
 mod utils;
 extern crate chrono;
 use ::rocraters::ro_crate::constraints::*;
+use ::rocraters::ro_crate::context::{ContextItem, RoCrateContext};
 use ::rocraters::ro_crate::graph_vector::GraphVector;
 use ::rocraters::ro_crate::metadata_descriptor::MetadataDescriptor;
 use ::rocraters::ro_crate::read::parse_zip;
 use ::rocraters::ro_crate::root::RootDataEntity;
 use ::rocraters::ro_crate::{
     read::{read_crate, read_crate_obj},
-    rocrate::{ContextItem, RoCrate, RoCrateContext},
+    rocrate::RoCrate,
     write::{write_crate as rs_write_crate, zip_crate as rs_zip_crate},
 };
 use chrono::prelude::*;
 use pyo3::exceptions::PyIOError;
 use pyo3::{
     prelude::*,
-    types::{PyDict, PyList, PyString},
+    types::{PyDict, PyList},
 };
 use std::collections::HashMap;
 use std::path::Path;
 
 /// PyO3 compatible wrapper around RoCrate struct
 #[pyclass]
+#[derive(Debug)]
 struct PyRoCrate {
     inner: RoCrate,
 }
 
 /// PyO3 compatible wrapper around RoCrateContext struct
 #[pyclass]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct PyRoCrateContext {
     inner: RoCrateContext,
 }
@@ -41,7 +43,7 @@ impl PyRoCrateContext {
     ///
     /// Used for creating a base RoCrate vocab
     #[staticmethod]
-    fn from_string(context: &PyString) -> Self {
+    fn from_string(context: &str) -> Self {
         PyRoCrateContext {
             inner: RoCrateContext::ReferenceContext(context.to_string()),
         }
@@ -51,13 +53,13 @@ impl PyRoCrateContext {
     ///
     /// Allows for a Reference, Embedded and Extended RoCrate context.
     #[staticmethod]
-    fn from_list(context: &PyList) -> PyResult<Self> {
+    fn from_list<'py>(context: Bound<'py, PyList>) -> PyResult<Self> {
         let mut context_items = Vec::new();
         for obj in context.iter() {
             // Check if obj is a string or a dict
-            if let Ok(string) = obj.extract::<String>() {
+            if let Ok(string) = obj.extract() {
                 context_items.push(ContextItem::ReferenceItem(string));
-            } else if let Ok(dict) = obj.extract::<&PyDict>() {
+            } else if let Ok(dict) = obj.clone().downcast_into::<PyDict>() {
                 let mut map = HashMap::new();
                 for (key, val) in dict.into_iter() {
                     let key_str: String = key.extract()?;
@@ -248,7 +250,7 @@ fn read(relative_path: &str, validation_level: i8) -> PyResult<PyRoCrate> {
 ///
 /// Useful for json from browsers/ applications
 #[pyfunction]
-fn read_obj(obj: &str, validation_level: i8) -> PyResult<PyRoCrate> {
+fn read_object(obj: &str, validation_level: i8) -> PyResult<PyRoCrate> {
     let rocrate = read_crate_obj(obj, validation_level)
         .map_err(|e| PyIOError::new_err(format!("Failed to read crate: {:#?}", e)))?;
     Ok(PyRoCrate::from(rocrate))
@@ -318,11 +320,11 @@ impl Default for PyRoCrate {
 
 /// A lightweight Python library for Ro-Crate manipulation implemented in Rust.
 #[pymodule]
-fn rocraters(_py: Python, m: &PyModule) -> PyResult<()> {
+fn rocraters(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyRoCrate>()?;
     m.add_class::<PyRoCrateContext>()?;
     m.add_function(wrap_pyfunction!(read, m)?)?;
-    m.add_function(wrap_pyfunction!(read_obj, m)?)?;
+    m.add_function(wrap_pyfunction!(read_object, m)?)?;
     m.add_function(wrap_pyfunction!(read_zip, m)?)?;
     m.add_function(wrap_pyfunction!(zip, m)?)?;
     Ok(())

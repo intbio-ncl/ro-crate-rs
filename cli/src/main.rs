@@ -11,10 +11,11 @@ use constraints::{DataType, EntityValue, Id, License};
 use data_entity::DataEntity;
 use json_to_table::json_to_table;
 use read::{crate_path, read_crate};
+use rocraters::ro_crate::context::{ContextItem, RoCrateContext};
 use rocraters::ro_crate::graph_vector::GraphVector;
 use rocraters::ro_crate::read::parse_zip;
-use rocraters::ro_crate::rocrate::{ContextItem, RoCrate, RoCrateContext};
-use rocraters::ro_crate::{self, constraints, data_entity, metadata_descriptor, read, root, write};
+use rocraters::ro_crate::rocrate::RoCrate;
+use rocraters::ro_crate::{constraints, data_entity, metadata_descriptor, read, root, write};
 use serde_json::Value as JsonValue;
 use serde_json::{json, to_string_pretty};
 use std::collections::HashMap;
@@ -487,7 +488,7 @@ fn add_dynamic_entity() -> Option<HashMap<String, EntityValue>> {
             let bvalue = parse_bool(value);
             match bvalue {
                 Ok(value) => {
-                    dynamic_entity.insert(key, EntityValue::EntityBool(Some(value)));
+                    dynamic_entity.insert(key, EntityValue::EntityBool(value));
                 }
                 Err(e) => println!("An error occurred: {}", e),
             }

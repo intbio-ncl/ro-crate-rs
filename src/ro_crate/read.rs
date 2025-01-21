@@ -32,9 +32,41 @@ pub fn read_crate(crate_path: &PathBuf, validation_level: i8) -> Result<RoCrate,
                     }
                 }
             }
-            Err(e) => Err(CrateReadError::from(e)),
+            Err(e) => {
+                // This is a simplified method for being able to parse None
+                // values without having to rebuild a custom Value deserialiser.
+                // None is handled explicitly because it is not JSON synatx but
+                // could be common with python workflows. As such, it is replaced by
+                // null as this enables the value parser to continue
+                //
+                // This will error and highlight the specific point of failure,
+                // however will try and continue.
+                //
+                // DO NOT REMOVE UNLESS BUILDING CUSTOM DESERIALISER FOR GRAPHVECTOR
+                println!("Error in parsing {}", e);
+                let normalised = data.replace(": None", ": null");
+                match serde_json::from_str::<RoCrate>(&normalised) {
+                    Ok(rocrate) => {
+                        if validation_level == 0 {
+                            Ok(rocrate)
+                        } else {
+                            match validity_wrapper(&rocrate, validation_level) {
+                                Ok(_) => Ok(rocrate),
+                                Err(e) => Err(e),
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        println!("1 | failed at rocrate parse");
+                        Err(CrateReadError::from(e))
+                    }
+                }
+            }
         },
-        Err(e) => Err(CrateReadError::from(e)),
+        Err(e) => {
+            println!("Failed at reading to string");
+            Err(CrateReadError::from(e))
+        }
     }
 }
 
@@ -58,7 +90,36 @@ pub fn read_crate_obj(crate_obj: &str, validation_level: i8) -> Result<RoCrate, 
                 }
             }
         }
-        Err(e) => Err(CrateReadError::from(e)),
+        Err(e) => {
+            // This is a simplified method for being able to parse None
+            // values without having to rebuild a custom Value deserialiser.
+            // None is handled explicitly because it is not JSON synatx but
+            // could be common with python workflows. As such, it is replaced by
+            // null as this enables the value parser to continue
+            //
+            // This will error and highlight the specific point of failure,
+            // however will try and continue.
+            //
+            // DO NOT REMOVE UNLESS BUILDING CUSTOM DESERIALISER FOR GRAPHVECTOR
+            println!("Error in parsing {}", e);
+            let normalised = crate_obj.replace(": None", ": null");
+            match serde_json::from_str::<RoCrate>(&normalised) {
+                Ok(rocrate) => {
+                    if validation_level == 0 {
+                        Ok(rocrate)
+                    } else {
+                        match validity_wrapper(&rocrate, validation_level) {
+                            Ok(_) => Ok(rocrate),
+                            Err(e) => Err(e),
+                        }
+                    }
+                }
+                Err(e) => {
+                    println!("1 | failed at rocrate parse");
+                    Err(CrateReadError::from(e))
+                }
+            }
+        }
     }
 }
 
@@ -249,6 +310,7 @@ pub enum ValidationResult {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
 
     fn fixture_path(relative_path: &str) -> PathBuf {
@@ -260,6 +322,7 @@ mod tests {
         let path = fixture_path("_ro-crate-metadata-minimal.json");
 
         let crate_result = read_crate(&path, 0);
+        println!("{:?}", crate_result);
         assert!(crate_result.is_ok());
     }
 
@@ -273,7 +336,7 @@ mod tests {
 
     #[test]
     fn test_parse_zip() {
-        let zip = parse_zip("tests/fixtures/test_experiment/test_experiment.zip", 0);
+        let zip = parse_zip("tests/fixtures/zip_test/fixtures.zip", 0);
         assert!(zip.is_ok());
     }
 

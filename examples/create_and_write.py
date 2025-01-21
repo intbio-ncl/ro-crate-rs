@@ -93,4 +93,4 @@ crate.write()
 crate = read("ro-crate-metadata.json", 1)
 
 # Zip the crate to get all data
-# zip("ro-crate-metadata.json", True, 2)
+zip("ro-crate-metadata.json", True, 2, True)

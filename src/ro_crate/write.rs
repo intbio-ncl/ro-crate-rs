@@ -434,7 +434,7 @@ fn get_noncontained_paths(
             let resolved_path = rocrate_path.join(path.unwrap()).canonicalize();
             println!("Resolved path: {:?}", resolved_path);
             match resolved_path {
-                Ok(abs_path) => { 
+                Ok(abs_path) => {
                     println!("Can confirm: {:?}", abs_path);
                     if abs_path.exists() {
                         println!("Exists: {:?}", abs_path);
@@ -596,20 +596,26 @@ mod write_crate_tests {
     #[test]
     fn test_construct_paths() {
         let cwd = env::current_dir().unwrap();
-        let path = fixture_path("test_experiment/_ro-crate-metadata-minimal.json").canonicalize().unwrap();
+        let path = fixture_path("test_experiment/_ro-crate-metadata-minimal.json")
+            .canonicalize()
+            .unwrap();
 
         let paths = construct_paths(&path).unwrap();
 
         assert_eq!(paths.absolute_path, cwd.join(&path));
         assert_eq!(
             paths.root_path,
-            cwd.join(PathBuf::from("tests/fixtures/test_experiment")).canonicalize().unwrap()
+            cwd.join(PathBuf::from("tests/fixtures/test_experiment"))
+                .canonicalize()
+                .unwrap()
         );
         assert_eq!(
             paths.zip_file_name,
-            cwd.join(PathBuf::from(
-                "tests/fixtures/test_experiment/test_experiment.zip"
-            ).canonicalize().unwrap())
+            cwd.join(
+                PathBuf::from("tests/fixtures/test_experiment/test_experiment.zip")
+                    .canonicalize()
+                    .unwrap()
+            )
         );
     }
 
@@ -654,10 +660,16 @@ mod write_crate_tests {
             directory_walk(&mut rocrate, &zip_paths, &mut zip_data, false).unwrap();
 
         let test_vec: Vec<PathBuf> = vec![
-            cwd.join(PathBuf::from("tests/fixtures/test_experiment/data.csv").canonicalize().unwrap()),
-            cwd.join(PathBuf::from(
-                "tests/fixtures/test_experiment/text_1.txt",
-            ).canonicalize().unwrap()),
+            cwd.join(
+                PathBuf::from("tests/fixtures/test_experiment/data.csv")
+                    .canonicalize()
+                    .unwrap(),
+            ),
+            cwd.join(
+                PathBuf::from("tests/fixtures/test_experiment/text_1.txt")
+                    .canonicalize()
+                    .unwrap(),
+            ),
         ];
 
         assert_eq!(directory_contents, test_vec);
@@ -713,11 +725,13 @@ mod write_crate_tests {
         url_types.insert("backblaze://bucket-name/object-key", false); // Backblaze B2 Storage
         url_types.insert("rackspace://container-name/object-name", false); // Rackspace Cloud Files
         url_types.insert("oracle://bucket-name/object-key", false); // Oracle Cloud Object Storage
-        
 
         // Fragment ref
         url_types.insert("#test", true); // Fragment ref
-        url_types.insert("main.nf#main/FAMOSAB_WRROCMETATEST:WRROCMETATEST:FASTP", true);
+        url_types.insert(
+            "main.nf#main/FAMOSAB_WRROCMETATEST:WRROCMETATEST:FASTP",
+            true,
+        );
 
         // File Paths (true)
         url_types.insert("file:///C:/Windows/System32/drivers/etc/hosts", true); // Windows File Path
@@ -746,7 +760,6 @@ mod write_crate_tests {
         }
     }
 
-    
     fn user_root_unix(mut path_types: HashMap<&str, bool>) -> HashMap<&str, bool> {
         if !cfg!(windows) {
             path_types.insert("~/.cargo/env", true); // Relative Path
@@ -768,7 +781,7 @@ mod write_crate_tests {
         path_types.insert("text_1.txt", false); // Linux Absolute Path
         path_types.insert("#fragment", false); // Relative Path
 
-       path_types = user_root_unix(path_types); //Check tilde paths
+        path_types = user_root_unix(path_types); //Check tilde paths
 
         // abs path but not relative
         let abs_not = cwd

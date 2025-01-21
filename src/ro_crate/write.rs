@@ -656,10 +656,10 @@ mod write_crate_tests {
         );
         */
 
-        let directory_contents =
+        let mut directory_contents =
             directory_walk(&mut rocrate, &zip_paths, &mut zip_data, false).unwrap();
 
-        let test_vec: Vec<PathBuf> = vec![
+        let mut test_vec: Vec<PathBuf> = vec![
             cwd.join(
                 PathBuf::from("tests/fixtures/test_experiment/data.csv")
                     .canonicalize()
@@ -671,6 +671,9 @@ mod write_crate_tests {
                     .unwrap(),
             ),
         ];
+
+        directory_contents.sort();
+        test_vec.sort();
 
         assert_eq!(directory_contents, test_vec);
     }

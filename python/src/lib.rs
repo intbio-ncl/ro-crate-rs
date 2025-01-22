@@ -267,9 +267,15 @@ fn read_zip(obj: &str, validation_level: i8) -> PyResult<PyRoCrate> {
 
 /// Targets a ro-crate and zips directory contents
 #[pyfunction]
-fn zip(crate_path: &str, external: bool, validation_level: i8, flatten: bool) -> PyResult<()> {
+fn zip(
+    crate_path: &str,
+    external: bool,
+    validation_level: i8,
+    flatten: bool,
+    unique: bool,
+) -> PyResult<()> {
     let path = Path::new(crate_path).to_path_buf();
-    let _ = rs_zip_crate(&path, external, validation_level, flatten);
+    let _ = rs_zip_crate(&path, external, validation_level, flatten, unique);
     Ok(())
 }
 

@@ -128,7 +128,7 @@ class TestApi(unittest.TestCase):
 
         # TODO: FIX
         crate_path = self.path / Path("tests/fixtures/test_experiment/_ro-crate-metadata-minimal.json")
-        zip(str(crate_path), True, 1, False)
+        zip(str(crate_path), True, 1, False, False)
 
         self.assertTrue(Path.exists(self.path / Path("tests/fixtures/test_experiment/test_experiment.zip")))
 

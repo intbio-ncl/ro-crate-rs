@@ -17,7 +17,7 @@ use chrono::prelude::*;
 use pyo3::exceptions::PyIOError;
 use pyo3::{
     prelude::*,
-    types::{PyDict, PyList},
+    types::{PyDict, PyList, PyString},
 };
 use std::collections::HashMap;
 use std::path::Path;
@@ -95,6 +95,22 @@ impl PyRoCrate {
     #[staticmethod]
     fn new_default() -> Self {
         PyRoCrate::default()
+    }
+
+    fn get_all_context(&mut self, py: Python) -> PyResult<Py<PyList>> {
+        let test2 = self.inner.context.get_all_context();
+        let py_list = PyList::new(py, test2.iter().map(|s| s.as_str()))?;
+        Ok(py_list.into())
+    }
+
+    fn get_specific_context(&mut self, py: Python, context: PyObject) -> PyResult<Py<PyString>> {
+        let context_str: &str = context.extract(py)?;
+        let specific_context = self
+            .inner
+            .context
+            .get_specific_context(context_str)
+            .unwrap();
+        Ok(PyString::new(py, &specific_context).into())
     }
 
     /// Gets a specified entity based upon ID

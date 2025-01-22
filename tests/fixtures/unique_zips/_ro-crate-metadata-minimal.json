@@ -1,5 +1,6 @@
-{ "@context": ["https://w3id.org/ro/crate/1.1/context",{"@base" : "urn:uuid:01234567-89ab-cdef-0123-456789abcdef"}],
+{ "@context": "https://w3id.org/ro/crate/1.1/context", 
   "@graph": [
+
  {
     "@type": "CreativeWork",
     "@id": "ro-crate-metadata.json",
@@ -13,7 +14,8 @@
     "datePublished": "2017",
     "name": "Data files associated with the manuscript:Effects of facilitated family case conferencing for ...",
     "description": "Palliative care planning for nursing home residents with advanced dementia ...",
-    "license": {"@id": "https://creativecommons.org/licenses/by-nc-sa/3.0/au/"}
+    "license": {"@id": "https://creativecommons.org/licenses/by-nc-sa/3.0/au/"},
+    "value": None
  },
  {
   "@id": "https://creativecommons.org/licenses/by-nc-sa/3.0/au/",

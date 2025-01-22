@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
+use uuid::Uuid;
 /// Defines the JSON-LD contexts in an RO-Crate, facilitating flexible context specification.
 ///
 /// This enum models the `@context` field's variability in RO-Crates, enabling the use of external URLs,
@@ -154,6 +155,65 @@ impl RoCrateContext {
         }
         valid_context
     }
+
+    pub fn get_specific_context(&self, context_key: &str) -> Option<String> {
+        match self {
+            RoCrateContext::ExtendedContext(context) => {
+                for item in context {
+                    match item {
+                        ContextItem::EmbeddedContext(embedded) => {
+                            if let Some(value) = embedded.get(context_key) {
+                                return Some(value.clone());
+                            }
+                        }
+                        ContextItem::ReferenceItem(_) => {
+                            // Skip ReferenceItems as they don't contain key-value pairs
+                        }
+                    }
+                }
+                None
+            }
+            RoCrateContext::ReferenceContext(_reference) => None,
+            RoCrateContext::EmbeddedContext(_context) => None,
+        }
+    }
+
+    pub fn add_urn_uuid(&mut self) {
+        match self {
+            RoCrateContext::ExtendedContext(context) => {
+                for x in context {
+                    match x {
+                        ContextItem::EmbeddedContext(ref mut embedded) => {
+                            let urn_found = embedded
+                                .get("@base")
+                                .is_some_and(|value| value.starts_with("urn:uuid:"));
+                            if !urn_found {
+                                embedded.insert(
+                                    "@base".to_string(),
+                                    format!("urn:uuid:{}", Uuid::now_v7()),
+                                );
+                            }
+                        }
+                        ContextItem::ReferenceItem(_) => {
+                            continue;
+                        }
+                    }
+                }
+            }
+            RoCrateContext::ReferenceContext(reference) => {
+                let mut base_map = HashMap::new();
+                base_map.insert("@base".to_string(), format!("urn:uuid:{}", Uuid::now_v7()));
+
+                *self = RoCrateContext::ExtendedContext(vec![
+                    ContextItem::ReferenceItem(reference.clone()),
+                    ContextItem::EmbeddedContext(base_map),
+                ]);
+            }
+            RoCrateContext::EmbeddedContext(context) => {
+                println!("EmbeddedContext legacy of {:?}", context)
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -182,5 +242,32 @@ mod write_crate_tests {
         fixture_vec.sort();
 
         assert_eq!(context, fixture_vec);
+    }
+
+    #[test]
+    fn test_add_urn() {
+        let path = fixture_path("_ro-crate-metadata-complex-context.json");
+        let mut rocrate = read_crate(&path, 0).unwrap();
+
+        let mut context = rocrate.context.get_all_context();
+        assert_eq!(context.len(), 3);
+
+        rocrate.context.add_urn_uuid();
+        context = rocrate.context.get_all_context();
+
+        assert_eq!(context.len(), 4);
+    }
+
+    #[test]
+    fn test_get_context_from_key() {
+        let path = fixture_path("_ro-crate-metadata-complex-context.json");
+        let mut rocrate = read_crate(&path, 0).unwrap();
+
+        let specific_context = rocrate.context.get_specific_context("education");
+
+        assert_eq!(
+            specific_context.unwrap(),
+            "https://criminalcharacters.com/vocab#education"
+        );
     }
 }

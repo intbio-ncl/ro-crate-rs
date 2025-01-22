@@ -120,14 +120,25 @@ pub fn zip_crate(
     external: bool,
     validation_level: i8,
     flatten: bool,
+    unique: bool,
 ) -> Result<(), ZipError> {
     // After prepping create the initial zip file
-    let zip_paths = construct_paths(crate_path).unwrap();
-
-    let mut zip_data = build_zip(&zip_paths).unwrap();
+    let mut zip_paths = construct_paths(crate_path).unwrap();
 
     // Opens target crate ready for update
     let mut rocrate = read_crate(&zip_paths.absolute_path, validation_level).unwrap();
+
+    // Attach unique identifier if not already present
+    rocrate.context.add_urn_uuid();
+    println!("{:?}", zip_paths);
+    if unique {
+        let base_id = rocrate.context.get_specific_context("@base").unwrap();
+
+        let stripped_id = format!("{}.zip", base_id.strip_prefix("urn:uuid:").unwrap());
+        zip_paths.zip_file_name = zip_paths.root_path.join(stripped_id);
+    }
+    println!("{:?}", zip_paths);
+    let mut zip_data = build_zip(&zip_paths).unwrap();
 
     let _ = directory_walk(&mut rocrate, &zip_paths, &mut zip_data, flatten);
 
@@ -139,7 +150,7 @@ pub fn zip_crate(
 
     Ok(())
 }
-
+#[derive(Debug)]
 pub struct RoCrateZipPaths {
     absolute_path: PathBuf,
     root_path: PathBuf,
@@ -581,7 +592,7 @@ mod write_crate_tests {
     fn test_zip_crate_basic() {
         let path = fixture_path("test_experiment/_ro-crate-metadata-minimal.json");
 
-        let zipped = zip_crate(&path, false, 0, false);
+        let zipped = zip_crate(&path, false, 0, false, false);
         println!("{:?}", zipped);
     }
 
@@ -589,7 +600,15 @@ mod write_crate_tests {
     fn test_zip_crate_external_full() {
         let path = fixture_path("test_experiment/_ro-crate-metadata-minimal.json");
 
-        let zipped = zip_crate(&path, true, 0, false);
+        let zipped = zip_crate(&path, true, 0, false, false);
+        println!("{:?}", zipped);
+    }
+
+    #[test]
+    fn test_zip_crate_external_full_unique() {
+        let path = fixture_path("unique_zips/_ro-crate-metadata-minimal.json");
+
+        let zipped = zip_crate(&path, true, 0, false, true);
         println!("{:?}", zipped);
     }
 

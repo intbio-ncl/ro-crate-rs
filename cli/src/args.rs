@@ -219,6 +219,9 @@ pub struct ZipCrateCommand {
     // Flatten contents to remove folder stucture in zip
     #[clap(short, long, default_value_t = false)]
     pub flatten: bool,
+    // Renames zip with uuidv7
+    #[clap(short, long, default_value_t = false)]
+    pub unique: bool,
 }
 
 #[derive(Debug, Subcommand)]

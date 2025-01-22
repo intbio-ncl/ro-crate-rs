@@ -257,7 +257,7 @@ fn main() {
                     path = crate_path(zip_command.target_crate.as_str());
                 }
                 println!("{:?}", path);
-                let _ = zip_crate(&path, true, 1, zip_command.flatten);
+                let _ = zip_crate(&path, true, 1, zip_command.flatten, zip_command.unique);
             }
         },
         CrateAction::Validate(validate_command) => match validate_command {

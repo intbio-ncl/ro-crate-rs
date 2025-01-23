@@ -214,6 +214,14 @@ impl RoCrateContext {
             }
         }
     }
+
+    pub fn get_urn_uuid(&self) -> Option<String> {
+        let base = self.get_specific_context("@base");
+        match base {
+            Some(uuid) => Some(uuid.strip_prefix("urn:uuid:").unwrap().to_string()),
+            None => None,
+        }
+    }
 }
 
 #[cfg(test)]

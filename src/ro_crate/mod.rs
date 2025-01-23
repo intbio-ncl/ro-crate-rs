@@ -7,6 +7,7 @@
 pub mod constraints;
 pub mod context;
 pub mod contextual_entity;
+pub mod convert;
 pub mod data_entity;
 pub mod graph_vector;
 pub mod metadata_descriptor;

@@ -114,6 +114,11 @@ impl PyRoCrate {
         Ok(PyString::new(py, &specific_context).into())
     }
 
+    fn get_urn_uuid(&mut self, py: Python) -> PyResult<Py<PyString>> {
+        let urn = self.inner.context.get_urn_uuid().unwrap();
+        Ok(PyString::new(py, &urn).into())
+    }
+
     /// Gets a specified entity based upon ID
     fn get_entity(&mut self, py: Python, id: &str) -> PyResult<PyObject> {
         match self.inner.get_entity(id) {

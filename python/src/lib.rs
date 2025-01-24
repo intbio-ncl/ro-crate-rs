@@ -4,6 +4,7 @@ mod utils;
 extern crate chrono;
 use ::rocraters::ro_crate::constraints::*;
 use ::rocraters::ro_crate::context::{ContextItem, RoCrateContext};
+use ::rocraters::ro_crate::convert::{to_df, write_csv, write_parquet as wr_par};
 use ::rocraters::ro_crate::graph_vector::GraphVector;
 use ::rocraters::ro_crate::metadata_descriptor::MetadataDescriptor;
 use ::rocraters::ro_crate::read::parse_zip;
@@ -20,7 +21,7 @@ use pyo3::{
     types::{PyDict, PyList, PyString},
 };
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// PyO3 compatible wrapper around RoCrate struct
 #[pyclass]
@@ -281,6 +282,15 @@ fn read_zip(obj: &str, validation_level: i8) -> PyResult<PyRoCrate> {
     Ok(PyRoCrate::from(rocrate))
 }
 
+// Writes to parquet
+#[pyfunction]
+fn write_parquet(rocrate: &PyRoCrate, path: &str) {
+    let mut df = to_df(&rocrate.inner);
+
+    let target_path = PathBuf::from(path);
+    wr_par(&mut df, target_path);
+}
+
 /// Targets a ro-crate and zips directory contents
 #[pyfunction]
 fn zip(
@@ -349,5 +359,6 @@ fn rocraters(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(read_object, m)?)?;
     m.add_function(wrap_pyfunction!(read_zip, m)?)?;
     m.add_function(wrap_pyfunction!(zip, m)?)?;
+    m.add_function(wrap_pyfunction!(write_parquet, m)?)?;
     Ok(())
 }

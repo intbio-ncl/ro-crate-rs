@@ -44,13 +44,21 @@ pub fn to_df(rocrate: &RoCrate) -> DataFrame {
     .unwrap()
 }
 
-pub fn to_csv(df: &mut DataFrame, path: PathBuf) {
+pub fn write_csv(df: &mut DataFrame, path: PathBuf) {
     let mut file = std::fs::File::create(path).unwrap();
     CsvWriter::new(&mut file).finish(df).unwrap();
 }
-pub fn to_parquet(df: &mut DataFrame, path: PathBuf) {
+pub fn write_parquet(df: &mut DataFrame, path: PathBuf) {
     let mut file = std::fs::File::create(path).unwrap();
     ParquetWriter::new(&mut file).finish(df).unwrap();
+}
+
+pub fn to_parquet(df: &mut DataFrame) -> Result<u64, PolarsError> {
+    // Create an in-memory buffer (Vec<u8>)
+    let mut buffer: Vec<u8> = Vec::new();
+
+    // Write the DataFrame to the Parquet buffer
+    ParquetWriter::new(&mut buffer).finish(df)
 }
 
 struct CrateFrame {
@@ -242,9 +250,9 @@ fn frame_graph(crate_frame: &mut CrateFrame, rocrate: &RoCrate) {
 
 #[cfg(test)]
 mod write_crate_tests {
-    use crate::ro_crate::convert::to_csv;
     use crate::ro_crate::convert::to_df;
-    use crate::ro_crate::convert::to_parquet;
+    use crate::ro_crate::convert::write_csv;
+    use crate::ro_crate::convert::write_parquet;
     use crate::ro_crate::read::read_crate;
     use std::path::Path;
     use std::path::PathBuf;
@@ -261,8 +269,8 @@ mod write_crate_tests {
         let mut df = to_df(&rocrate);
         let path_csv = fixture_path("test-ro-crate.csv");
         let path_parquet = fixture_path("test-ro-crate.parquet");
-        to_csv(&mut df, path_csv);
-        to_parquet(&mut df, path_parquet);
+        write_csv(&mut df, path_csv);
+        write_parquet(&mut df, path_parquet);
     }
 
     #[test]
@@ -278,9 +286,9 @@ mod write_crate_tests {
         println!("Created dataframe");
         let path_csv = fixture_path("test-ro-crate.csv");
         let path_parquet = fixture_path("test-ro-crate.parquet");
-        to_csv(&mut df, path_csv);
+        write_csv(&mut df, path_csv);
         println!("CSV created");
-        to_parquet(&mut df, path_parquet);
+        write_parquet(&mut df, path_parquet);
         println!("Parquet created");
     }
 }

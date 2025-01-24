@@ -278,6 +278,8 @@ impl RoCrate {
             false
         }
     }
+
+    pub fn to_parquet(&mut self) {}
 }
 
 impl Default for RoCrate {

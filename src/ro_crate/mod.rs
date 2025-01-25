@@ -12,6 +12,7 @@ pub mod data_entity;
 pub mod graph_vector;
 pub mod metadata_descriptor;
 pub mod modify;
+pub mod object_storage;
 pub mod read;
 pub mod rocrate;
 pub mod root;

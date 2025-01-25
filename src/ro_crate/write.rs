@@ -505,7 +505,7 @@ fn get_absolute_path(relative_path: &Path) -> Option<PathBuf> {
 /// assert!(is_not_url("/path/to/file"));
 /// assert!(!is_not_url("http://example.com"));
 /// ```
-fn is_not_url(path: &str) -> bool {
+pub fn is_not_url(path: &str) -> bool {
     // Check if the path is likely a Windows extended-length path
     let is_extended_windows_path = path.starts_with(r"\\?\");
 

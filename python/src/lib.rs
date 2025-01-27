@@ -7,6 +7,7 @@ use ::rocraters::ro_crate::context::{ContextItem, RoCrateContext};
 use ::rocraters::ro_crate::convert::{to_df, write_csv, write_parquet as wr_par};
 use ::rocraters::ro_crate::graph_vector::GraphVector;
 use ::rocraters::ro_crate::metadata_descriptor::MetadataDescriptor;
+use ::rocraters::ro_crate::object_storage::relative_to_object_store;
 use ::rocraters::ro_crate::read::parse_zip;
 use ::rocraters::ro_crate::root::RootDataEntity;
 use ::rocraters::ro_crate::{
@@ -296,6 +297,11 @@ fn write_parquet(rocrate: &PyRoCrate, path: &str) {
     wr_par(&mut df, target_path);
 }
 
+#[pyfunction]
+fn prefix_object_id(rocrate: &mut PyRoCrate, object_root: &str) {
+    relative_to_object_store(&mut rocrate.inner, object_root);
+}
+
 /// Targets a ro-crate and zips directory contents
 #[pyfunction]
 fn zip(
@@ -365,5 +371,6 @@ fn rocraters(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(read_zip, m)?)?;
     m.add_function(wrap_pyfunction!(zip, m)?)?;
     m.add_function(wrap_pyfunction!(write_parquet, m)?)?;
+    m.add_function(wrap_pyfunction!(prefix_object_id, m)?)?;
     Ok(())
 }

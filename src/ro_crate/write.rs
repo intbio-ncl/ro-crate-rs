@@ -130,6 +130,9 @@ pub fn zip_crate(
 
     // Attach unique identifier if not already present
     rocrate.context.add_urn_uuid();
+    // This saves a modified copy with the updated urn -> prevents duplicate if already
+    // present
+    write_crate(&rocrate, "ro-crate-metadata.json".to_string());
     println!("{:?}", zip_paths);
     if unique {
         let base_id = rocrate.context.get_specific_context("@base").unwrap();
@@ -458,7 +461,9 @@ fn get_noncontained_paths(
                         //println!("8 | Failed to resolve ID: {:?}", id);
                     }
                 }
-                Err(_e) => {} //println!("{}", e),
+                Err(_e) => {
+                    println!("{}", _e)
+                }
             }
         }
     }

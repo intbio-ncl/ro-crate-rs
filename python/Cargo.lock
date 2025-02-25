@@ -2171,7 +2171,7 @@ dependencies = [
 
 [[package]]
 name = "ro-crate-rs"
-version = "0.4.9"
+version = "0.4.10"
 dependencies = [
  "chrono",
  "dirs",
@@ -2188,7 +2188,7 @@ dependencies = [
 
 [[package]]
 name = "rocraters-python"
-version = "0.4.4"
+version = "0.4.5"
 dependencies = [
  "chrono",
  "pyo3",

@@ -23,8 +23,11 @@ Built using PyO3 and maturin. Recommended to setup python venv, then install mat
 # Installation 
 
 ```bash
-pip install -i https://test.pypi.org/simple/ rocraters
+pip install rocraters
 ```
+
+If pip not available for your particular platform, you can build from source by 
+cloning this repository and building via maturin. 
 
 # Basic usage 
 
@@ -35,7 +38,7 @@ To create an empty RO-Crate, you need to do the following:
 from rocraters import PyRoCrateContext, PyRoCrate
 
 # Define context 
-context = PyRoCrateContext.from_string(" https://w3id.org/ro/crate/1.1/context")
+context = PyRoCrateContext.from_string("https://w3id.org/ro/crate/1.1/context")
 
 # Initialise empty crate 
 crate = PyRoCrate(context)
@@ -66,7 +69,9 @@ descriptor = {
 # Root data entity 
 root =  {
     "id": "./",
-    "type": "Dataset",
+    "type": "Dataset", 
+    "name": "Test Dataset",
+    "description": "Description of a test dataset",
     "datePublished": "2017",
     "license": {"id": "https://creativecommons.org/licenses/by-nc-sa/3.0/au/"}
 }
@@ -100,16 +105,22 @@ To then read a `ro-crate-metadata.json` file and load it in as a structured obje
 # New example
 from rocraters import read
 
-# Read RO-Crate at specified path 
-crate = read("ro-crate-metadata.json", True)
+# Read RO-Crate at specified path with validation level 1
+crate = read("ro-crate-metadata.json", 1)
 ```
+If required, you can also use `read_object` to read in a string of a ro-crate if querying as json response.
+
+Additionally, you can read the ro-crate directly from a zip file using `read_zip`
 
 To zip the folder and all contained directories within the `ro-crate-metadata.json` directory:
 ```python
 # new example 
 from rocraters import zip
 
-zip("ro-crate-metadata.json", True)
+# This zips the target ro-crate up into a zip file, pulling in externally 
+# definined files from their paths, with validation level 1, without flattening 
+# and naming the zip file as the UUID as defined in the URN. 
+zip("ro-crate-metadata.json", True, 1, False, True)
 ```
 
 # Modifying a RO-Crate 

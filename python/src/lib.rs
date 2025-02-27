@@ -207,7 +207,7 @@ impl PyRoCrate {
 
     /// Update the metadata descriptor with new data
     ///
-    /// Lazy update of metadata descriptor, finds id and overwrites the index.
+    /// Lazy update of metadata descriptor, finds id  and overwrites the index.
     /// Strongly recommended to extract index data, modify, then rewrite the
     /// modified index data as the update.
     fn update_descriptor(&mut self, py: Python, py_obj: PyObject) -> PyResult<()> {

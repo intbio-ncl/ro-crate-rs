@@ -35,16 +35,18 @@ The RO-Crate specification defines an RO-Crate as a JSON-LD file, consisting of 
 
 To create an empty RO-Crate, you need to do the following: 
 ```python
-from rocraters import PyRoCrateContext, PyRoCrate
+from rocraters import PyRoCrateContext, PyRoCrate, read, zip
 
-# Define context 
+# Define context
 context = PyRoCrateContext.from_string("https://w3id.org/ro/crate/1.1/context")
 
-# Initialise empty crate 
+# Initialise empty crate
 crate = PyRoCrate(context)
 
 # For an easy start, you can make a default crate!
 default_crate = PyRoCrate.new_default()
+
+print(f"Example of a default crate \n {default_crate}")
 ```
 
 Now, there are 4 primary objects (dictionaries) that can be added to the crate:
@@ -59,38 +61,43 @@ To populate the basic crate, with the essential keys to conform to specification
 
 ```python 
 # Continuation of the above examples 
-# Metadata descriptor 
+# Metadata descriptor
 descriptor = {
-        "type": "CreativeWork",
-        "id": "ro-crate-metadata.json",
-        "conformsTo": {"id": "https://w3id.org/ro/crate/1.1"},
-        "about": {"id": "./"}
+    "type": "CreativeWork",
+    "id": "ro-crate-metadata.json",
+    "conformsTo": {"id": "https://w3id.org/ro/crate/1.1"},
+    "about": {"id": "./"},
 }
-# Root data entity 
-root =  {
+
+# Root data entity
+root = {
     "id": "./",
-    "type": "Dataset", 
-    "name": "Test Dataset",
-    "description": "Description of a test dataset",
+    "type": "Dataset",
+    "name": "Example Crate",
+    "description": "Description of the Example Crate",
     "datePublished": "2017",
-    "license": {"id": "https://creativecommons.org/licenses/by-nc-sa/3.0/au/"}
+    "license": {"id": "https://creativecommons.org/licenses/by-nc-sa/3.0/au/"},
+    "author": {"id": "#johndoe"},
 }
-# Data entity 
-data = {
-    "id": "data_file.txt",
-    "type": "Dataset"
-}
-# Contextual entity 
+# Data entity
+data = {"id": "output/data_file.txt", "type": "Dataset", "name": "Data file name"}
+# Contextual entity
 contextual = {
     "id": "#JohnDoe",
     "type": "Person",
 }
 
-# Update the RO-Crate object 
+failed_data = {"id": "this_is_not_a_file.txt", "type": "Dataset"}
+
+# Update the RO-Crate object
 crate.update_descriptor(descriptor)
 crate.update_root(root)
 crate.update_data(data)
 crate.update_contextual(contextual)
+
+# This acts as an example of how if the file/ URI isn't valid as a potentially
+# accessible data entity, it loads as a contextual entity
+crate.update_data(failed_data)
 ```
 
 To then write the crate to a `ro-crate-metadata.json` file in the current working directory:
@@ -103,7 +110,6 @@ crate.write()
 To then read a `ro-crate-metadata.json` file and load it in as a structured object:
 ```python 
 # New example
-from rocraters import read
 
 # Read RO-Crate at specified path with validation level 1
 crate = read("ro-crate-metadata.json", 1)
@@ -119,7 +125,8 @@ from rocraters import zip
 
 # This zips the target ro-crate up into a zip file, pulling in externally 
 # definined files from their paths, with validation level 1, without flattening 
-# and naming the zip file as the UUID as defined in the URN. 
+# and naming the zip file as the UUID as defined in the URN. If you flatten
+# the zip file will not preserve directory structure
 zip("ro-crate-metadata.json", True, 1, False, True)
 ```
 

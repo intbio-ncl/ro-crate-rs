@@ -88,5 +88,6 @@ crate.write()
 # Final example of modified crate
 crate = read("ro-crate-metadata.json", 2)
 
-# Zip the crate to get all data
-zip("ro-crate-metadata.json", True, 2)
+# Zip the crate to get all data, pulling in external data, keeping the directory
+# structure and assigned the URN uuid as zip folder name
+zip("ro-crate-metadata.json", True, 2, False, True)

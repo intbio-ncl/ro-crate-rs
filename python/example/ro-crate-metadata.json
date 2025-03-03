@@ -1,5 +1,10 @@
 {
-  "@context": ["https://w3id.org/ro/crate/1.1/context", {"@base": "urn:uuid:test123"}],
+  "@context": [
+    "https://w3id.org/ro/crate/1.1/context",
+    {
+      "@base": "urn:uuid:01955ba6-bed5-7645-a126-a9fb3cbb2262"
+    }
+  ],
   "@graph": [
     {
       "@id": "ro-crate-metadata.json",
@@ -22,15 +27,7 @@
       },
       "author": {
         "@id": "#johndoe"
-      },
-      "hasPart": [
-        {
-          "@id": "output/data_file.txt"
-        },
-        {
-          "@id": "this_is_not_a_file.txt"
-        }
-      ]
+      }
     },
     {
       "@id": "output/data_file.txt",

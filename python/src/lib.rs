@@ -303,6 +303,7 @@ fn prefix_object_id(rocrate: &mut PyRoCrate, object_root: &str) {
 }
 
 /// Targets a ro-crate and zips directory contents
+/// Flatten removes directory structure in Zip
 #[pyfunction]
 fn zip(
     crate_path: &str,

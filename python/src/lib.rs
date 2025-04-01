@@ -154,8 +154,18 @@ impl PyRoCrate {
     /// Returns the crate's URN UUID.
     ///
     /// # Returns
-    /// A Python string containing the UUID (URN).
+    /// A Python string containing the UUIDv7 (URN).
     fn get_urn_uuid(&mut self, py: Python) -> PyResult<Py<PyString>> {
+        let urn = self.inner.context.get_urn_uuid().unwrap();
+        Ok(PyString::new(py, &urn).into())
+    }
+
+    /// Adds a URN UUID to crate
+    ///
+    /// # Returns
+    /// A Python string containing the UUIDv7 (URN)
+    fn add_urn_uuid(&mut self, py: Python) -> PyResult<Py<PyString>> {
+        self.inner.context.add_urn_uuid();
         let urn = self.inner.context.get_urn_uuid().unwrap();
         Ok(PyString::new(py, &urn).into())
     }

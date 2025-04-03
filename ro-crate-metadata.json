@@ -2,7 +2,7 @@
   "@context": [
     "https://w3id.org/ro/crate/1.1/context",
     {
-      "@base": "urn:uuid:01955bac-22c7-79a2-ac8c-980e0c3f1cfb"
+      "@base": "urn:uuid:0195fb5d-1b82-7e93-b70b-1c94c8e1133f"
     }
   ],
   "@graph": [
@@ -31,10 +31,10 @@
     {
       "@id": "https://creativecommons.org/licenses/by-nc-sa/3.0/au/",
       "@type": "CreativeWork",
-      "identifier": "https://creativecommons.org/licenses/by-nc-sa/3.0/au/",
       "description": "This work is licensed under the Creative Commons Attribution-NonCommercial-ShareAlike 3.0 Australia License. To view a copy of this license, visit http://creativecommons.org/licenses/by-nc-sa/3.0/au/ or send a letter to Creative Commons, PO Box 1866, Mountain View, CA 94042, USA.",
-      "name": "Attribution-NonCommercial-ShareAlike 3.0 Australia (CC BY-NC-SA 3.0 AU)",
-      "value": null
+      "value": null,
+      "identifier": "https://creativecommons.org/licenses/by-nc-sa/3.0/au/",
+      "name": "Attribution-NonCommercial-ShareAlike 3.0 Australia (CC BY-NC-SA 3.0 AU)"
     }
   ]
 }

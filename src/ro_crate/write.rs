@@ -13,7 +13,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use url::Url;
 use walkdir::WalkDir;
-use zip::{write::FileOptions, ZipWriter};
+use zip::{write::SimpleFileOptions, ZipWriter};
 
 /// Serializes and writes an RO-Crate object to a JSON file.
 ///
@@ -62,7 +62,7 @@ pub fn write_crate(rocrate: &RoCrate, name: String) {
 fn write_crate_to_zip(
     rocrate: &RoCrate,
     name: String,
-    mut zip_data: RoCrateZip,
+    zip_data: &mut RoCrateZip,
 ) -> Result<(), ZipError> {
     // Attempt to serialize the RoCrate object to a pretty JSON string
     let json_ld = serde_json::to_string_pretty(&rocrate)
@@ -74,15 +74,9 @@ fn write_crate_to_zip(
         .start_file(name, zip_data.options)
         .map_err(|e| ZipError::ZipOperationError(e.to_string()))?;
 
-    // Write the serialized JSON data to the file in the zip archive
     zip_data
         .zip
         .write_all(json_ld.as_bytes())
-        .map_err(|e| ZipError::ZipOperationError(e.to_string()))?;
-
-    zip_data
-        .zip
-        .finish()
         .map_err(|e| ZipError::ZipOperationError(e.to_string()))?;
 
     // If everything succeeded, return Ok(())
@@ -133,14 +127,14 @@ pub fn zip_crate(
     // This saves a modified copy with the updated urn -> prevents duplicate if already
     // present
     write_crate(&rocrate, "ro-crate-metadata.json".to_string());
-    println!("{:?}", zip_paths);
     if unique {
         let base_id = rocrate.context.get_specific_context("@base").unwrap();
 
         let stripped_id = format!("{}.zip", base_id.strip_prefix("urn:uuid:").unwrap());
         zip_paths.zip_file_name = zip_paths.root_path.join(stripped_id);
     }
-    println!("{:?}", zip_paths);
+    println!("ZIP PATH NAME {:?}", zip_paths.zip_file_name);
+
     let mut zip_data = build_zip(&zip_paths).unwrap();
 
     let _ = directory_walk(&mut rocrate, &zip_paths, &mut zip_data, flatten);
@@ -149,7 +143,13 @@ pub fn zip_crate(
         zip_data = zip_crate_external(&mut rocrate, zip_data, &zip_paths)?
     }
 
-    let _ = write_crate_to_zip(&rocrate, "ro-crate-metadata.json".to_string(), zip_data);
+    let _ = write_crate_to_zip(
+        &rocrate,
+        "ro-crate-metadata.json".to_string(),
+        &mut zip_data,
+    );
+
+    let _ = zip_data.zip.finish();
 
     Ok(())
 }
@@ -172,7 +172,6 @@ fn construct_paths(crate_path: &Path) -> Result<RoCrateZipPaths, Box<dyn std::er
         .ok_or(ZipError::FileNameConversionFailed)?;
 
     let zip_file_name = root_path.join(format!("{}.zip", zip_file_base_name));
-
     Ok(RoCrateZipPaths {
         absolute_path,
         root_path,
@@ -185,14 +184,17 @@ fn build_zip(path_information: &RoCrateZipPaths) -> Result<RoCrateZip, Box<dyn s
     let zip = ZipWriter::new(file);
 
     // Can change this to deflated for standard compression
-    let options = FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    let options = SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated)
+        .unix_permissions(0o755)
+        .large_file(true);
 
     Ok(RoCrateZip { zip, options })
 }
 
 pub struct RoCrateZip {
     zip: ZipWriter<File>,
-    options: FileOptions,
+    options: SimpleFileOptions,
 }
 
 /// Sole focus must be on present data
@@ -333,7 +335,7 @@ impl From<std::path::StripPrefixError> for ZipError {
 /// * `rocrate` - A mutable reference to the `RoCrate` object being packaged.
 /// * `crate_path` - The filesystem path to the directory containing the RO-Crate's metadata and data entities.
 /// * `zip` - A `ZipWriter<File>` for writing to the zip archive.
-/// * `options` - `FileOptions` determining how files are added to the archive (e.g., compression level).
+/// * `options` - `SimpleFileOptions` determining how files are added to the archive (e.g., compression level).
 ///
 /// # Returns
 /// Returns a `Result` containing the updated `ZipWriter<File>` on success, or a `ZipError` on failure,
@@ -359,19 +361,28 @@ pub fn zip_crate_external(
                 .ok_or(ZipError::FileNameConversionFailed)?;
             let zip_entry_name = format!("external/{}", file_name);
 
-            let mut file = fs::File::open(&path).map_err(ZipError::IoError)?;
+            if path.is_dir() {
+                // It's a directory -> recursively add all of its contents
+                add_directory_recursively(&path, &zip_entry_name, &mut zip_data)?;
 
-            zip_data
-                .zip
-                .start_file(&zip_entry_name, zip_data.options)
-                .map_err(|e| ZipError::ZipOperationError(e.to_string()))?;
+                rocrate.update_id_recursive(&id, &zip_entry_name);
+            } else if path.is_file() {
+                let mut file = fs::File::open(&path).map_err(ZipError::IoError)?;
 
-            let copy_result = io::copy(&mut file, &mut zip_data.zip).map_err(ZipError::IoError);
-            match copy_result {
-                Ok(_) => {
-                    rocrate.update_id_recursive(&id, &zip_entry_name);
+                zip_data
+                    .zip
+                    .start_file(&zip_entry_name, zip_data.options)
+                    .map_err(|e| ZipError::ZipOperationError(e.to_string()))?;
+
+                let copy_result = io::copy(&mut file, &mut zip_data.zip).map_err(ZipError::IoError);
+                match copy_result {
+                    Ok(_) => {
+                        rocrate.update_id_recursive(&id, &zip_entry_name);
+                    }
+                    Err(e) => return Err(e),
                 }
-                Err(e) => return Err(e),
+            } else {
+                println!("Skipping non-file, non-directory: {:?}", path);
             }
         }
     }
@@ -557,9 +568,50 @@ fn is_outside_base_folder(base_folder: &Path, file_path: &Path) -> bool {
     !file_path.starts_with(base_folder)
 }
 
+/// Recursively adds an entire directory (and subdirectories) into the ZIP under `zip_prefix/…`.
+fn add_directory_recursively(
+    base_dir: &Path,
+    zip_prefix: &str,
+    zip_data: &mut RoCrateZip,
+) -> Result<(), ZipError> {
+    // WalkDir will yield subdirectories and files.
+    for entry in WalkDir::new(base_dir).into_iter().filter_map(|e| e.ok()) {
+        let p = entry.path();
+        println!("p = {:?}", p);
+
+        // Figure out the path we want inside the zip. That’s basically:
+        //   zip_prefix + (path relative to base_dir)
+        let relative_subpath = match p.strip_prefix(base_dir) {
+            Ok(sub) => sub,
+            Err(e) => return Err(ZipError::PathError(e)),
+        };
+
+        // For example: "mydir/subdir/file.txt"
+        let zip_entry_name = format!("{}/{}", zip_prefix, relative_subpath.display());
+        println!("zp entry name: {:?}", zip_entry_name);
+        if p.is_dir() {
+            // Optional: add an explicit directory entry in the archive:
+            zip_data
+                .zip
+                .add_directory(zip_entry_name, zip_data.options)
+                .map_err(|e| ZipError::ZipOperationError(e.to_string()))?;
+        } else if p.is_file() {
+            let mut file = fs::File::open(p).map_err(ZipError::IoError)?;
+            println!("FILE: {:?}", file);
+            zip_data
+                .zip
+                .start_file(&zip_entry_name, zip_data.options)
+                .map_err(|e| ZipError::ZipOperationError(e.to_string()))?;
+            io::copy(&mut file, &mut zip_data.zip).map_err(ZipError::IoError)?;
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod write_crate_tests {
     use super::*;
+    use crate::ro_crate::read::parse_zip;
     use crate::ro_crate::read::read_crate;
     use std::collections::HashMap;
     use std::env;
@@ -596,17 +648,21 @@ mod write_crate_tests {
     #[test]
     fn test_zip_crate_basic() {
         let path = fixture_path("test_experiment/_ro-crate-metadata-minimal.json");
+        let path_zip = fixture_path("test_experiment/test_experiment.zip");
 
         let zipped = zip_crate(&path, false, 0, false, false);
         println!("{:?}", zipped);
+        let roc = parse_zip(path_zip.to_str().unwrap(), 0);
     }
 
     #[test]
     fn test_zip_crate_external_full() {
         let path = fixture_path("test_experiment/_ro-crate-metadata-minimal.json");
+        let path_zip = fixture_path("test_experiment/test_experiment.zip");
 
         let zipped = zip_crate(&path, true, 0, false, false);
         println!("{:?}", zipped);
+        let roc = parse_zip(path_zip.to_str().unwrap(), 0);
     }
 
     #[test]
@@ -658,7 +714,8 @@ mod write_crate_tests {
 
         let mut zip_data = RoCrateZip {
             zip: ZipWriter::new(File::create(&zip_paths.zip_file_name).unwrap()),
-            options: FileOptions::default().compression_method(zip::CompressionMethod::Deflated),
+            options: SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated),
         };
 
         let path = fixture_path("test_experiment/_ro-crate-metadata-minimal.json");
@@ -858,7 +915,8 @@ mod write_crate_tests {
 
         let zip_data = RoCrateZip {
             zip: ZipWriter::new(File::create(&zip_paths.zip_file_name).unwrap()),
-            options: FileOptions::default().compression_method(zip::CompressionMethod::Deflated),
+            options: SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated),
         };
 
         let _zipped = zip_crate_external(&mut rocrate, zip_data, &zip_paths);

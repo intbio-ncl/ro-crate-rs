@@ -256,8 +256,18 @@ fn main() {
                 } else {
                     path = crate_path(zip_command.target_crate.as_str());
                 }
-                println!("{:?}", path);
-                let _ = zip_crate(&path, true, 1, zip_command.flatten, zip_command.unique);
+                println!(
+                    "Path: {:?}, External: {:?}, Unique: {:?}, Flatted: {:?}",
+                    path, zip_command.external, zip_command.flatten, zip_command.unique
+                );
+                let zip = zip_crate(
+                    &path,
+                    zip_command.external,
+                    1,
+                    zip_command.flatten,
+                    zip_command.unique,
+                );
+                println!("ZIP OUTPUT: {:?}", zip);
             }
         },
         CrateAction::Validate(validate_command) => match validate_command {

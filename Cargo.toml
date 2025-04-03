@@ -1,6 +1,6 @@
 [package]
 name = "ro-crate-rs"
-version = "0.4.11"
+version = "0.4.12"
 edition = "2021"
 repository = "https://github.com/intbio-ncl/ro-crate-rs"
 authors = ["Matt Burridge <m.burridge1@newcastle.ac.uk>"]
@@ -27,7 +27,7 @@ chrono = { version = "0.4.31", features = ["serde"]}
 uuid = { version = "1.0", features = ["v4", "v7"] }
 rand = "0.8"
 url = "2.2"
-zip = "0.6.6"
+zip = "2.4.2"
 walkdir = "2"
 reqwest = { version = "0.11", features =  ["blocking", "json"], default-features = false}
 dirs = "6.0.0"

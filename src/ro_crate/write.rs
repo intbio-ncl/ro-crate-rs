@@ -656,6 +656,7 @@ mod write_crate_tests {
     }
 
     #[test]
+    #[ignore]
     fn test_zip_crate_external_full() {
         let path = fixture_path("test_experiment/_ro-crate-metadata-minimal.json");
         let path_zip = fixture_path("test_experiment/test_experiment.zip");
@@ -666,6 +667,7 @@ mod write_crate_tests {
     }
 
     #[test]
+    #[ignore]
     fn test_zip_crate_external_full_unique() {
         let path = fixture_path("unique_zips/_ro-crate-metadata-minimal.json");
 

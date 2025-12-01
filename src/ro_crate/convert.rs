@@ -16,30 +16,27 @@ use polars::prelude::*;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+/// Convert crate to df with G,S,P,O rdf columns
 pub fn to_df(rocrate: &RoCrate) -> DataFrame {
     // Get uuid
-    let uuid = rocrate.context.get_urn_uuid().unwrap();
+    let g = rocrate.context.get_urn_uuid().unwrap();
 
     // Build the context
     let mut crate_frame = CrateFrame {
-        uuid,
-        id: Vec::new(),
-        key: Vec::new(),
-        value: Vec::new(),
+        g,
+        s: Vec::new(),
+        p: Vec::new(),
+        o: Vec::new(),
     };
 
     frame_context(&mut crate_frame, &rocrate.context);
     frame_graph(&mut crate_frame, rocrate);
 
     DataFrame::new(vec![
-        Series::new(
-            "uuid".into(),
-            vec![crate_frame.uuid.clone(); crate_frame.id.len()],
-        )
-        .into(),
-        Series::new("id".into(), crate_frame.id.clone()).into(),
-        Series::new("key".into(), crate_frame.key.clone()).into(),
-        Series::new("value".into(), crate_frame.value.clone()).into(),
+        Series::new("g".into(), vec![crate_frame.g.clone(); crate_frame.s.len()]).into(),
+        Series::new("s".into(), crate_frame.s.clone()).into(),
+        Series::new("p".into(), crate_frame.p.clone()).into(),
+        Series::new("o".into(), crate_frame.o.clone()).into(),
     ])
     .unwrap()
 }
@@ -62,17 +59,17 @@ pub fn to_parquet(df: &mut DataFrame) -> Result<u64, PolarsError> {
 }
 
 struct CrateFrame {
-    uuid: String,
-    id: Vec<String>,
-    key: Vec<String>,
-    value: Vec<String>,
+    g: String,
+    s: Vec<String>,
+    p: Vec<String>,
+    o: Vec<String>,
 }
 
 impl CrateFrame {
-    fn push_data(&mut self, id: &str, key: &str, value: &str) {
-        self.id.push(String::from(id));
-        self.key.push(String::from(key));
-        self.value.push(String::from(value));
+    fn push_data(&mut self, s: &str, p: &str, o: &str) {
+        self.s.push(String::from(s));
+        self.p.push(String::from(p));
+        self.o.push(String::from(o));
     }
 }
 

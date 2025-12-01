@@ -2,7 +2,7 @@
   "@context": [
     "https://w3id.org/ro/crate/1.1/context",
     {
-      "@base": "urn:uuid:01955bac-22c7-79a2-ac8c-980e0c3f1cfb"
+      "@base": "urn:uuid:019ada66-3162-7101-90df-16d8ede6a209"
     }
   ],
   "@graph": [
@@ -25,15 +25,15 @@
       "license": {
         "@id": "https://creativecommons.org/licenses/by-nc-sa/3.0/au/"
       },
-      "identifier": "https://doi.org/10.4225/59/59672c09f4a4b",
-      "value": null
+      "value": null,
+      "identifier": "https://doi.org/10.4225/59/59672c09f4a4b"
     },
     {
       "@id": "https://creativecommons.org/licenses/by-nc-sa/3.0/au/",
       "@type": "CreativeWork",
-      "identifier": "https://creativecommons.org/licenses/by-nc-sa/3.0/au/",
-      "description": "This work is licensed under the Creative Commons Attribution-NonCommercial-ShareAlike 3.0 Australia License. To view a copy of this license, visit http://creativecommons.org/licenses/by-nc-sa/3.0/au/ or send a letter to Creative Commons, PO Box 1866, Mountain View, CA 94042, USA.",
       "name": "Attribution-NonCommercial-ShareAlike 3.0 Australia (CC BY-NC-SA 3.0 AU)",
+      "description": "This work is licensed under the Creative Commons Attribution-NonCommercial-ShareAlike 3.0 Australia License. To view a copy of this license, visit http://creativecommons.org/licenses/by-nc-sa/3.0/au/ or send a letter to Creative Commons, PO Box 1866, Mountain View, CA 94042, USA.",
+      "identifier": "https://creativecommons.org/licenses/by-nc-sa/3.0/au/",
       "value": null
     }
   ]

@@ -2,7 +2,7 @@ Working in Alpha
 
 # Overview 
 
-ro-crate-rs is a rust library, python library and CLI tool for interfacing with [Reserach Object Crates](https://www.researchobject.org/ro-crate/). 
+ro-crate-rs is a rust library, python library and CLI tool for interfacing with [Research Object Crates](https://www.researchobject.org/ro-crate/). 
 This implementation was specifically created to address the challenges of data 
 handling on automated robotic systems within an automated synthetic biology lab,
 however it's noted that this could have more general applicability to other environments.

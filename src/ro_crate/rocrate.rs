@@ -279,6 +279,7 @@ impl RoCrate {
         }
     }
 
+    #[cfg(feature = "parquet")]
     pub fn to_parquet(&mut self) {}
 }
 

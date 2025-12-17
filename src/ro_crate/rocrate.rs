@@ -6,7 +6,7 @@
 //! # Note
 //! This should definitly be split up in future implementations
 
-use crate::ro_crate::constraints::EntityValue;
+use crate::ro_crate::constraints::{EntityValue, Id};
 use crate::ro_crate::context::{ContextItem, RoCrateContext};
 use crate::ro_crate::graph_vector::GraphVector;
 use crate::ro_crate::modify::DynamicEntityManipulation;
@@ -288,6 +288,27 @@ impl RoCrate {
 
     #[cfg(feature = "parquet")]
     pub fn to_parquet(&mut self) {}
+
+    /// Returns all entities that are referenced rocrates
+    pub fn get_subcrates(&self) -> Vec<&GraphVector> {
+        self.graph
+            .iter()
+            .filter_map(|entry| {
+                if let GraphVector::DataEntity(data_entitiy) = entry {
+                    if let Some(dynamic) = &data_entitiy.dynamic_entity {
+                        if let Some(EntityValue::EntityId(Id::Id(crate_path))) =
+                            dynamic.get("conformsTo")
+                        {
+                            if crate_path.contains("https://w3id.org/ro/crate") {
+                                return Some(entry);
+                            }
+                        }
+                    }
+                }
+                None
+            })
+            .collect()
+    }
 }
 
 impl Default for RoCrate {

@@ -4,6 +4,7 @@ use crate::ro_crate::data_entity::DataEntity;
 use crate::ro_crate::metadata_descriptor::MetadataDescriptor;
 use crate::ro_crate::modify::DynamicEntityManipulation;
 use crate::ro_crate::root::RootDataEntity;
+use log::error;
 use serde::de::Error as SerdeError;
 use serde::ser::Serializer;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -283,7 +284,7 @@ impl GraphVector {
                 GraphVector::ContextualEntity(entity) => entity.find_value_details(&entity_value),
             }
         } else {
-            eprintln!("Failed to parse value into EntityValue: {}", value);
+            error!("Failed to parse value into EntityValue: {}", value);
             None
         }
     }

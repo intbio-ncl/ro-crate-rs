@@ -2602,6 +2602,7 @@ version = "0.4.12"
 dependencies = [
  "chrono",
  "dirs",
+ "log",
  "polars",
  "rand",
  "reqwest",
@@ -2621,6 +2622,7 @@ dependencies = [
  "chrono",
  "clap",
  "json_to_table",
+ "log",
  "ro-crate-rs",
  "serde",
  "serde_json",

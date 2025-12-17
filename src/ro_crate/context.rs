@@ -1,3 +1,4 @@
+use log::debug;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
@@ -120,10 +121,10 @@ impl RoCrateContext {
 
     pub fn get_all_context(&mut self) -> Vec<String> {
         let mut valid_context: Vec<String> = Vec::new();
-        println!("Self: {:?}", self);
+        debug!("Self: {:?}", self);
         match &self {
             RoCrateContext::EmbeddedContext(context) => {
-                println!("Found Embedded Context");
+                debug!("Found Embedded Context");
                 for map in context {
                     for key in map.keys() {
                         valid_context.push(key.to_string());
@@ -131,25 +132,25 @@ impl RoCrateContext {
                 }
             }
             RoCrateContext::ExtendedContext(context) => {
-                println!("Found Extended Context");
+                debug!("Found Extended Context");
                 for map in context {
-                    println!("This is current map: {:?}", map);
+                    debug!("This is current map: {:?}", map);
                     match map {
                         ContextItem::EmbeddedContext(context) => {
-                            println!("Inside Embedded Context: {:?}", context);
+                            debug!("Inside Embedded Context: {:?}", context);
                             for value in context.values() {
                                 valid_context.push(value.to_string());
                             }
                         }
                         ContextItem::ReferenceItem(context) => {
-                            println!("Inside Reference Item: {:?}", context);
+                            debug!("Inside Reference Item: {:?}", context);
                             valid_context.push(context.to_string());
                         }
                     }
                 }
             }
             RoCrateContext::ReferenceContext(context) => {
-                println!("Found Reference Context");
+                debug!("Found Reference Context");
                 valid_context.push(context.to_string());
             }
         }
@@ -210,7 +211,7 @@ impl RoCrateContext {
                 ]);
             }
             RoCrateContext::EmbeddedContext(context) => {
-                println!("EmbeddedContext legacy of {:?}", context)
+                debug!("EmbeddedContext legacy of {:?}", context)
             }
         }
     }
@@ -269,7 +270,7 @@ mod write_crate_tests {
     #[test]
     fn test_get_context_from_key() {
         let path = fixture_path("_ro-crate-metadata-complex-context.json");
-        let mut rocrate = read_crate(&path, 0).unwrap();
+        let rocrate = read_crate(&path, 0).unwrap();
 
         let specific_context = rocrate.context.get_specific_context("education");
 

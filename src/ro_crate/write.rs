@@ -6,6 +6,7 @@
 use crate::ro_crate::read::read_crate;
 use crate::ro_crate::rocrate::RoCrate;
 use dirs;
+use log::{debug, error};
 use std::collections::HashMap;
 use std::fmt;
 use std::fs::{self, File};
@@ -35,12 +36,12 @@ pub fn write_crate(rocrate: &RoCrate, name: String) {
         Ok(json_ld) => match File::create(name) {
             Ok(mut file) => {
                 if writeln!(file, "{}", json_ld).is_err() {
-                    eprintln!("Failed to write to the file.");
+                    error!("Failed to write to the file.");
                 }
             }
-            Err(e) => eprintln!("Failed to create file: {}", e),
+            Err(e) => error!("Failed to create file: {}", e),
         },
-        Err(e) => eprintln!("Serialization failed: {}", e),
+        Err(e) => error!("Serialization failed: {}", e),
     }
 }
 
@@ -133,7 +134,7 @@ pub fn zip_crate(
         let stripped_id = format!("{}.zip", base_id.strip_prefix("urn:uuid:").unwrap());
         zip_paths.zip_file_name = zip_paths.root_path.join(stripped_id);
     }
-    println!("ZIP PATH NAME {:?}", zip_paths.zip_file_name);
+    debug!("ZIP PATH NAME {:?}", zip_paths.zip_file_name);
 
     let mut zip_data = build_zip(&zip_paths).unwrap();
 
@@ -268,10 +269,10 @@ fn directory_walk(
                     }
                 }
             }
-            Err(_e) => println!("problem"),
+            Err(e) => error!("{e}"),
         }
     }
-    println!("0 | Rocrate: {:?}", rocrate);
+    debug!("0 | Rocrate: {:?}", rocrate);
     Ok(data_vec)
 }
 
@@ -382,7 +383,7 @@ pub fn zip_crate_external(
                     Err(e) => return Err(e),
                 }
             } else {
-                println!("Skipping non-file, non-directory: {:?}", path);
+                debug!("Skipping non-file, non-directory: {:?}", path);
             }
         }
     }
@@ -426,7 +427,7 @@ fn get_noncontained_paths(
 
     // Get the absolute path of the crate directory
     let rocrate_path = get_absolute_path(crate_dir).unwrap();
-    println!("crate path {:?} and target id {:?}", rocrate_path, ids);
+    debug!("crate path {:?} and target id {:?}", rocrate_path, ids);
 
     // Iterate over all the ids, check if the paths are relative to the crate.
     // EVERYTHING NEEDS TO BE WITHIN THE CRATE
@@ -440,7 +441,7 @@ fn get_noncontained_paths(
         if let Some(path) = get_absolute_path(Path::new(id)) {
             // Check if the path exists
             if path.exists() {
-                println!("Absolute path: {:?}", path);
+                debug!("Absolute path: {:?}", path);
                 // Check if the path is outside the base crate directory
                 if is_outside_base_folder(&rocrate_path, &path) && !inverse {
                     nonrels.insert(id.to_string(), path);
@@ -449,31 +450,34 @@ fn get_noncontained_paths(
                 }
             }
         } else {
-            println!("ID: {:?}", id);
-            let path = match Path::new(id).canonicalize() {
+            debug!("ID: {:?}", id);
+            let path: Result<PathBuf, ()> = match Path::new(id).canonicalize() {
                 Ok(resolved) => Ok(resolved),
                 Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(resolve_tilde_path(id)),
-                Err(e) => Err(continue),
+                Err(e) => {
+                    error!("{e}");
+                    continue
+                }
             };
-            println!("Pre Resolved path: {:?}", path);
+            debug!("Pre Resolved path: {:?}", path);
             let resolved_path = rocrate_path.join(path.unwrap()).canonicalize();
-            println!("Resolved path: {:?}", resolved_path);
+            debug!("Resolved path: {:?}", resolved_path);
             match resolved_path {
                 Ok(abs_path) => {
-                    println!("Can confirm: {:?}", abs_path);
+                    debug!("Can confirm: {:?}", abs_path);
                     if abs_path.exists() {
-                        println!("Exists: {:?}", abs_path);
+                        debug!("Exists: {:?}", abs_path);
                         if is_outside_base_folder(&rocrate_path, &abs_path) && !inverse {
                             nonrels.insert(id.to_string(), abs_path);
                         } else if inverse {
                             nonrels.insert(id.to_string(), abs_path);
                         }
                     } else {
-                        //println!("8 | Failed to resolve ID: {:?}", id);
+                        //debug!("8 | Failed to resolve ID: {:?}", id);
                     }
                 }
-                Err(_e) => {
-                    println!("{}", _e)
+                Err(e) => {
+                    error!("{}", e)
                 }
             }
         }
@@ -564,7 +568,7 @@ pub fn is_not_url(path: &str) -> bool {
 /// ```
 fn is_outside_base_folder(base_folder: &Path, file_path: &Path) -> bool {
     // Compare the given file path with the base folder path
-    println!("Base folder: {:?} | file path {:?}", base_folder, file_path);
+    debug!("Base folder: {:?} | file path {:?}", base_folder, file_path);
     !file_path.starts_with(base_folder)
 }
 
@@ -577,7 +581,7 @@ fn add_directory_recursively(
     // WalkDir will yield subdirectories and files.
     for entry in WalkDir::new(base_dir).into_iter().filter_map(|e| e.ok()) {
         let p = entry.path();
-        println!("p = {:?}", p);
+        debug!("p = {:?}", p);
 
         // Figure out the path we want inside the zip. That’s basically:
         //   zip_prefix + (path relative to base_dir)
@@ -588,7 +592,7 @@ fn add_directory_recursively(
 
         // For example: "mydir/subdir/file.txt"
         let zip_entry_name = format!("{}/{}", zip_prefix, relative_subpath.display());
-        println!("zp entry name: {:?}", zip_entry_name);
+        debug!("zp entry name: {:?}", zip_entry_name);
         if p.is_dir() {
             // Optional: add an explicit directory entry in the archive:
             zip_data
@@ -597,7 +601,7 @@ fn add_directory_recursively(
                 .map_err(|e| ZipError::ZipOperationError(e.to_string()))?;
         } else if p.is_file() {
             let mut file = fs::File::open(p).map_err(ZipError::IoError)?;
-            println!("FILE: {:?}", file);
+            debug!("FILE: {:?}", file);
             zip_data
                 .zip
                 .start_file(&zip_entry_name, zip_data.options)
@@ -652,7 +656,7 @@ mod write_crate_tests {
 
         let zipped = zip_crate(&path, false, 0, false, false);
         println!("{:?}", zipped);
-        let roc = parse_zip(path_zip.to_str().unwrap(), 0);
+        assert!(parse_zip(path_zip.to_str().unwrap(), 0).is_ok());
     }
 
     #[test]
@@ -663,7 +667,7 @@ mod write_crate_tests {
 
         let zipped = zip_crate(&path, true, 0, false, false);
         println!("{:?}", zipped);
-        let roc = parse_zip(path_zip.to_str().unwrap(), 0);
+        assert!(parse_zip(path_zip.to_str().unwrap(), 0).is_ok());
     }
 
     #[test]
@@ -673,6 +677,7 @@ mod write_crate_tests {
 
         let zipped = zip_crate(&path, true, 0, false, true);
         println!("{:?}", zipped);
+        assert!(zipped.is_ok())
     }
 
     #[test]
@@ -921,6 +926,6 @@ mod write_crate_tests {
                 .compression_method(zip::CompressionMethod::Deflated),
         };
 
-        let _zipped = zip_crate_external(&mut rocrate, zip_data, &zip_paths);
+        assert!(zip_crate_external(&mut rocrate, zip_data, &zip_paths).is_ok());
     }
 }

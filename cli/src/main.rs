@@ -1,5 +1,6 @@
 //! Cli binding logic
 
+use log::debug;
 use ::serde::Serialize;
 use args::{
     AddCommand, ContextType, CrateAction, DeleteCommand, ModifyCommand, PackageCommand,
@@ -39,12 +40,12 @@ fn main() {
 
             if init_command.default {
                 let rocrate = RoCrate::default();
-                println!("{:?}", rocrate);
+                debug!("{:?}", rocrate);
 
                 write_crate(&rocrate, "ro-crate-metadata.json".to_string())
             } else {
                 if let Some(input) = init_command.context_type {
-                    println!("Recieved context_type {}", input);
+                    debug!("Recieved context_type {}", input);
                     let mut rocrate = create_rocrate_with_context(input);
                     if init_command.minimal {
                         rocrate = create_default_crate(rocrate)

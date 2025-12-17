@@ -15,6 +15,7 @@ use crate::ro_crate::rocrate::RoCrate;
 use polars::prelude::*;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use log::warn;
 
 pub fn to_df(rocrate: &RoCrate) -> DataFrame {
     // Get uuid
@@ -97,7 +98,7 @@ fn frame_context(crate_frame: &mut CrateFrame, context: &RoCrateContext) {
             crate_frame.push_data("@context", "ro-crate", reference);
         }
         RoCrateContext::EmbeddedContext(_embedded) => {
-            println!("legacy - shouldnt be used")
+            warn!("legacy - shouldnt be used")
         }
     }
 }

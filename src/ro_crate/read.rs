@@ -3,6 +3,9 @@
 
 use crate::ro_crate::rocrate::RoCrate;
 use crate::ro_crate::schema::load_rocrate_schema;
+use log::error;
+use log::info;
+use log::warn;
 use serde_json;
 use std::collections::HashSet;
 use std::fs;
@@ -43,7 +46,7 @@ pub fn read_crate(crate_path: &PathBuf, validation_level: i8) -> Result<RoCrate,
                 // however will try and continue.
                 //
                 // DO NOT REMOVE UNLESS BUILDING CUSTOM DESERIALISER FOR GRAPHVECTOR
-                println!("Error in parsing {}", e);
+                error!("Error in parsing {}", e);
                 let normalised = data.replace(": None", ": null");
                 match serde_json::from_str::<RoCrate>(&normalised) {
                     Ok(rocrate) => {
@@ -57,14 +60,14 @@ pub fn read_crate(crate_path: &PathBuf, validation_level: i8) -> Result<RoCrate,
                         }
                     }
                     Err(e) => {
-                        println!("1 | failed at rocrate parse");
+                        error!("1 | failed at rocrate parse");
                         Err(CrateReadError::from(e))
                     }
                 }
             }
         },
         Err(e) => {
-            println!("Failed at reading to string");
+            error!("Failed at reading to string");
             Err(CrateReadError::from(e))
         }
     }
@@ -101,7 +104,7 @@ pub fn read_crate_obj(crate_obj: &str, validation_level: i8) -> Result<RoCrate, 
             // however will try and continue.
             //
             // DO NOT REMOVE UNLESS BUILDING CUSTOM DESERIALISER FOR GRAPHVECTOR
-            println!("Error in parsing {}", e);
+            error!("Error in parsing {}", e);
             let normalised = crate_obj.replace(": None", ": null");
             match serde_json::from_str::<RoCrate>(&normalised) {
                 Ok(rocrate) => {
@@ -115,7 +118,7 @@ pub fn read_crate_obj(crate_obj: &str, validation_level: i8) -> Result<RoCrate, 
                     }
                 }
                 Err(e) => {
-                    println!("1 | failed at rocrate parse");
+                    error!("1 | failed at rocrate parse");
                     Err(CrateReadError::from(e))
                 }
             }
@@ -129,7 +132,7 @@ fn validity_wrapper(rocrate: &RoCrate, validation_level: i8) -> Result<&RoCrate,
         ValidationResult::Valid => Ok(rocrate),
         ValidationResult::Invalid(validation) => {
             if validation_level == 1 {
-                eprintln!(
+                warn!(
                     "Warning: Invalid keys: {:?}, Invalid IDs: {:?}, Invalid types: {:?}",
                     validation.invalid_keys, validation.invalid_ids, validation.invalid_types
                 );
@@ -263,13 +266,13 @@ impl CrateValidation {
     // Method to display the invalid data
     pub fn report_invalid(&self) {
         if !self.invalid_keys.is_empty() {
-            println!("Invalid keys: {:?}", self.invalid_keys);
+            info!("Invalid keys: {:?}", self.invalid_keys);
         }
         if !self.invalid_ids.is_empty() {
-            println!("Invalid IDs: {:?}", self.invalid_ids);
+            info!("Invalid IDs: {:?}", self.invalid_ids);
         }
         if !self.invalid_types.is_empty() {
-            println!("Invalid types: {:?}", self.invalid_types);
+            info!("Invalid types: {:?}", self.invalid_types);
         }
     }
 }

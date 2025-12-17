@@ -4,6 +4,7 @@
 //! RO-Crate entity. It can be added, modified or deleted.
 
 use crate::ro_crate::constraints::*;
+use log::debug;
 use serde::ser::SerializeMap;
 use serde::{Serialize, Serializer};
 use serde_json::Value;
@@ -216,7 +217,7 @@ pub trait DynamicEntityManipulation: Serialize {
                         keys_to_remove.push(key.clone());
                     }
                     EntityValue::Fallback(fallback_values) => {
-                        println!("Exploring fallback {:?}", fallback_values);
+                        debug!("Exploring fallback {:?}", fallback_values);
                         fallback_keys_to_modify.push(key.clone());
                     }
                     // Handle other EntityValue types if necessary

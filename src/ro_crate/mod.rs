@@ -21,3 +21,5 @@ pub mod schema;
 #[cfg(feature = "subcrate-resolution")]
 pub mod subcrate_resolution;
 pub mod write;
+
+pub mod rdf;

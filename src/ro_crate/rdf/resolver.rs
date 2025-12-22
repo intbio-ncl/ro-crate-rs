@@ -66,7 +66,6 @@ impl ContextResolverBuilder {
             cache: HashMap::new(),
             allow_remote: false,
             client: reqwest::blocking::Client::builder()
-                .user_agent("ro-crate-rs/0.4")
                 .timeout(std::time::Duration::from_secs(30))
                 .build()
                 .expect("Failed to create HTTP client"),
@@ -106,7 +105,9 @@ impl ContextResolverBuilder {
 
     /// Auto-detects the RO-Crate version from context URLs and preloads the schema.
     fn preload_rocrate_schema(&mut self, context: &RoCrateContext) {
-        let version = context.get_schema_version().unwrap_or(RoCrateSchemaVersion::V1_2);
+        let version = context
+            .get_schema_version()
+            .unwrap_or(RoCrateSchemaVersion::V1_2);
 
         match version {
             RoCrateSchemaVersion::V1_1 => {
@@ -354,7 +355,10 @@ mod tests {
     fn test_default_to_1_2_when_no_version() {
         // Use a custom embedded context with no RO-Crate URL
         let mut embedded = HashMap::new();
-        embedded.insert("customTerm".to_string(), "http://example.org/custom".to_string());
+        embedded.insert(
+            "customTerm".to_string(),
+            "http://example.org/custom".to_string(),
+        );
 
         let context = RoCrateContext::EmbeddedContext(vec![embedded]);
         // This should succeed because 1.2 is preloaded as default

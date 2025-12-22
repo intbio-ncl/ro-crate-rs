@@ -81,8 +81,10 @@ impl RoCrate {
         valid_context
     }
 
-    /// TODO
-    pub fn add_context(&self) {}
+    /// Adds a context item to the RO-Crate.
+    pub fn add_context(&mut self, context: ContextItem) {
+        self.context.add_context(&context);
+    }
 
     /// Returns entity based on ID
     pub fn get_entity(&self, id: &str) -> Option<&GraphVector> {

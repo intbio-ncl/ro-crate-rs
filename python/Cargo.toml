@@ -23,4 +23,3 @@ serde_with = "3.16.1"
 [dependencies.ro-crate-rs]
 path = "../"
 version = "0"
-

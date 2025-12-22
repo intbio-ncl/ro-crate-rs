@@ -7,27 +7,28 @@ authors = ["Matt Burridge <m.burridge1@newcastle.ac.uk>"]
 autoexamples = false
 license = "Apache-2.0"
 description = "Library for creating, modifying and reading RO-Crates"
-keywords = ["researchobject","ro-crate","ro","metadata","jsonld"]
+keywords = ["researchobject", "ro-crate", "ro", "metadata", "jsonld"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [workspace]
-members = [
-    "cli",
-]
+members = ["cli"]
 
 [workspace.dependencies]
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-chrono = { version = "0.4.42", features = ["serde"]}
+serde_json = "1.0.145"
+chrono = { version = "0.4.42", features = ["serde"] }
 uuid = { version = "1.19", features = ["v4", "v7"] }
 rand = "0.9"
 url = "2.5"
-zip = "6.0.0"
+zip = "7.0.0"
 walkdir = "2"
-reqwest = { version = "0.12", features =  ["blocking", "json"], default-features = false}
+reqwest = { version = "0.12", features = [
+    "blocking",
+    "json",
+], default-features = false }
 dirs = "6.0.0"
-polars = {version = "0.52.0", features =["parquet"]}
+polars = { version = "0.52.0", features = ["parquet"] }
 log = "0.4.29"
 
 [lib]
@@ -54,4 +55,3 @@ log = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3.23"
-

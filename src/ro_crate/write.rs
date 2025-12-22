@@ -504,10 +504,7 @@ fn resolve_tilde_path(path: &str) -> PathBuf {
 /// # Returns
 /// An `Option<PathBuf>` containing the absolute path, if the conversion was successful; otherwise, `None`.
 fn get_absolute_path(relative_path: &Path) -> Option<PathBuf> {
-    match fs::canonicalize(relative_path) {
-        Ok(path) => Some(path),
-        Err(_e) => None,
-    }
+    fs::canonicalize(relative_path).ok()
 }
 /// Determines whether a given string is not a URL.
 ///

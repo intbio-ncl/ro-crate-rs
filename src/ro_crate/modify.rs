@@ -346,7 +346,7 @@ fn remove_matching_value_from_json(value: &mut Value, target_value: &str) {
         Value::Array(arr) => {
             let mut i = 0;
             while i < arr.len() {
-                if &arr[i] == target_value {
+                if arr[i] == target_value {
                     arr.remove(i);
                 } else {
                     remove_matching_value_from_json(&mut arr[i], target_value);

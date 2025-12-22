@@ -328,7 +328,7 @@ fn create_rocrate_with_context(context_type: ContextType) -> RoCrate {
                 Ok(num) => {
                     if num == 1 {
                         answer.clear();
-                        answer.push_str("https://w3id.org/ro/crate/1.1/context");
+                        answer.push_str("https://w3id.org/ro/crate/1.2/context");
                     }
                 }
                 Err(e) => println!("Error: {}", e),
@@ -389,7 +389,7 @@ fn create_default_crate(mut rocrate: RoCrate) -> RoCrate {
     let description = metadata_descriptor::MetadataDescriptor {
         id: "ro-crate-metadata.json".to_string(),
         type_: DataType::Term("CreativeWork".to_string()),
-        conforms_to: Id::Id("https://w3id.org/ro/crate/1.1".to_string()),
+        conforms_to: Id::Id("https://w3id.org/ro/crate/1.2".to_string()),
         about: Id::Id("./".to_string()),
         dynamic_entity: None,
     };

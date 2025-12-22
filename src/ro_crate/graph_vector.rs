@@ -323,10 +323,7 @@ impl<'de> Deserialize<'de> for GraphVector {
     {
         let value = Value::deserialize(deserializer)?;
 
-        try_deserialize_into_graph_vector(&value)
-            .or_else(|e| {
-                return Err(e);
-            })
+        try_deserialize_into_graph_vector(&value).map_err(|e| e)
             .map_err(|e: SerdeJsonError| {
                 // Use the error type from the deserializer's context
                 D::Error::custom(format!("Failed to deserialize: {}", e))

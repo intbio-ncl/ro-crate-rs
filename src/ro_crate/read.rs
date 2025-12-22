@@ -212,7 +212,15 @@ impl From<serde_json::Error> for CrateReadError {
 /// This function checks the crate's properties against the official RO-Crate context and any embedded vocabularies.
 /// It does not validate properties by dereferencing URIs but rather checks if the properties' keys are recognized.
 pub fn validate_crate_keys(rocrate: &RoCrate) -> ValidationResult {
-    match load_rocrate_schema() {
+    let version = match rocrate.get_rocrate_version() {
+        Some(v) => v,
+        None => {
+            return ValidationResult::Error(
+                "Could not determine RO-Crate schema version from context".to_string(),
+            )
+        }
+    };
+    match load_rocrate_schema(version) {
         Ok(crate_metadata) => {
             let crate_context: Vec<String> = crate_metadata.context.keys().cloned().collect();
             let custom_context = rocrate.get_context_items();

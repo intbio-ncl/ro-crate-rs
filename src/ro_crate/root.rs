@@ -24,7 +24,7 @@ use super::constraints::Id;
 // change.
 #[derive(Debug, Clone)]
 pub struct RootDataEntity {
-    // A string that SHOULD be ./ and MUST end with /
+    // A string identifying the root (typically "./" for attached crates, or absolute URI for detached)
     pub id: String,
     // A string that MUST be Dataset
     pub type_: DataType,

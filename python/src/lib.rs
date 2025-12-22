@@ -473,7 +473,7 @@ impl Default for PyRoCrate {
         let mut rocrate = PyRoCrate {
             inner: RoCrate {
                 context: RoCrateContext::ReferenceContext(
-                    "https://w3id.org/ro/crate/1.1/context".to_string(),
+                    "https://w3id.org/ro/crate/1.2/context".to_string(),
                 ),
                 graph: Vec::new(),
             },
@@ -482,7 +482,7 @@ impl Default for PyRoCrate {
         let description = MetadataDescriptor {
             id: "ro-crate-metadata.json".to_string(),
             type_: DataType::Term("CreativeWork".to_string()),
-            conforms_to: Id::Id("https://w3id.org/ro/crate/1.1".to_string()),
+            conforms_to: Id::Id("https://w3id.org/ro/crate/1.2".to_string()),
             about: Id::Id("./".to_string()),
             dynamic_entity: None,
         };

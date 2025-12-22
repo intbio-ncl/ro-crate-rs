@@ -38,7 +38,7 @@ To create an empty RO-Crate, you need to do the following:
 from rocraters import PyRoCrateContext, PyRoCrate, read, zip
 
 # Define context
-context = PyRoCrateContext.from_string("https://w3id.org/ro/crate/1.1/context")
+context = PyRoCrateContext.from_string("https://w3id.org/ro/crate/1.2/context")
 
 # Initialise empty crate
 crate = PyRoCrate(context)
@@ -65,7 +65,7 @@ To populate the basic crate, with the essential keys to conform to specification
 descriptor = {
     "type": "CreativeWork",
     "id": "ro-crate-metadata.json",
-    "conformsTo": {"id": "https://w3id.org/ro/crate/1.1"},
+    "conformsTo": {"id": "https://w3id.org/ro/crate/1.2"},
     "about": {"id": "./"},
 }
 

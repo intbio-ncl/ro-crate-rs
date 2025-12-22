@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 use url::Url;
 use walkdir::WalkDir;
-use zip::{ZipWriter, write::SimpleFileOptions};
+use zip::{write::SimpleFileOptions, ZipWriter};
 
 #[derive(Error, Debug)]
 pub enum WriteError {
@@ -1080,5 +1080,80 @@ mod write_crate_tests {
             println!("Func result: {}, testing: {}, {}", test, key, value);
             assert_eq!(test, value);
         }
+    }
+    fn user_root_unix(mut path_types: HashMap<&str, bool>) -> HashMap<&str, bool> {
+        if !cfg!(windows) {
+            path_types.insert("~/.cargo/env", true); // Relative Path
+            path_types.insert("/var/log/syslog", true); // Linux Absolute Path
+        }
+        path_types
+    }
+
+    #[test]
+    fn test_get_noncontained_paths() {
+        let mut path_types: HashMap<&str, bool> = HashMap::new();
+        let cwd = env::current_dir().unwrap();
+        let crate_path = cwd.join(PathBuf::from("tests/fixtures/test_experiment"));
+
+        path_types.insert("../invalid.json", true); // External relative path (in fixtures/)
+        path_types.insert("../external.txt", true); // External relative path (in fixtures/)
+        path_types.insert("./data.csv", false); // Internal relative path
+        path_types.insert("./text_1.txt", false); // Internal relative path
+        path_types.insert("text_1.txt", false); // Internal relative path (no prefix)
+        path_types.insert("#fragment", false); // Fragment reference (skipped)
+
+        // abs path but not relative
+        let abs_not = cwd
+            .join(PathBuf::from("README.md"))
+            .to_str()
+            .unwrap()
+            .to_string();
+        path_types.insert(&abs_not, true);
+
+        // abs path rel
+        let abs_is = cwd
+            .join(crate_path.join(PathBuf::from("data.csv")))
+            .to_str()
+            .unwrap()
+            .to_string();
+        path_types.insert(&abs_is, false);
+
+        for (key, value) in path_types {
+            let mut input_vec: Vec<&String> = Vec::new();
+            let target = key.to_string();
+            input_vec.push(&target);
+
+            let test = get_noncontained_paths(input_vec.clone(), &crate_path, false);
+            if test.is_empty() {
+                println!("Test is empty for relative ID: {}", key);
+                assert_eq!(value, false)
+            } else {
+                println!("Test is successful for relative ID: {}", key);
+                assert_eq!(value, true)
+            }
+        }
+    }
+
+    #[test]
+    fn test_zip_crate_external_func() {
+        let cwd = env::current_dir().unwrap();
+        let path = fixture_path("test_experiment/_ro-crate-metadata-minimal.json");
+
+        let mut rocrate = read_crate(&path, 0).unwrap();
+        let zip_paths = RoCrateZipPaths {
+            absolute_path: cwd.join(&path),
+            root_path: cwd.join(PathBuf::from("tests/fixtures/test_experiment")),
+            zip_file_name: cwd.join(PathBuf::from(
+                "tests/fixtures/test_experiment/test_experiment.zip",
+            )),
+        };
+
+        let zip_data = RoCrateZip {
+            zip: ZipWriter::new(File::create(&zip_paths.zip_file_name).unwrap()),
+            options: SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated),
+        };
+
+        assert!(zip_crate_external(&mut rocrate, zip_data, &zip_paths).is_ok());
     }
 }

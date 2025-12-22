@@ -12,10 +12,10 @@ use crate::ro_crate::constraints::{DataType, EntityValue, Id, License};
 use crate::ro_crate::context::{ContextItem, RoCrateContext};
 use crate::ro_crate::graph_vector::GraphVector;
 use crate::ro_crate::rocrate::RoCrate;
+use log::warn;
 use polars::prelude::*;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use log::warn;
 
 pub fn to_df(rocrate: &RoCrate) -> DataFrame {
     // Get uuid

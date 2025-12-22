@@ -1,6 +1,5 @@
 //! Cli binding logic
 
-use log::debug;
 use ::serde::Serialize;
 use args::{
     AddCommand, ContextType, CrateAction, DeleteCommand, ModifyCommand, PackageCommand,
@@ -11,6 +10,7 @@ use clap::Parser;
 use constraints::{DataType, EntityValue, Id, License};
 use data_entity::DataEntity;
 use json_to_table::json_to_table;
+use log::debug;
 use read::{crate_path, read_crate};
 use rocraters::ro_crate::context::{ContextItem, RoCrateContext};
 use rocraters::ro_crate::graph_vector::GraphVector;

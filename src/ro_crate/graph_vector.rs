@@ -143,10 +143,18 @@ impl GraphVector {
     /// Adds a type to the entity
     pub fn add_type(&mut self, new_type: String) {
         match self {
-            GraphVector::MetadataDescriptor(entity) => entity.type_.add_type(new_type),
-            GraphVector::RootDataEntity(entity) => entity.type_.add_type(new_type),
-            GraphVector::DataEntity(entity) => entity.type_.add_type(new_type),
-            GraphVector::ContextualEntity(entity) => entity.type_.add_type(new_type),
+            GraphVector::MetadataDescriptor(entity) => {
+                entity.type_ = entity.type_.add_type(new_type);
+            }
+            GraphVector::RootDataEntity(entity) => {
+                entity.type_ = entity.type_.add_type(new_type);
+            }
+            GraphVector::DataEntity(entity) => {
+                entity.type_ = entity.type_.add_type(new_type);
+            }
+            GraphVector::ContextualEntity(entity) => {
+                entity.type_ = entity.type_.add_type(new_type);
+            }
         }
     }
 
@@ -323,11 +331,10 @@ impl<'de> Deserialize<'de> for GraphVector {
     {
         let value = Value::deserialize(deserializer)?;
 
-        try_deserialize_into_graph_vector(&value).map_err(|e| e)
-            .map_err(|e: SerdeJsonError| {
-                // Use the error type from the deserializer's context
-                D::Error::custom(format!("Failed to deserialize: {}", e))
-            })
+        try_deserialize_into_graph_vector(&value).map_err(|e: SerdeJsonError| {
+            // Use the error type from the deserializer's context
+            D::Error::custom(format!("Failed to deserialize: {}", e))
+        })
     }
 }
 

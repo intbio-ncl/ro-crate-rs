@@ -220,7 +220,6 @@ fn directory_walk(
     // Consider only files, not directories
     {
         let path = entry.path();
-        let file_name: String;
 
         if path == zip_paths.zip_file_name {
             continue;
@@ -230,21 +229,19 @@ fn directory_walk(
             continue;
         }
 
-        if flatten {
-            file_name = path
-                .file_name()
+        let file_name: String = if flatten {
+            path.file_name()
                 .ok_or(ZipError::FileNameNotFound)?
                 .to_str()
                 .ok_or(ZipError::FileNameConversionFailed)?
-                .to_string();
+                .to_string()
         } else {
-            file_name = path
-                .strip_prefix(&zip_paths.root_path)
+            path.strip_prefix(&zip_paths.root_path)
                 .map_err(ZipError::PathError)?
                 .to_str()
                 .ok_or(ZipError::FileNameConversionFailed)?
-                .to_string();
-        }
+                .to_string()
+        };
 
         let mut file = fs::File::open(path).map_err(ZipError::IoError)?;
 
@@ -443,9 +440,7 @@ fn get_noncontained_paths(
             if path.exists() {
                 debug!("Absolute path: {:?}", path);
                 // Check if the path is outside the base crate directory
-                if is_outside_base_folder(&rocrate_path, &path) && !inverse {
-                    nonrels.insert(id.to_string(), path);
-                } else if inverse {
+                if is_outside_base_folder(&rocrate_path, &path) || inverse {
                     nonrels.insert(id.to_string(), path);
                 }
             }
@@ -456,7 +451,7 @@ fn get_noncontained_paths(
                 Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(resolve_tilde_path(id)),
                 Err(e) => {
                     error!("{e}");
-                    continue
+                    continue;
                 }
             };
             debug!("Pre Resolved path: {:?}", path);
@@ -467,9 +462,7 @@ fn get_noncontained_paths(
                     debug!("Can confirm: {:?}", abs_path);
                     if abs_path.exists() {
                         debug!("Exists: {:?}", abs_path);
-                        if is_outside_base_folder(&rocrate_path, &abs_path) && !inverse {
-                            nonrels.insert(id.to_string(), abs_path);
-                        } else if inverse {
+                        if is_outside_base_folder(&rocrate_path, &abs_path) || inverse {
                             nonrels.insert(id.to_string(), abs_path);
                         }
                     } else {

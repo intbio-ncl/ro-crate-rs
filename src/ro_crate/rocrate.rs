@@ -291,16 +291,36 @@ impl RoCrate {
 
     /// Returns all entities that are referenced rocrates
     pub fn get_subcrates(&self) -> Vec<&GraphVector> {
+        // DataEntity::get_property_value() searches recursive, so if we have a DataEntity with
+        // a nested custom field that also contains on any lower level `subjectOf`
+        // we also get a match. But in this case we only want to get first level matches
         self.graph
             .iter()
             .filter_map(|entry| {
                 if let GraphVector::DataEntity(data_entitiy) = entry {
                     if let Some(dynamic) = &data_entitiy.dynamic_entity {
-                        if let Some(EntityValue::EntityId(Id::Id(crate_path))) =
-                            dynamic.get("conformsTo")
-                        {
-                            if crate_path.contains("https://w3id.org/ro/crate") {
-                                return Some(entry);
+                        if let Some(entity) = dynamic.get("conformsTo") {
+                            // There are two variants here:
+                            // Either we have an EntityId entry with just one Id
+                            // that matches an ro-crate specification or we have an
+                            // entity vec where some entities may match an ro-crate
+                            // specification
+                            match entity {
+                                EntityValue::EntityId(Id::Id(crate_path)) => {
+                                    if crate_path.contains("https://w3id.org/ro/crate") {
+                                        return Some(entry);
+                                    }
+                                }
+                                EntityValue::EntityVec(entity_values) => {
+                                    for value in entity_values {
+                                        if let EntityValue::EntityId(Id::Id(crate_path)) = value {
+                                            if crate_path.contains("https://w3id.org/ro/crate") {
+                                                return Some(entry);
+                                            }
+                                        }
+                                    }
+                                }
+                                _ => {}
                             }
                         }
                     }

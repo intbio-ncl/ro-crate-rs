@@ -10,7 +10,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::ro_crate::context::{ContextItem, RoCrateContext};
-use crate::ro_crate::schema::ROCRATE_SCHEMA_1_1;
+use crate::ro_crate::schema::{RoCrateSchemaVersion, ROCRATE_SCHEMA_1_1, ROCRATE_SCHEMA_1_2};
 
 use super::context::ResolvedContext;
 use super::error::ContextError;
@@ -25,24 +25,24 @@ pub const ROCRATE_1_2_CONTEXT_URL: &str = "https://w3id.org/ro/crate/1.2/context
 ///
 /// Accumulates pre-cached contexts and configuration, then resolves
 /// an `RoCrateContext` into a `ResolvedContext` in a single pass.
+/// The RO-Crate version (1.1 or 1.2) is auto-detected from the context URL,
+/// defaulting to 1.2 if not specified.
 ///
 /// # Example
 ///
 /// ```ignore
-/// // Default includes RO-Crate 1.1
+/// // Auto-detects RO-Crate version from context
 /// let resolved = ContextResolverBuilder::default()
 ///     .resolve(&rocrate.context)?;
 ///
-/// // Or start empty and add contexts manually
+/// // Or add custom contexts
 /// let resolved = ContextResolverBuilder::new()
-///     .with_rocrate_1_1()
 ///     .with_context("https://custom.org/ctx", custom_json)?
 ///     .resolve(&rocrate.context)?;
 /// ```
 pub struct ContextResolverBuilder {
     cache: HashMap<String, CachedContext>,
     allow_remote: bool,
-    #[cfg(feature = "rdf")]
     client: reqwest::blocking::Client,
 }
 
@@ -55,7 +55,7 @@ struct CachedContext {
 
 impl Default for ContextResolverBuilder {
     fn default() -> Self {
-        Self::new().with_rocrate_1_1()
+        Self::new()
     }
 }
 
@@ -65,22 +65,12 @@ impl ContextResolverBuilder {
         Self {
             cache: HashMap::new(),
             allow_remote: false,
-            #[cfg(feature = "rdf")]
             client: reqwest::blocking::Client::builder()
                 .user_agent("ro-crate-rs/0.4")
                 .timeout(std::time::Duration::from_secs(30))
                 .build()
                 .expect("Failed to create HTTP client"),
         }
-    }
-
-    /// Adds the RO-Crate 1.1 context (embedded in the library).
-    pub fn with_rocrate_1_1(mut self) -> Self {
-        if let Ok(cached) = parse_context_json(ROCRATE_SCHEMA_1_1) {
-            self.cache
-                .insert(ROCRATE_1_1_CONTEXT_URL.to_string(), cached);
-        }
-        self
     }
 
     /// Adds a context from JSON, associated with the given URL.
@@ -98,14 +88,38 @@ impl ContextResolverBuilder {
 
     /// Resolves an RO-Crate context into a `ResolvedContext`.
     ///
+    /// Auto-detects the RO-Crate version from the context URL and preloads
+    /// the appropriate schema. Defaults to 1.2 if no version is detected.
+    ///
     /// Consumes the builder and returns the resolved context.
     pub fn resolve(mut self, context: &RoCrateContext) -> Result<ResolvedContext, ContextError> {
+        // Auto-detect and preload the appropriate RO-Crate schema
+        self.preload_rocrate_schema(context);
+
         let mut resolved = ResolvedContext::new(context.clone());
         let mut visited = HashSet::new();
 
         self.process_context(context, &mut resolved, &mut visited, true)?;
 
         Ok(resolved)
+    }
+
+    /// Auto-detects the RO-Crate version from context URLs and preloads the schema.
+    fn preload_rocrate_schema(&mut self, context: &RoCrateContext) {
+        let version = context.get_schema_version().unwrap_or(RoCrateSchemaVersion::V1_2);
+
+        match version {
+            RoCrateSchemaVersion::V1_1 => {
+                self.cache
+                    .entry(ROCRATE_1_1_CONTEXT_URL.to_string())
+                    .or_insert_with(|| parse_context_json(ROCRATE_SCHEMA_1_1).unwrap());
+            }
+            RoCrateSchemaVersion::V1_2 => {
+                self.cache
+                    .entry(ROCRATE_1_2_CONTEXT_URL.to_string())
+                    .or_insert_with(|| parse_context_json(ROCRATE_SCHEMA_1_2).unwrap());
+            }
+        }
     }
 
     fn process_context(
@@ -195,7 +209,6 @@ impl ContextResolverBuilder {
         Ok(cached)
     }
 
-    #[cfg(feature = "rdf")]
     fn fetch_remote(&self, url: &str) -> Result<CachedContext, ContextError> {
         let response = self
             .client
@@ -220,14 +233,6 @@ impl ContextResolverBuilder {
         })?;
 
         parse_context_json(&body)
-    }
-
-    #[cfg(not(feature = "rdf"))]
-    fn fetch_remote(&self, url: &str) -> Result<CachedContext, ContextError> {
-        Err(ContextError::FetchFailed {
-            url: url.to_string(),
-            reason: "Remote fetching requires 'rdf' feature".to_string(),
-        })
     }
 
     fn process_embedded(
@@ -320,19 +325,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_default_includes_rocrate_1_1() {
-        let builder = ContextResolverBuilder::default();
-        assert!(builder.cache.contains_key(ROCRATE_1_1_CONTEXT_URL));
-    }
-
-    #[test]
     fn test_new_is_empty() {
         let builder = ContextResolverBuilder::new();
         assert!(builder.cache.is_empty());
     }
 
     #[test]
-    fn test_resolve_rocrate_1_1_reference() {
+    fn test_auto_detect_1_1_context() {
         let context = RoCrateContext::ReferenceContext(ROCRATE_1_1_CONTEXT_URL.to_string());
         let resolved = ContextResolverBuilder::default().resolve(&context).unwrap();
 
@@ -340,6 +339,28 @@ mod tests {
         assert!(resolved.terms.contains_key("description"));
         assert!(resolved.terms.contains_key("author"));
         assert!(resolved.terms.contains_key("hasPart"));
+    }
+
+    #[test]
+    fn test_auto_detect_1_2_context() {
+        let context = RoCrateContext::ReferenceContext(ROCRATE_1_2_CONTEXT_URL.to_string());
+        let resolved = ContextResolverBuilder::default().resolve(&context).unwrap();
+
+        assert!(resolved.terms.contains_key("name"));
+        assert!(resolved.terms.contains_key("description"));
+    }
+
+    #[test]
+    fn test_default_to_1_2_when_no_version() {
+        // Use a custom embedded context with no RO-Crate URL
+        let mut embedded = HashMap::new();
+        embedded.insert("customTerm".to_string(), "http://example.org/custom".to_string());
+
+        let context = RoCrateContext::EmbeddedContext(vec![embedded]);
+        // This should succeed because 1.2 is preloaded as default
+        let resolved = ContextResolverBuilder::default().resolve(&context).unwrap();
+
+        assert!(resolved.terms.contains_key("customTerm"));
     }
 
     #[test]

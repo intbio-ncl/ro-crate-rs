@@ -45,6 +45,12 @@ pub enum RdfError {
     InvalidIri(String),
     /// Blank nodes are not supported.
     BlankNode(String),
+    /// Serialization failed.
+    Serialization(String),
+    /// RDF parsing failed.
+    ParseError(String),
+    /// Missing root entities.
+    MissingRootEntities(String),
 }
 
 impl fmt::Display for RdfError {
@@ -53,6 +59,9 @@ impl fmt::Display for RdfError {
             RdfError::Context(e) => write!(f, "Context error: {}", e),
             RdfError::InvalidIri(iri) => write!(f, "Invalid IRI: {}", iri),
             RdfError::BlankNode(id) => write!(f, "Blank nodes not supported: {}", id),
+            RdfError::Serialization(msg) => write!(f, "Serialization error: {}", msg),
+            RdfError::ParseError(msg) => write!(f, "Parse error: {}", msg),
+            RdfError::MissingRootEntities(msg) => write!(f, "Missing root entities: {}", msg),
         }
     }
 }

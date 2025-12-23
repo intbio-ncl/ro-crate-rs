@@ -45,13 +45,13 @@ fn main() {
         //
         let entity_types = Vec::from(["File".to_string(), "DigitalDocument".to_string()]);
 
-        let mut data_entity = DataEntity {
+        let data_entity = DataEntity {
             id: "output/data_entity.txt".to_string(),
             type_: DataType::TermArray(entity_types),
             dynamic_entity: None,
         };
 
-        let mut contextual_entity: ContextualEntity = ContextualEntity {
+        let contextual_entity: ContextualEntity = ContextualEntity {
             id: "#JohnDoe".to_string(),
             type_: DataType::Term("Person".to_string()),
             dynamic_entity: None,
@@ -84,7 +84,7 @@ fn main() {
         let crate_name = crate_path("ro-crate-metadata_3.json");
 
         match read_crate(&crate_name, 0) {
-            Ok(mut rocrate) => {}
+            Ok(_rocrate) => {}
             Err(CrateReadError::IoError(err)) => {
                 eprintln!("IO error occurred: {}", err);
             }

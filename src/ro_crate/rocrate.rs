@@ -6,9 +6,10 @@
 //! # Note
 //! This should definitly be split up in future implementations
 
-use crate::ro_crate::constraints::{EntityValue, Id};
-use crate::ro_crate::context::{ContextItem, RoCrateContext};
-use crate::ro_crate::graph_vector::GraphVector;
+pub use crate::ro_crate::constraints::EntityValue;
+use crate::ro_crate::constraints::Id;
+pub use crate::ro_crate::context::{ContextItem, RoCrateContext};
+pub use crate::ro_crate::graph_vector::GraphVector;
 use crate::ro_crate::modify::DynamicEntityManipulation;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

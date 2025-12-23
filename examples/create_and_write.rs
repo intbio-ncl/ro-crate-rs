@@ -1,12 +1,12 @@
-use ro_crate_rs::ro_crate::constraints::*;
-use ro_crate_rs::ro_crate::contextual_entity::ContextualEntity;
-use ro_crate_rs::ro_crate::data_entity::DataEntity;
-use ro_crate_rs::ro_crate::metadata_descriptor::MetadataDescriptor;
-use ro_crate_rs::ro_crate::read::{read_crate, CrateReadError};
-use ro_crate_rs::ro_crate::rocrate::GraphVector;
-use ro_crate_rs::ro_crate::rocrate::{RoCrate, RoCrateContext};
-use ro_crate_rs::ro_crate::root::RootDataEntity;
-use ro_crate_rs::ro_crate::write::write_crate;
+use rocraters::ro_crate::constraints::*;
+use rocraters::ro_crate::contextual_entity::ContextualEntity;
+use rocraters::ro_crate::data_entity::DataEntity;
+use rocraters::ro_crate::metadata_descriptor::MetadataDescriptor;
+use rocraters::ro_crate::read::{crate_path, read_crate, CrateReadError};
+use rocraters::ro_crate::rocrate::GraphVector;
+use rocraters::ro_crate::rocrate::{RoCrate, RoCrateContext};
+use rocraters::ro_crate::root::RootDataEntity;
+use rocraters::ro_crate::write::write_crate;
 use uuid::Uuid;
 
 fn main() {
@@ -25,12 +25,8 @@ fn main() {
         let description = MetadataDescriptor {
             id: "ro-crate-metadata.json".to_string(),
             type_: DataType::Term("CreativeWork".to_string()),
-            conforms_to: Id::Id(IdValue {
-                id: "https://w3id.org/ro/crate/1.2".to_string(),
-            }),
-            about: Id::Id(IdValue {
-                id: "./".to_string(),
-            }),
+            conforms_to: Id::Id("https://w3id.org/ro/crate/1.2".to_string()),
+            about: Id::Id("./".to_string()),
             dynamic_entity: None,
         };
 
@@ -41,10 +37,8 @@ fn main() {
             name: "Test Crate".to_string(),
             description: "Crate for testing the RO-Crate rust library and seeing how it functions"
                 .to_string(),
-            date_published: Option::Some("2024".to_string()),
-            license: Some(License::Id(Id::Id(IdValue {
-                id: "MIT LICENSE".to_string(),
-            }))),
+            date_published: "2024".to_string(),
+            license: License::Id(Id::Id("MIT LICENSE".to_string())),
             dynamic_entity: None,
         };
 

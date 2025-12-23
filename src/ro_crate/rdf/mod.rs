@@ -45,8 +45,8 @@ pub mod resolver;
 
 // Re-exports
 pub use context::ResolvedContext;
-pub use convert::rocrate_to_rdf;
+pub use convert::{rocrate_to_rdf, rocrate_to_rdf_with_options, ConversionOptions};
 pub use error::{ContextError, RdfError};
 pub use graph::RdfGraph;
-pub use rdf_io::{rdf_to_rocrate, RdfFormat};
+pub use rdf_io::{rdf_graph_to_rocrate, rdf_to_rocrate, RdfFormat};
 pub use resolver::ContextResolverBuilder;

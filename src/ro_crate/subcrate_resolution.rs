@@ -2,7 +2,7 @@ use crate::ro_crate::constraints::Id;
 use crate::ro_crate::data_entity::DataEntity;
 use crate::ro_crate::rocrate::RoCrate;
 use crate::ro_crate::write::is_not_url;
-use log::debug;
+use log::{debug, warn};
 use reqwest::header::{HeaderMap, ToStrError};
 use std::io::{Bytes, Cursor, Read};
 use zip::result::ZipError;
@@ -89,41 +89,60 @@ pub fn fetch_subcrates(rocrate: RoCrate) -> Result<Vec<RoCrate>, FetchError> {
         let id = get_id(subcrate);
 
         if is_not_url(&id) {
-            todo!("Resolve locally")
+
+            match try_resolve_local(&id) {
+                Ok(rocrate) => {
+                    collected_subcrates.push(rocrate);
+                    continue;
+                }
+                Err(err) => warn!("{}", err),
+            }
         } else {
-            let response = reqwest::blocking::get(&id)?;
-            let headers = response.headers().clone();
-            let redirect_url = response.url().to_string();
-            let body = response.bytes()?;
-
-            if let Ok(ro_crate) = serde_json::from_slice::<RoCrate>(&body) {
-                collected_subcrates.push(ro_crate);
-                continue;
-            }
-
-            if let Ok(rocrate) = try_signposting(&headers) {
-                collected_subcrates.push(rocrate);
-                continue;
-            }
-
-            if let Ok(response) = try_content_negotiation(&id) {
-                collected_subcrates.push(response);
-                continue;
-            };
-
-            if let Ok(response) = guess_location(&redirect_url) {
-                collected_subcrates.push(response);
-                continue;
-            };
-
-            if let Ok(response) = try_zip(&headers, &redirect_url) {
-                collected_subcrates.push(response);
-                continue;
+            match try_resolve_remote(&id) {
+                Ok(rocrate) => {
+                    collected_subcrates.push(rocrate);
+                    continue;
+                }
+                Err(err) => warn!("{}", err),
             }
         }
     }
 
     Ok(vec![])
+}
+
+fn try_resolve_local(id: &str) -> Result<RoCrate, FetchError> {
+    todo!()
+}
+
+fn try_resolve_remote(id: &str) -> Result<RoCrate, FetchError> {
+    let response = reqwest::blocking::get(id)?;
+    let headers = response.headers().clone();
+    let redirect_url = response.url().to_string();
+    let body = response.bytes()?;
+
+    if let Ok(ro_crate) = serde_json::from_slice::<RoCrate>(&body) {
+        return Ok(ro_crate);
+    }
+
+    if let Ok(ro_crate) = try_signposting(&headers) {
+        return Ok(ro_crate);
+    }
+
+    if let Ok(ro_crate) = try_content_negotiation(&id) {
+        return Ok(ro_crate);
+    }
+
+    if let Ok(ro_crate) = guess_location(&redirect_url) {
+        return Ok(ro_crate);
+    }
+
+    if let Ok(ro_crate) = try_zip(&headers, &redirect_url) {
+        return Ok(ro_crate);
+    }
+    Err(FetchError::NotFound(format!(
+        "Could not retrieve subcrate with id {id}"
+    )))
 }
 
 /// Extract the metadata URL from subjectOf property

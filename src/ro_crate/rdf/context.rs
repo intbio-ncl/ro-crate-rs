@@ -46,8 +46,7 @@ fn resolve_relative_iri(base: &str, relative: &str) -> String {
     }
 
     // Handle relative paths starting with "./"
-    if relative.starts_with("./") {
-        let rel_path = &relative[2..];
+    if let Some(rel_path) = relative.strip_prefix("./") {
         // Remove trailing filename from base if present
         let base_dir = if let Some(last_slash) = base.rfind('/') {
             &base[..=last_slash]

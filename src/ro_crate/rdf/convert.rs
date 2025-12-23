@@ -15,10 +15,11 @@ use super::graph::RdfGraph;
 use super::resolver::ContextResolverBuilder;
 
 /// Configuration for how relative IRIs are handled during RDF conversion.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum ConversionOptions {
     /// Strict mode: fail on any relative IRI that cannot be resolved.
     /// Use when the context should define @base or all IRIs should be absolute.
+    #[default]
     Strict,
 
     /// Permissive mode: allow relative IRIs to pass through unresolved.
@@ -28,12 +29,6 @@ pub enum ConversionOptions {
     /// Resolve relative IRIs against the provided base IRI.
     /// This takes precedence over @base defined in the context.
     WithBase(String),
-}
-
-impl Default for ConversionOptions {
-    fn default() -> Self {
-        Self::Strict
-    }
 }
 
 impl ConversionOptions {

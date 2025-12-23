@@ -486,7 +486,10 @@ mod tests {
     #[test]
     fn test_resolve_relative_current_dir() {
         let base = "http://example.org/crate/";
-        assert_eq!(resolve_relative_iri(base, "./"), "http://example.org/crate/");
+        assert_eq!(
+            resolve_relative_iri(base, "./"),
+            "http://example.org/crate/"
+        );
     }
 
     #[test]
@@ -611,7 +614,8 @@ mod tests {
     fn test_expand_term_checked_absolute_iri() {
         let ctx = test_context();
         assert_eq!(
-            ctx.expand_term_checked("http://example.org/thing", false).unwrap(),
+            ctx.expand_term_checked("http://example.org/thing", false)
+                .unwrap(),
             "http://example.org/thing"
         );
     }

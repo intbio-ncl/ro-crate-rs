@@ -13,7 +13,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     use rocraters::ro_crate::constraints::{DataType, Id, License};
     use rocraters::ro_crate::metadata_descriptor::MetadataDescriptor;
     use rocraters::ro_crate::rdf::{
-        rocrate_to_rdf, rocrate_to_rdf_with_options, ConversionOptions, ContextResolverBuilder,
+        rocrate_to_rdf, rocrate_to_rdf_with_options, ContextResolverBuilder, ConversionOptions,
         RdfFormat,
     };
     use rocraters::ro_crate::rocrate::{GraphVector, RoCrate, RoCrateContext};

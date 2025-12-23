@@ -78,8 +78,8 @@ impl RdfGraph {
     /// graph.write(file, RdfFormat::Turtle)?;
     /// ```
     pub fn write<W: Write>(&self, writer: W, format: RdfFormat) -> Result<(), RdfError> {
-        let mut serializer = RdfSerializer::from_format(format.to_oxrdf_format())
-            .for_writer(writer);
+        let mut serializer =
+            RdfSerializer::from_format(format.to_oxrdf_format()).for_writer(writer);
 
         // Serialize all triples in the graph
         for triple in self.iter() {
@@ -149,18 +149,19 @@ fn parse_rdf(input: &str, format: RdfFormat, base: Option<&str>) -> Result<Vec<T
     }
 
     let reader = input.as_bytes();
-    let quads: Result<Vec<Quad>, _> = parser
-        .for_reader(reader)
-        .collect();
+    let quads: Result<Vec<Quad>, _> = parser.for_reader(reader).collect();
 
     let quads = quads.map_err(|e| RdfError::ParseError(format!("Failed to parse RDF: {}", e)))?;
 
     // Convert Quads to Triples (ignoring graph information)
-    let triples = quads.into_iter().map(|q| Triple {
-        subject: q.subject,
-        predicate: q.predicate,
-        object: q.object,
-    }).collect();
+    let triples = quads
+        .into_iter()
+        .map(|q| Triple {
+            subject: q.subject,
+            predicate: q.predicate,
+            object: q.object,
+        })
+        .collect();
 
     Ok(triples)
 }
@@ -179,7 +180,7 @@ fn parse_rdf(input: &str, format: RdfFormat, base: Option<&str>) -> Result<Vec<T
 /// # Errors
 ///
 /// Returns `RdfError::MissingRootEntities` if required entities are not found.
-/// 
+///
 /// NOTE: This function might be not so performant on very large graphs due to multiple passes.
 fn find_root_entities(triples: &[Triple]) -> Result<(String, String), RdfError> {
     // Define important IRIs
@@ -201,7 +202,7 @@ fn find_root_entities(triples: &[Triple]) -> Result<(String, String), RdfError> 
 
     let metadata_iri = metadata_iri.ok_or_else(|| {
         RdfError::MissingRootEntities(
-            "Could not find metadata file IRI containing 'ro-crate-metadata.json'".to_string()
+            "Could not find metadata file IRI containing 'ro-crate-metadata.json'".to_string(),
         )
     })?;
 
@@ -220,7 +221,7 @@ fn find_root_entities(triples: &[Triple]) -> Result<(String, String), RdfError> 
 
     let root_iri = root_iri.ok_or_else(|| {
         RdfError::MissingRootEntities(
-            "Could not find root crate IRI via schema:about predicate".to_string()
+            "Could not find root crate IRI via schema:about predicate".to_string(),
         )
     })?;
 
@@ -240,9 +241,10 @@ fn find_root_entities(triples: &[Triple]) -> Result<(String, String), RdfError> 
     }
 
     if !is_dataset {
-        return Err(RdfError::MissingRootEntities(
-            format!("Root IRI '{}' is not a schema:Dataset", root_iri)
-        ));
+        return Err(RdfError::MissingRootEntities(format!(
+            "Root IRI '{}' is not a schema:Dataset",
+            root_iri
+        )));
     }
 
     Ok((metadata_iri, root_iri))
@@ -255,7 +257,6 @@ enum EntityType {
     Contextual,
 }
 
-
 /// Convert an RDF Term to an EntityValue.
 ///
 /// # Arguments
@@ -267,12 +268,8 @@ enum EntityType {
 /// An EntityValue representing the RDF term
 fn term_to_entity_value(term: &Term) -> EntityValue {
     match term {
-        Term::NamedNode(node) => {
-            EntityValue::EntityId(Id::Id(node.as_str().to_string()))
-        }
-        Term::BlankNode(node) => {
-            EntityValue::EntityId(Id::Id(format!("_:{}", node.as_str())))
-        }
+        Term::NamedNode(node) => EntityValue::EntityId(Id::Id(node.as_str().to_string())),
+        Term::BlankNode(node) => EntityValue::EntityId(Id::Id(format!("_:{}", node.as_str()))),
         Term::Literal(literal) => {
             // Try to parse as number or boolean first
             let value_str = literal.value();
@@ -300,12 +297,14 @@ fn term_to_entity_value(term: &Term) -> EntityValue {
     }
 }
 
-
 /// Extract all properties for a subject IRI from triples (without context compaction).
 ///
 /// This is used internally for graph traversal where property names don't matter.
 /// For final entity building, use `extract_entity_properties_with_context` instead.
-fn extract_entity_properties_simple(subject_iri: &str, triples: &[Triple]) -> HashMap<String, EntityValue> {
+fn extract_entity_properties_simple(
+    subject_iri: &str,
+    triples: &[Triple],
+) -> HashMap<String, EntityValue> {
     let rdf_type = NamedNode::new_unchecked("http://www.w3.org/1999/02/22-rdf-syntax-ns#type");
     let mut properties: HashMap<String, Vec<EntityValue>> = HashMap::new();
 
@@ -321,9 +320,7 @@ fn extract_entity_properties_simple(subject_iri: &str, triples: &[Triple]) -> Ha
                 let property_name = triple.predicate.as_str().to_string();
                 let value = term_to_entity_value(&triple.object);
 
-                properties.entry(property_name)
-                    .or_default()
-                    .push(value);
+                properties.entry(property_name).or_default().push(value);
             }
         }
     }
@@ -416,9 +413,9 @@ fn is_vocabulary_iri(iri: &str, context: &ResolvedContext) -> bool {
 /// An IRI that is referenced but doesn't exist as a subject is a "dangling reference"
 /// pointing to an external resource not defined in this RO-Crate.
 fn is_entity_subject(iri: &str, triples: &[Triple]) -> bool {
-    triples.iter().any(|t| {
-        matches!(&t.subject, NamedOrBlankNode::NamedNode(n) if n.as_str() == iri)
-    })
+    triples
+        .iter()
+        .any(|t| matches!(&t.subject, NamedOrBlankNode::NamedNode(n) if n.as_str() == iri))
 }
 
 /// Walk the graph from root, collecting all reachable entity IRIs.
@@ -580,14 +577,15 @@ fn infer_base_from_metadata(metadata_iri: &str) -> Option<String> {
     None
 }
 
-
-
-
 /// Helper function to extract types from triples for a given IRI.
 ///
 /// Returns a tuple of (DataType, Vec<String>) where the Vec contains raw type strings
 /// needed for entity classification.
-fn extract_types(iri: &str, triples: &[Triple], context: &ResolvedContext) -> (DataType, Vec<String>) {
+fn extract_types(
+    iri: &str,
+    triples: &[Triple],
+    context: &ResolvedContext,
+) -> (DataType, Vec<String>) {
     let rdf_type = NamedNode::new_unchecked("http://www.w3.org/1999/02/22-rdf-syntax-ns#type");
     let mut types = Vec::new();
 
@@ -626,8 +624,13 @@ fn compact_entity_properties(
 /// Helper function to add "./" prefix to relative paths (for RO-Crate compliance).
 fn ensure_relative_prefix(iri: &str) -> String {
     // If it's already a relative path or an absolute URI, return as-is
-    if iri.starts_with("./") || iri.starts_with("../") || iri.starts_with("http://")
-        || iri.starts_with("https://") || iri.starts_with("#") || iri.starts_with("_:") {
+    if iri.starts_with("./")
+        || iri.starts_with("../")
+        || iri.starts_with("http://")
+        || iri.starts_with("https://")
+        || iri.starts_with("#")
+        || iri.starts_with("_:")
+    {
         iri.to_string()
     } else if !iri.contains(':') {
         // It's a bare path (like "data.csv"), add "./" prefix
@@ -715,9 +718,7 @@ fn extract_entity_properties_with_context(
                 let property_name = context.compact_iri(triple.predicate.as_str());
                 let value = term_to_entity_value(&triple.object);
 
-                properties.entry(property_name)
-                    .or_default()
-                    .push(value);
+                properties.entry(property_name).or_default().push(value);
             }
         }
     }
@@ -742,11 +743,13 @@ fn build_metadata_descriptor(
     triples: &[Triple],
     context: &ResolvedContext,
 ) -> MetadataDescriptor {
-    let mut metadata_properties = extract_entity_properties_with_context(metadata_iri, triples, context);
+    let mut metadata_properties =
+        extract_entity_properties_with_context(metadata_iri, triples, context);
     let (metadata_type, _) = extract_types(metadata_iri, triples, context);
 
     // Remove 'about' from dynamic_entity as it's a required field
-    let about = metadata_properties.remove("about")
+    let about = metadata_properties
+        .remove("about")
         .and_then(|v| match v {
             EntityValue::EntityId(id) => Some(id),
             _ => None,
@@ -782,44 +785,60 @@ fn build_root_entity(
     let (root_type, _) = extract_types(root_iri, triples, context);
 
     // Extract SHOULD fields with warnings for missing values
-    let name = root_properties.remove("name")
+    let name = root_properties
+        .remove("name")
         .and_then(|v| match v {
             EntityValue::EntityString(s) => Some(s),
             _ => None,
         })
         .unwrap_or_else(|| {
-            log::warn!("Root entity '{}' missing 'name' property (SHOULD per RO-Crate spec)", root_iri);
+            log::warn!(
+                "Root entity '{}' missing 'name' property (SHOULD per RO-Crate spec)",
+                root_iri
+            );
             String::new()
         });
 
-    let description = root_properties.remove("description")
+    let description = root_properties
+        .remove("description")
         .and_then(|v| match v {
             EntityValue::EntityString(s) => Some(s),
             _ => None,
         })
         .unwrap_or_else(|| {
-            log::warn!("Root entity '{}' missing 'description' property (SHOULD per RO-Crate spec)", root_iri);
+            log::warn!(
+                "Root entity '{}' missing 'description' property (SHOULD per RO-Crate spec)",
+                root_iri
+            );
             String::new()
         });
 
-    let date_published = root_properties.remove("datePublished")
+    let date_published = root_properties
+        .remove("datePublished")
         .and_then(|v| match v {
             EntityValue::EntityString(s) => Some(s),
             _ => None,
         })
         .unwrap_or_else(|| {
-            log::warn!("Root entity '{}' missing 'datePublished' property (SHOULD per RO-Crate spec)", root_iri);
+            log::warn!(
+                "Root entity '{}' missing 'datePublished' property (SHOULD per RO-Crate spec)",
+                root_iri
+            );
             String::new()
         });
 
-    let license = root_properties.remove("license")
+    let license = root_properties
+        .remove("license")
         .map(|v| match v {
             EntityValue::EntityId(id) => License::Id(id),
             EntityValue::EntityString(s) => License::Description(s),
             _ => License::Description(String::new()),
         })
         .unwrap_or_else(|| {
-            log::warn!("Root entity '{}' missing 'license' property (SHOULD per RO-Crate spec)", root_iri);
+            log::warn!(
+                "Root entity '{}' missing 'license' property (SHOULD per RO-Crate spec)",
+                root_iri
+            );
             License::Description(String::new())
         });
 
@@ -841,11 +860,7 @@ fn build_root_entity(
 }
 
 /// Build a DataEntity or ContextualEntity from triples.
-fn build_graph_entity(
-    iri: &str,
-    triples: &[Triple],
-    context: &ResolvedContext,
-) -> GraphVector {
+fn build_graph_entity(iri: &str, triples: &[Triple], context: &ResolvedContext) -> GraphVector {
     let mut properties = extract_entity_properties_with_context(iri, triples, context);
     let (entity_type, type_strings) = extract_types(iri, triples, context);
 
@@ -857,20 +872,16 @@ fn build_graph_entity(
 
     // Classify entity based on types and IRI patterns
     match classify_entity(&compacted_id, &type_strings) {
-        EntityType::Data => {
-            GraphVector::DataEntity(DataEntity {
-                id: compacted_id,
-                type_: entity_type,
-                dynamic_entity: Some(properties),
-            })
-        }
-        EntityType::Contextual => {
-            GraphVector::ContextualEntity(ContextualEntity {
-                id: compacted_id,
-                type_: entity_type,
-                dynamic_entity: Some(properties),
-            })
-        }
+        EntityType::Data => GraphVector::DataEntity(DataEntity {
+            id: compacted_id,
+            type_: entity_type,
+            dynamic_entity: Some(properties),
+        }),
+        EntityType::Contextual => GraphVector::ContextualEntity(ContextualEntity {
+            id: compacted_id,
+            type_: entity_type,
+            dynamic_entity: Some(properties),
+        }),
     }
 }
 
@@ -883,7 +894,8 @@ fn rdf_to_rocrate_with_context(
     let (metadata_iri, root_iri) = find_root_entities(&triples)?;
 
     // Build metadata descriptor and root entity
-    let metadata_descriptor = build_metadata_descriptor(&metadata_iri, &root_iri, &triples, &context);
+    let metadata_descriptor =
+        build_metadata_descriptor(&metadata_iri, &root_iri, &triples, &context);
     let root_entity = build_root_entity(&root_iri, &triples, &context);
 
     // Walk the graph to collect reachable entities
@@ -903,7 +915,10 @@ fn rdf_to_rocrate_with_context(
     // Warn about unreferenced entities
     for iri in &all_iris {
         if !reachable_iris.contains(iri) {
-            log::warn!("Entity '{}' is not reachable from root and will be excluded", iri);
+            log::warn!(
+                "Entity '{}' is not reachable from root and will be excluded",
+                iri
+            );
         }
     }
 
@@ -924,11 +939,13 @@ fn rdf_to_rocrate_with_context(
     }
 
     // Create RoCrate with RO-Crate 1.2 default context
-    let ro_context = RoCrateContext::ReferenceContext(
-        "https://w3id.org/ro/crate/1.2/context".to_string()
-    );
+    let ro_context =
+        RoCrateContext::ReferenceContext("https://w3id.org/ro/crate/1.2/context".to_string());
 
-    Ok(RoCrate { context: ro_context, graph })
+    Ok(RoCrate {
+        context: ro_context,
+        graph,
+    })
 }
 
 /// Convert an RdfGraph to a RoCrate structure.
@@ -987,7 +1004,11 @@ pub fn rdf_graph_to_rocrate(graph: RdfGraph) -> Result<RoCrate, RdfError> {
 /// let rdf_data = "..."; // Turtle format RDF
 /// let crate = rdf_to_rocrate(rdf_data, RdfFormat::Turtle, None)?;
 /// ```
-pub fn rdf_to_rocrate(input: &str, format: RdfFormat, base: Option<&str>) -> Result<RoCrate, RdfError> {
+pub fn rdf_to_rocrate(
+    input: &str,
+    format: RdfFormat,
+    base: Option<&str>,
+) -> Result<RoCrate, RdfError> {
     // Parse RDF into triples
     let triples = parse_rdf(input, format, base)?;
 
@@ -1001,12 +1022,12 @@ pub fn rdf_to_rocrate(input: &str, format: RdfFormat, base: Option<&str>) -> Res
         .unwrap_or_else(|| "http://example.org/".to_string());
 
     // Create a ResolvedContext with RO-Crate 1.2 default context + base IRI
-    let ro_context = RoCrateContext::ReferenceContext(
-        "https://w3id.org/ro/crate/1.2/context".to_string()
-    );
+    let ro_context =
+        RoCrateContext::ReferenceContext("https://w3id.org/ro/crate/1.2/context".to_string());
 
     let resolver = ContextResolverBuilder::default();
-    let mut context = resolver.resolve(&ro_context)
+    let mut context = resolver
+        .resolve(&ro_context)
         .map_err(|e| RdfError::ParseError(format!("Failed to resolve context: {}", e)))?;
 
     // Set the base IRI in the context for proper compaction
@@ -1080,22 +1101,10 @@ mod tests {
 
     #[test]
     fn test_format_conversion() {
-        assert_eq!(
-            RdfFormat::Turtle.to_oxrdf_format(),
-            OxRdfFormat::Turtle
-        );
-        assert_eq!(
-            RdfFormat::NTriples.to_oxrdf_format(),
-            OxRdfFormat::NTriples
-        );
-        assert_eq!(
-            RdfFormat::NQuads.to_oxrdf_format(),
-            OxRdfFormat::NQuads
-        );
-        assert_eq!(
-            RdfFormat::RdfXml.to_oxrdf_format(),
-            OxRdfFormat::RdfXml
-        );
+        assert_eq!(RdfFormat::Turtle.to_oxrdf_format(), OxRdfFormat::Turtle);
+        assert_eq!(RdfFormat::NTriples.to_oxrdf_format(), OxRdfFormat::NTriples);
+        assert_eq!(RdfFormat::NQuads.to_oxrdf_format(), OxRdfFormat::NQuads);
+        assert_eq!(RdfFormat::RdfXml.to_oxrdf_format(), OxRdfFormat::RdfXml);
     }
 
     #[test]
@@ -1191,8 +1200,14 @@ mod tests {
         assert_eq!(crate_obj.graph.len(), 2);
 
         // Check that we have a MetadataDescriptor and RootDataEntity
-        let has_metadata = crate_obj.graph.iter().any(|g| matches!(g, GraphVector::MetadataDescriptor(_)));
-        let has_root = crate_obj.graph.iter().any(|g| matches!(g, GraphVector::RootDataEntity(_)));
+        let has_metadata = crate_obj
+            .graph
+            .iter()
+            .any(|g| matches!(g, GraphVector::MetadataDescriptor(_)));
+        let has_root = crate_obj
+            .graph
+            .iter()
+            .any(|g| matches!(g, GraphVector::RootDataEntity(_)));
         assert!(has_metadata);
         assert!(has_root);
     }
@@ -1211,15 +1226,33 @@ mod tests {
         // Without File/Dataset type, entity is Contextual regardless of @id
         assert_eq!(classify_entity("./data.txt", &[]), EntityType::Contextual);
         assert_eq!(classify_entity("../file.csv", &[]), EntityType::Contextual);
-        assert_eq!(classify_entity("http://example.org/data.json", &[]), EntityType::Contextual);
+        assert_eq!(
+            classify_entity("http://example.org/data.json", &[]),
+            EntityType::Contextual
+        );
 
         // DataEntity: File type (compact form) with non-# @id
-        assert_eq!(classify_entity("./data.txt", &["File".to_string()]), EntityType::Data);
-        assert_eq!(classify_entity("http://example.org/data", &["File".to_string()]), EntityType::Data);
+        assert_eq!(
+            classify_entity("./data.txt", &["File".to_string()]),
+            EntityType::Data
+        );
+        assert_eq!(
+            classify_entity("http://example.org/data", &["File".to_string()]),
+            EntityType::Data
+        );
 
         // DataEntity: MediaObject (same as File in RO-Crate) with non-# @id
-        assert_eq!(classify_entity("./data.txt", &["MediaObject".to_string()]), EntityType::Data);
-        assert_eq!(classify_entity("http://example.org/data", &["schema:MediaObject".to_string()]), EntityType::Data);
+        assert_eq!(
+            classify_entity("./data.txt", &["MediaObject".to_string()]),
+            EntityType::Data
+        );
+        assert_eq!(
+            classify_entity(
+                "http://example.org/data",
+                &["schema:MediaObject".to_string()]
+            ),
+            EntityType::Data
+        );
 
         // DataEntity: File type with expanded IRI (http://schema.org/MediaObject)
         assert_eq!(
@@ -1228,21 +1261,42 @@ mod tests {
         );
 
         // DataEntity: Dataset type
-        assert_eq!(classify_entity("http://example.org/item", &["Dataset".to_string()]), EntityType::Data);
+        assert_eq!(
+            classify_entity("http://example.org/item", &["Dataset".to_string()]),
+            EntityType::Data
+        );
         assert_eq!(
             classify_entity("./subdir/", &["http://schema.org/Dataset".to_string()]),
             EntityType::Data
         );
 
         // ContextualEntity: File/Dataset with # prefix @id (local identifier)
-        assert_eq!(classify_entity("#file1", &["File".to_string()]), EntityType::Contextual);
-        assert_eq!(classify_entity("#dataset1", &["Dataset".to_string()]), EntityType::Contextual);
-        assert_eq!(classify_entity("#media1", &["MediaObject".to_string()]), EntityType::Contextual);
+        assert_eq!(
+            classify_entity("#file1", &["File".to_string()]),
+            EntityType::Contextual
+        );
+        assert_eq!(
+            classify_entity("#dataset1", &["Dataset".to_string()]),
+            EntityType::Contextual
+        );
+        assert_eq!(
+            classify_entity("#media1", &["MediaObject".to_string()]),
+            EntityType::Contextual
+        );
 
         // ContextualEntity: non-File/Dataset types
         assert_eq!(classify_entity("#person1", &[]), EntityType::Contextual);
-        assert_eq!(classify_entity("http://orcid.org/0000-0001-2345-6789", &["Person".to_string()]), EntityType::Contextual);
-        assert_eq!(classify_entity("http://example.org/alice", &["Person".to_string()]), EntityType::Contextual);
+        assert_eq!(
+            classify_entity(
+                "http://orcid.org/0000-0001-2345-6789",
+                &["Person".to_string()]
+            ),
+            EntityType::Contextual
+        );
+        assert_eq!(
+            classify_entity("http://example.org/alice", &["Person".to_string()]),
+            EntityType::Contextual
+        );
     }
 
     #[test]
@@ -1317,9 +1371,8 @@ mod tests {
         let triples = parse_rdf(turtle, RdfFormat::Turtle, None).unwrap();
 
         // Create a context with schema.org prefix for vocabulary filtering
-        let ro_context = RoCrateContext::ReferenceContext(
-            "https://w3id.org/ro/crate/1.2/context".to_string()
-        );
+        let ro_context =
+            RoCrateContext::ReferenceContext("https://w3id.org/ro/crate/1.2/context".to_string());
         let resolver = ContextResolverBuilder::default();
         let context = resolver.resolve(&ro_context).unwrap();
 
@@ -1371,19 +1424,31 @@ mod tests {
         assert_eq!(crate_obj.graph.len(), 4);
 
         // Check metadata descriptor
-        let has_metadata = crate_obj.graph.iter().any(|g| matches!(g, GraphVector::MetadataDescriptor(_)));
+        let has_metadata = crate_obj
+            .graph
+            .iter()
+            .any(|g| matches!(g, GraphVector::MetadataDescriptor(_)));
         assert!(has_metadata);
 
         // Check root entity
-        let has_root = crate_obj.graph.iter().any(|g| matches!(g, GraphVector::RootDataEntity(_)));
+        let has_root = crate_obj
+            .graph
+            .iter()
+            .any(|g| matches!(g, GraphVector::RootDataEntity(_)));
         assert!(has_root);
 
         // Check data entity
-        let has_data = crate_obj.graph.iter().any(|g| matches!(g, GraphVector::DataEntity(_)));
+        let has_data = crate_obj
+            .graph
+            .iter()
+            .any(|g| matches!(g, GraphVector::DataEntity(_)));
         assert!(has_data);
 
         // Check contextual entity
-        let has_contextual = crate_obj.graph.iter().any(|g| matches!(g, GraphVector::ContextualEntity(_)));
+        let has_contextual = crate_obj
+            .graph
+            .iter()
+            .any(|g| matches!(g, GraphVector::ContextualEntity(_)));
         assert!(has_contextual);
     }
 
@@ -1478,7 +1543,6 @@ mod tests {
         let base = infer_base_from_metadata("ro-crate-metadata.json");
         assert_eq!(base, None);
     }
-
 
     #[test]
     fn test_rdf_to_rocrate_with_compaction() {
@@ -1611,7 +1675,7 @@ mod tests {
 
         let original_crate = RoCrate {
             context: RoCrateContext::ReferenceContext(
-                "https://w3id.org/ro/crate/1.2/context".to_string()
+                "https://w3id.org/ro/crate/1.2/context".to_string(),
             ),
             graph: vec![
                 GraphVector::MetadataDescriptor(metadata),
@@ -1624,16 +1688,19 @@ mod tests {
         let rdf_graph = rocrate_to_rdf_with_options(
             &original_crate,
             resolver,
-            ConversionOptions::WithBase("http://example.org/".to_string())
-        ).expect("RO-Crate to RDF conversion failed");
+            ConversionOptions::WithBase("http://example.org/".to_string()),
+        )
+        .expect("RO-Crate to RDF conversion failed");
 
         // Serialize to Turtle
-        let turtle = rdf_graph.to_string(RdfFormat::Turtle)
+        let turtle = rdf_graph
+            .to_string(RdfFormat::Turtle)
             .expect("RDF serialization failed");
 
         // Convert back to RO-Crate
-        let restored_crate = rdf_to_rocrate(&turtle, RdfFormat::Turtle, Some("http://example.org/"))
-            .expect("RDF to RO-Crate conversion failed");
+        let restored_crate =
+            rdf_to_rocrate(&turtle, RdfFormat::Turtle, Some("http://example.org/"))
+                .expect("RDF to RO-Crate conversion failed");
 
         // Verify structure is preserved
         assert_eq!(restored_crate.graph.len(), 2);
@@ -1669,8 +1736,8 @@ mod tests {
     #[test]
     fn test_rdf_graph_to_rocrate_uses_context() {
         use crate::ro_crate::rdf::convert::{rocrate_to_rdf_with_options, ConversionOptions};
-        use crate::ro_crate::rdf::resolver::ContextResolverBuilder;
         use crate::ro_crate::rdf::rdf_graph_to_rocrate;
+        use crate::ro_crate::rdf::resolver::ContextResolverBuilder;
 
         // Create a minimal RO-Crate with schema.org terms
         let metadata = MetadataDescriptor {
@@ -1682,7 +1749,10 @@ mod tests {
         };
 
         let mut root_props = HashMap::new();
-        root_props.insert("author".to_string(), EntityValue::EntityId(Id::Id("./person/alice".to_string())));
+        root_props.insert(
+            "author".to_string(),
+            EntityValue::EntityId(Id::Id("./person/alice".to_string())),
+        );
 
         let root = RootDataEntity {
             id: "./".to_string(),
@@ -1696,7 +1766,7 @@ mod tests {
 
         let original_crate = RoCrate {
             context: RoCrateContext::ReferenceContext(
-                "https://w3id.org/ro/crate/1.2/context".to_string()
+                "https://w3id.org/ro/crate/1.2/context".to_string(),
             ),
             graph: vec![
                 GraphVector::MetadataDescriptor(metadata),
@@ -1708,18 +1778,21 @@ mod tests {
         let rdf_graph = rocrate_to_rdf_with_options(
             &original_crate,
             resolver,
-            ConversionOptions::WithBase("http://example.org/".to_string())
-        ).expect("RO-Crate to RDF conversion failed");
+            ConversionOptions::WithBase("http://example.org/".to_string()),
+        )
+        .expect("RO-Crate to RDF conversion failed");
 
         // Verify graph has triples
         assert!(!rdf_graph.is_empty(), "RDF graph should not be empty");
 
         // Verify context is stored in graph
-        assert!(!rdf_graph.context.terms.is_empty() || !rdf_graph.context.prefixes.is_empty(),
-                "RDF graph should preserve context");
+        assert!(
+            !rdf_graph.context.terms.is_empty() || !rdf_graph.context.prefixes.is_empty(),
+            "RDF graph should preserve context"
+        );
 
-        let restored_crate = rdf_graph_to_rocrate(rdf_graph)
-            .expect("RDF graph to RO-Crate conversion failed");
+        let restored_crate =
+            rdf_graph_to_rocrate(rdf_graph).expect("RDF graph to RO-Crate conversion failed");
 
         // Verify context was used for compaction
         let root = restored_crate.graph.iter().find_map(|g| {
@@ -1734,13 +1807,19 @@ mod tests {
 
         // Verify compacted properties (schema.org terms compacted to short names)
         assert_eq!(root.name, "Test Dataset", "Name should be preserved");
-        assert_eq!(root.description, "Testing context preservation in rdf_graph_to_rocrate", "Description should be preserved");
+        assert_eq!(
+            root.description, "Testing context preservation in rdf_graph_to_rocrate",
+            "Description should be preserved"
+        );
 
         // Verify author reference is compacted with "./" prefix
         if let Some(props) = &root.dynamic_entity {
             if let Some(EntityValue::EntityId(Id::Id(author_id))) = props.get("author") {
                 // Should be compacted to "./person/alice" not full IRI
-                assert_eq!(author_id, "./person/alice", "Author reference should use compacted IRI with ./ prefix");
+                assert_eq!(
+                    author_id, "./person/alice",
+                    "Author reference should use compacted IRI with ./ prefix"
+                );
             }
         }
 
@@ -1754,9 +1833,15 @@ mod tests {
         });
         assert!(metadata.is_some(), "Metadata descriptor should exist");
         let metadata = metadata.unwrap();
-        assert_eq!(metadata.id, "ro-crate-metadata.json", "Metadata ID should be compacted");
+        assert_eq!(
+            metadata.id, "ro-crate-metadata.json",
+            "Metadata ID should be compacted"
+        );
 
-        assert!(!restored_crate.graph.is_empty(), "Restored crate should have entities");
+        assert!(
+            !restored_crate.graph.is_empty(),
+            "Restored crate should have entities"
+        );
     }
 
     #[test]
@@ -1788,15 +1873,27 @@ mod tests {
         });
         assert!(root.is_some(), "Root entity should exist");
         let root = root.unwrap();
-        assert_eq!(root.name, "Test Dataset", "Predicate 'schema:name' should be compacted to 'name'");
-        assert_eq!(root.description, "Testing compaction", "Predicate 'schema:description' should be compacted to 'description'");
+        assert_eq!(
+            root.name, "Test Dataset",
+            "Predicate 'schema:name' should be compacted to 'name'"
+        );
+        assert_eq!(
+            root.description, "Testing compaction",
+            "Predicate 'schema:description' should be compacted to 'description'"
+        );
 
         // Verify types are compacted (schema:Dataset → Dataset)
-        assert_eq!(root.type_, DataType::Term("Dataset".to_string()),
-                   "Type 'http://schema.org/Dataset' should be compacted to 'Dataset'");
+        assert_eq!(
+            root.type_,
+            DataType::Term("Dataset".to_string()),
+            "Type 'http://schema.org/Dataset' should be compacted to 'Dataset'"
+        );
 
         // Verify entity IDs are compacted (http://example.org/ → ./)
-        assert_eq!(root.id, "./", "Entity ID should be compacted to base-relative with './' prefix");
+        assert_eq!(
+            root.id, "./",
+            "Entity ID should be compacted to base-relative with './' prefix"
+        );
     }
 
     #[test]
@@ -1845,17 +1942,29 @@ mod tests {
         let person = person.unwrap();
 
         // Verify type is compacted: http://schema.org/Person → Person
-        assert_eq!(person.type_, DataType::Term("Person".to_string()),
-                   "Type 'http://schema.org/Person' should compact to 'Person'");
+        assert_eq!(
+            person.type_,
+            DataType::Term("Person".to_string()),
+            "Type 'http://schema.org/Person' should compact to 'Person'"
+        );
 
         // Verify predicates are compacted
         if let Some(props) = &person.dynamic_entity {
             // schema:name → name
-            assert!(props.contains_key("name"), "Property 'schema:name' should be compacted to 'name'");
+            assert!(
+                props.contains_key("name"),
+                "Property 'schema:name' should be compacted to 'name'"
+            );
             // schema:email → email
-            assert!(props.contains_key("email"), "Property 'schema:email' should be compacted to 'email'");
+            assert!(
+                props.contains_key("email"),
+                "Property 'schema:email' should be compacted to 'email'"
+            );
             // schema:affiliation → affiliation
-            assert!(props.contains_key("affiliation"), "Property 'schema:affiliation' should be compacted to 'affiliation'");
+            assert!(
+                props.contains_key("affiliation"),
+                "Property 'schema:affiliation' should be compacted to 'affiliation'"
+            );
         }
 
         // Check Organization type compaction
@@ -1872,8 +1981,11 @@ mod tests {
         });
         assert!(org.is_some(), "Organization entity should exist");
         let org = org.unwrap();
-        assert_eq!(org.type_, DataType::Term("Organization".to_string()),
-                   "Type 'http://schema.org/Organization' should compact to 'Organization'");
+        assert_eq!(
+            org.type_,
+            DataType::Term("Organization".to_string()),
+            "Type 'http://schema.org/Organization' should compact to 'Organization'"
+        );
     }
 
     #[test]
@@ -1909,18 +2021,26 @@ mod tests {
         let crate_obj = result.unwrap();
 
         // Check that all data entity IDs have "./" prefix (all are MediaObject = File)
-        let data_entities: Vec<_> = crate_obj.graph.iter().filter_map(|g| {
-            if let GraphVector::DataEntity(data) = g {
-                Some(data.id.as_str())
-            } else {
-                None
-            }
-        }).collect();
+        let data_entities: Vec<_> = crate_obj
+            .graph
+            .iter()
+            .filter_map(|g| {
+                if let GraphVector::DataEntity(data) = g {
+                    Some(data.id.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect();
 
-        assert!(data_entities.contains(&"./data.csv"),
-                "Entity ID 'http://example.org/data.csv' should compact to './data.csv'");
-        assert!(data_entities.contains(&"./subdir/file.txt"),
-                "Entity ID 'http://example.org/subdir/file.txt' should compact to './subdir/file.txt'");
+        assert!(
+            data_entities.contains(&"./data.csv"),
+            "Entity ID 'http://example.org/data.csv' should compact to './data.csv'"
+        );
+        assert!(
+            data_entities.contains(&"./subdir/file.txt"),
+            "Entity ID 'http://example.org/subdir/file.txt' should compact to './subdir/file.txt'"
+        );
         assert!(data_entities.contains(&"./images/photo.jpg"),
                 "Entity ID 'http://example.org/images/photo.jpg' should compact to './images/photo.jpg'");
 
@@ -1936,20 +2056,29 @@ mod tests {
 
         if let Some(props) = &root.unwrap().dynamic_entity {
             if let Some(EntityValue::EntityVec(parts)) = props.get("hasPart") {
-                let part_ids: Vec<String> = parts.iter().filter_map(|v| {
-                    if let EntityValue::EntityId(Id::Id(id)) = v {
-                        Some(id.clone())
-                    } else {
-                        None
-                    }
-                }).collect();
+                let part_ids: Vec<String> = parts
+                    .iter()
+                    .filter_map(|v| {
+                        if let EntityValue::EntityId(Id::Id(id)) = v {
+                            Some(id.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
 
-                assert!(part_ids.contains(&"./data.csv".to_string()),
-                        "hasPart reference should have './' prefix");
-                assert!(part_ids.contains(&"./subdir/file.txt".to_string()),
-                        "hasPart reference should have './' prefix");
-                assert!(part_ids.contains(&"./images/photo.jpg".to_string()),
-                        "hasPart reference should have './' prefix");
+                assert!(
+                    part_ids.contains(&"./data.csv".to_string()),
+                    "hasPart reference should have './' prefix"
+                );
+                assert!(
+                    part_ids.contains(&"./subdir/file.txt".to_string()),
+                    "hasPart reference should have './' prefix"
+                );
+                assert!(
+                    part_ids.contains(&"./images/photo.jpg".to_string()),
+                    "hasPart reference should have './' prefix"
+                );
             }
         }
     }
@@ -1975,14 +2104,20 @@ mod tests {
 
         // Test 3: Expanded File IRI (http://schema.org/MediaObject) → DataEntity
         assert_eq!(
-            classify_entity("http://example.org/resource", &["http://schema.org/MediaObject".to_string()]),
+            classify_entity(
+                "http://example.org/resource",
+                &["http://schema.org/MediaObject".to_string()]
+            ),
             EntityType::Data,
             "Entity with expanded MediaObject IRI should be classified as DataEntity"
         );
 
         // Test 4: Expanded Dataset IRI → DataEntity
         assert_eq!(
-            classify_entity("http://example.org/dataset", &["http://schema.org/Dataset".to_string()]),
+            classify_entity(
+                "http://example.org/dataset",
+                &["http://schema.org/Dataset".to_string()]
+            ),
             EntityType::Data,
             "Entity with expanded Dataset IRI should be classified as DataEntity"
         );
@@ -1996,7 +2131,10 @@ mod tests {
 
         // Test 6: Prefixed form schema:MediaObject → DataEntity
         assert_eq!(
-            classify_entity("http://example.org/file", &["schema:MediaObject".to_string()]),
+            classify_entity(
+                "http://example.org/file",
+                &["schema:MediaObject".to_string()]
+            ),
             EntityType::Data,
             "Entity with 'schema:MediaObject' type should be classified as DataEntity"
         );
@@ -2017,7 +2155,10 @@ mod tests {
         );
 
         assert_eq!(
-            classify_entity("http://orcid.org/0000-0001-2345-6789", &["Person".to_string()]),
+            classify_entity(
+                "http://orcid.org/0000-0001-2345-6789",
+                &["Person".to_string()]
+            ),
             EntityType::Contextual,
             "Person type should be ContextualEntity"
         );
@@ -2044,7 +2185,10 @@ mod tests {
 
         // Test 11: Multiple types including File → DataEntity
         assert_eq!(
-            classify_entity("./photo.jpg", &["File".to_string(), "ImageObject".to_string()]),
+            classify_entity(
+                "./photo.jpg",
+                &["File".to_string(), "ImageObject".to_string()]
+            ),
             EntityType::Data,
             "Entity with both File and ImageObject should be DataEntity (File takes precedence)"
         );
@@ -2068,7 +2212,10 @@ mod tests {
         "#;
 
         let result = rdf_to_rocrate(turtle, RdfFormat::Turtle, Some("http://example.org/"));
-        assert!(result.is_ok(), "RDF parsing should succeed even with unknown IRIs");
+        assert!(
+            result.is_ok(),
+            "RDF parsing should succeed even with unknown IRIs"
+        );
 
         let crate_obj = result.unwrap();
 
@@ -2086,11 +2233,13 @@ mod tests {
             // Custom properties that can't be compacted should remain as full IRIs
             // Note: The actual behavior depends on how ResolvedContext handles unknown IRIs
             // It should either keep the full IRI or use the last segment
-            let has_custom_prop = props.keys().any(|k|
-                k.contains("custom") || k.contains("http://custom.example.org")
+            let has_custom_prop = props
+                .keys()
+                .any(|k| k.contains("custom") || k.contains("http://custom.example.org"));
+            assert!(
+                has_custom_prop,
+                "Unknown predicates should be preserved (either as full IRI or fallback)"
             );
-            assert!(has_custom_prop,
-                    "Unknown predicates should be preserved (either as full IRI or fallback)");
         }
     }
 
@@ -2136,60 +2285,87 @@ mod tests {
 
         let crate_obj = result.unwrap();
 
-        let root = crate_obj.graph.iter().find_map(|g| {
-            if let GraphVector::RootDataEntity(root) = g {
-                Some(root)
-            } else {
-                None
-            }
-        }).expect("Root should exist");
+        let root = crate_obj
+            .graph
+            .iter()
+            .find_map(|g| {
+                if let GraphVector::RootDataEntity(root) = g {
+                    Some(root)
+                } else {
+                    None
+                }
+            })
+            .expect("Root should exist");
 
-        assert_eq!(root.type_, DataType::Term("Dataset".to_string()),
-                   "schema:Dataset should compact to 'Dataset'");
-        assert_eq!(root.name, "Integration Test Dataset",
-                   "schema:name should compact to 'name'");
+        assert_eq!(
+            root.type_,
+            DataType::Term("Dataset".to_string()),
+            "schema:Dataset should compact to 'Dataset'"
+        );
+        assert_eq!(
+            root.name, "Integration Test Dataset",
+            "schema:name should compact to 'name'"
+        );
 
         assert_eq!(root.id, "./", "Root ID should be './'");
 
         // Person is ContextualEntity (not File/Dataset type)
-        let person = crate_obj.graph.iter().find_map(|g| {
-            if let GraphVector::ContextualEntity(ctx) = g {
-                if ctx.id.contains("bob") {
-                    Some(ctx)
+        let person = crate_obj
+            .graph
+            .iter()
+            .find_map(|g| {
+                if let GraphVector::ContextualEntity(ctx) = g {
+                    if ctx.id.contains("bob") {
+                        Some(ctx)
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 }
-            } else {
-                None
-            }
-        }).expect("Person should exist");
-        assert_eq!(person.id, "./person/bob",
-                   "Person ID should have './' prefix");
+            })
+            .expect("Person should exist");
+        assert_eq!(
+            person.id, "./person/bob",
+            "Person ID should have './' prefix"
+        );
 
         // CSV file is DataEntity (MediaObject = File)
-        let csv_file = crate_obj.graph.iter().find_map(|g| {
-            if let GraphVector::DataEntity(data) = g {
-                if data.id.contains("results.csv") {
-                    Some(data)
+        let csv_file = crate_obj
+            .graph
+            .iter()
+            .find_map(|g| {
+                if let GraphVector::DataEntity(data) = g {
+                    if data.id.contains("results.csv") {
+                        Some(data)
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 }
-            } else {
-                None
-            }
-        }).expect("CSV file should exist");
-        assert_eq!(csv_file.id, "./data/results.csv",
-                   "Data file ID should have './' prefix");
+            })
+            .expect("CSV file should exist");
+        assert_eq!(
+            csv_file.id, "./data/results.csv",
+            "Data file ID should have './' prefix"
+        );
 
-        assert_eq!(person.type_, DataType::Term("Person".to_string()),
-                   "Person type correctly identified");
+        assert_eq!(
+            person.type_,
+            DataType::Term("Person".to_string()),
+            "Person type correctly identified"
+        );
 
         match &csv_file.type_ {
             DataType::Term(t) => {
-                assert!(t == "MediaObject" || t == "File",
-                        "Data file should have MediaObject or File type, got: {}", t);
+                assert!(
+                    t == "MediaObject" || t == "File",
+                    "Data file should have MediaObject or File type, got: {}",
+                    t
+                );
             }
-            _ => panic!("Expected Term type for data file")
+            _ => panic!("Expected Term type for data file"),
         }
 
         // SoftwareSourceCode is NOT a Data Entity (not File or Dataset)
@@ -2205,23 +2381,35 @@ mod tests {
                 None
             }
         });
-        assert!(software.is_some(), "Software tool should exist as ContextualEntity");
-        assert_eq!(software.unwrap().type_, DataType::Term("SoftwareSourceCode".to_string()),
-                   "SoftwareSourceCode is ContextualEntity (not File/Dataset)");
+        assert!(
+            software.is_some(),
+            "Software tool should exist as ContextualEntity"
+        );
+        assert_eq!(
+            software.unwrap().type_,
+            DataType::Term("SoftwareSourceCode".to_string()),
+            "SoftwareSourceCode is ContextualEntity (not File/Dataset)"
+        );
 
         // README with MediaObject type is DataEntity
-        let readme = crate_obj.graph.iter().find_map(|g| {
-            if let GraphVector::DataEntity(data) = g {
-                if data.id.contains("readme") {
-                    Some(data)
+        let readme = crate_obj
+            .graph
+            .iter()
+            .find_map(|g| {
+                if let GraphVector::DataEntity(data) = g {
+                    if data.id.contains("readme") {
+                        Some(data)
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 }
-            } else {
-                None
-            }
-        }).expect("README should exist as DataEntity (MediaObject type)");
-        assert!(readme.id.ends_with(".md"),
-                ".md file with MediaObject type classified as DataEntity");
+            })
+            .expect("README should exist as DataEntity (MediaObject type)");
+        assert!(
+            readme.id.ends_with(".md"),
+            ".md file with MediaObject type classified as DataEntity"
+        );
     }
 }

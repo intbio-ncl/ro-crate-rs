@@ -211,9 +211,9 @@ impl<'a> RdfConverter<'a> {
                 .collect()),
 
             // Numeric literals
-            EntityValue::Entityi64(n) => {
-                Ok(vec![Term::Literal(self.typed_literal(n, &self.xsd_integer))])
-            }
+            EntityValue::Entityi64(n) => Ok(vec![Term::Literal(
+                self.typed_literal(n, &self.xsd_integer),
+            )]),
             EntityValue::Entityf64(n) => {
                 Ok(vec![Term::Literal(self.typed_literal(n, &self.xsd_double))])
             }
@@ -227,9 +227,9 @@ impl<'a> RdfConverter<'a> {
                 .collect()),
 
             // Boolean
-            EntityValue::EntityBool(b) => {
-                Ok(vec![Term::Literal(self.typed_literal(b, &self.xsd_boolean))])
-            }
+            EntityValue::EntityBool(b) => Ok(vec![Term::Literal(
+                self.typed_literal(b, &self.xsd_boolean),
+            )]),
 
             // References (Id, License, DataType)
             EntityValue::EntityId(id) => Ok(self
@@ -443,11 +443,10 @@ mod tests {
     }
 
     fn test_context_with_base() -> ResolvedContext {
-        let mut ctx = ResolvedContext::new(
-            crate::ro_crate::context::RoCrateContext::ReferenceContext(
+        let mut ctx =
+            ResolvedContext::new(crate::ro_crate::context::RoCrateContext::ReferenceContext(
                 "https://w3id.org/ro/crate/1.2/context".to_string(),
-            ),
-        );
+            ));
         ctx.base = Some("http://example.org/crate/".to_string());
         ctx
     }
@@ -468,11 +467,9 @@ mod tests {
 
     #[test]
     fn test_id_to_subject_relative_without_base_strict() {
-        let ctx = ResolvedContext::new(
-            crate::ro_crate::context::RoCrateContext::ReferenceContext(
-                "https://w3id.org/ro/crate/1.2/context".to_string(),
-            ),
-        );
+        let ctx = ResolvedContext::new(crate::ro_crate::context::RoCrateContext::ReferenceContext(
+            "https://w3id.org/ro/crate/1.2/context".to_string(),
+        ));
         let options = ConversionOptions::default(); // strict mode
 
         let result = id_to_subject("./", &ctx, &options);
@@ -482,11 +479,9 @@ mod tests {
 
     #[test]
     fn test_id_to_subject_relative_without_base_allow() {
-        let ctx = ResolvedContext::new(
-            crate::ro_crate::context::RoCrateContext::ReferenceContext(
-                "https://w3id.org/ro/crate/1.2/context".to_string(),
-            ),
-        );
+        let ctx = ResolvedContext::new(crate::ro_crate::context::RoCrateContext::ReferenceContext(
+            "https://w3id.org/ro/crate/1.2/context".to_string(),
+        ));
         let options = ConversionOptions::AllowRelative;
 
         // Should fail because "./" is not a valid absolute IRI

@@ -2,9 +2,11 @@ use crate::ro_crate::constraints::Id;
 use crate::ro_crate::data_entity::DataEntity;
 use crate::ro_crate::rocrate::RoCrate;
 use crate::ro_crate::write::is_not_url;
-use log::{debug, warn};
+use log::warn;
 use reqwest::header::{HeaderMap, ToStrError};
-use std::io::{Bytes, Cursor, Read};
+use sha2::Digest;
+use std::io::Read;
+use std::string::FromUtf8Error;
 use zip::result::ZipError;
 use zip::ZipArchive;
 
@@ -17,6 +19,8 @@ pub enum FetchError {
     ZipError(ZipError),
     IoError(std::io::Error),
     SerializationError(serde_json::Error),
+    BagItError(String),
+    FromUTF8Error(FromUtf8Error),
 }
 impl std::fmt::Display for FetchError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -41,6 +45,12 @@ impl std::fmt::Display for FetchError {
             }
             FetchError::SerializationError(err) => {
                 write!(f, "Serialization error `{}`", err)
+            }
+            FetchError::BagItError(err) => {
+                write!(f, "BagIt error `{}`", err)
+            }
+            FetchError::FromUTF8Error(err) => {
+                write!(f, "FromUTF8Error `{}`", err)
             }
         }
     }
@@ -73,6 +83,11 @@ impl From<serde_json::Error> for FetchError {
         FetchError::SerializationError(value)
     }
 }
+impl From<std::string::FromUtf8Error> for FetchError {
+    fn from(value: std::string::FromUtf8Error) -> Self {
+        FetchError::FromUTF8Error(value)
+    }
+}
 
 pub fn fetch_subcrates(rocrate: RoCrate) -> Result<Vec<RoCrate>, FetchError> {
     let subcrates = rocrate.get_subcrates();
@@ -89,7 +104,6 @@ pub fn fetch_subcrates(rocrate: RoCrate) -> Result<Vec<RoCrate>, FetchError> {
         let id = get_id(subcrate);
 
         if is_not_url(&id) {
-
             match try_resolve_local(&id) {
                 Ok(rocrate) => {
                     collected_subcrates.push(rocrate);
@@ -240,7 +254,7 @@ fn try_zip(headers: &HeaderMap, redirect_url: &str) -> Result<RoCrate, FetchErro
             let reader = std::io::Cursor::new(response);
             let mut archive = ZipArchive::new(reader)?;
 
-            // Retrieve the file by name
+            // Try retrieving file by name
             if let Ok(mut file_in_zip) = archive.by_name("ro-crate-metadata.json") {
                 // Read the file contents into memory
                 let mut buffer = Vec::new();
@@ -250,20 +264,14 @@ fn try_zip(headers: &HeaderMap, redirect_url: &str) -> Result<RoCrate, FetchErro
 
                 return Ok(subcrate);
             }
-            if let Ok(mut bagit) = archive.by_name("bagit.txt") {
-                // 5. If retrieved resource is a BagIt archive, extract and verify checksums,
-                //    then return data/ro-crate-metdata.json
-                let mut buffer = Vec::new();
-                bagit.read_to_end(&mut buffer)?;
 
-                let subcrate: RoCrate = serde_json::from_slice(&buffer)?;
-                return Ok(subcrate);
+            // Try to extract rocrate from bagit
+            if let Ok(rocrate) = try_bagit(archive.clone()) {
+                return Ok(rocrate);
             }
-            // Handle directories
+
+            // Try finding rocrate in subdirectories
             let names: Vec<String> = archive.file_names().map(|e| e.to_string()).collect();
-            if let Some(bagit) = names.iter().find(|x| x.contains("bagit.txt")) {
-                todo!("Handle bagit");
-            }
             if let Some(rocrate) = names.iter().find(|x| x.contains("metadata.json")) {
                 let mut file_in_zip = archive.by_name(rocrate)?;
 
@@ -277,4 +285,78 @@ fn try_zip(headers: &HeaderMap, redirect_url: &str) -> Result<RoCrate, FetchErro
         }
     }
     Err(FetchError::NotFound("No subcrate found".to_string()))
+}
+
+fn try_bagit(
+    mut archive: ZipArchive<std::io::Cursor<bytes::Bytes>>,
+) -> Result<RoCrate, FetchError> {
+    if archive.by_name("bagit.txt").is_ok() {
+        // 5. If retrieved resource is a BagIt archive, extract and verify checksums,
+        //    then return data/ro-crate-metdata.json
+        let mut rocrate = archive.by_name("data/ro-crate-metadata.json")?;
+        // Parse ro-crate
+        let mut ro_crate_buffer = Vec::new();
+        rocrate.read_to_end(&mut ro_crate_buffer)?;
+        let subcrate = serde_json::from_slice(&ro_crate_buffer)?;
+        drop(rocrate);
+
+        if let Ok(sha512hash) = try_verify_hash(&mut archive, Hash::Sha512) {
+            if sha512hash != hex::encode(sha2::Sha512::digest(&ro_crate_buffer)) {
+                return Err(FetchError::BagItError(
+                    "Hash mismatch of ro-crate-metadata.json in bagit archive".to_string(),
+                ));
+            }
+        } else {
+            let sha256hash = try_verify_hash(&mut archive, Hash::Sha256)?;
+
+            if sha256hash != hex::encode(sha2::Sha256::digest(&ro_crate_buffer)) {
+                return Err(FetchError::BagItError(
+                    "Hash mismatch of ro-crate-metadata.json in bagit archive".to_string(),
+                ));
+            }
+        }
+
+        Ok(subcrate)
+    } else {
+        Err(FetchError::BagItError(
+            "Could not crate BagIt from zip".to_string(),
+        ))
+    }
+}
+
+enum Hash {
+    Sha512,
+    Sha256,
+}
+
+fn try_verify_hash(
+    archive: &mut ZipArchive<std::io::Cursor<bytes::Bytes>>,
+    hash: Hash,
+) -> Result<String, FetchError> {
+    let manifest = match hash {
+        Hash::Sha512 => "manifest-sha512.txt",
+        Hash::Sha256 => "manifest-sha256.txt",
+    };
+    let mut sha512 = archive.by_name(manifest)?;
+    let mut buffer = Vec::new();
+    sha512.read_to_end(&mut buffer)?;
+
+    let hashes = String::from_utf8(buffer)?;
+    let hash = hashes
+        .lines()
+        .find_map(|line| {
+            if line.contains("ro-crate-metdata.json") {
+                if let Some((hash, _)) = line.split_once(' ') {
+                    Some(hash.to_string())
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+        .ok_or_else(|| {
+            FetchError::BagItError("Bagit does not list ro-crate-metadata.json".to_string())
+        })?;
+    Ok(hash)
 }

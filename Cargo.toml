@@ -33,7 +33,8 @@ log = "0.4.29"
 thiserror = "2.0.17"
 sha1 = "0.10.6"
 sha2 = "0.10.9"
-md-5 = "0.10.6"
+hex = "0.4.3"
+bytes = "1.11.0"
 
 [lib]
 name = "rocraters"
@@ -60,7 +61,8 @@ thiserror = { workspace = true }
 log = { workspace = true }
 sha1 = { workspace = true}# , optional = true }
 sha2 = { workspace = true}# , optional = true }
-md-5 = { workspace = true}# , optional = true }
+hex = { workspace = true}# , optional = true }
+bytes = { workspace = true}# , optional = true }
 
 [dev-dependencies]
 tempfile = "3.24"

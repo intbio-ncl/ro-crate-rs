@@ -21,4 +21,3 @@ pub mod schema;
 pub mod write;
 // #[cfg(feature = "subcrate-resolution")]
 pub mod subcrate_resolution;
-pub mod bagit;

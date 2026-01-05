@@ -122,11 +122,21 @@ pub fn fetch_subcrates(rocrate: RoCrate) -> Result<Vec<RoCrate>, FetchError> {
         }
     }
 
-    Ok(vec![])
+    Ok(collected_subcrates)
 }
 
 fn try_resolve_local(id: &str) -> Result<RoCrate, FetchError> {
-    todo!()
+    let path = if id.ends_with('/') {
+        format!("{id}ro-crate-metadata.json")
+    } else {
+        id.to_string()
+    };
+
+    let mut file = std::fs::File::open(path)?;
+    let mut buffer = Vec::new();
+    file.read_to_end(&mut buffer)?;
+
+    Ok(serde_json::from_slice(buffer.as_slice())?)
 }
 
 fn try_resolve_remote(id: &str) -> Result<RoCrate, FetchError> {
@@ -173,7 +183,6 @@ fn try_property(entity: &DataEntity, value: &str) -> Option<String> {
 }
 
 fn get_id(entity: &DataEntity) -> String {
-    // TODO:
     // 1. Try subjectOf (to url/path that leads to ro-crate-metadata.json)
     let id = if let Some(subject_of) = try_property(entity, "subjectOf") {
         subject_of
@@ -255,19 +264,25 @@ fn try_zip(headers: &HeaderMap, redirect_url: &str) -> Result<RoCrate, FetchErro
             let mut archive = ZipArchive::new(reader)?;
 
             // Try retrieving file by name
-            if let Ok(mut file_in_zip) = archive.by_name("ro-crate-metadata.json") {
-                // Read the file contents into memory
-                let mut buffer = Vec::new();
-                file_in_zip.read_to_end(&mut buffer)?;
+            match archive.by_name("ro-crate-metadata.json") {
+                Ok(mut file_in_zip) => {
+                    // Read the file contents into memory
+                    let mut buffer = Vec::new();
+                    file_in_zip.read_to_end(&mut buffer)?;
 
-                let subcrate: RoCrate = serde_json::from_slice(&buffer)?;
+                    let subcrate: RoCrate = serde_json::from_slice(&buffer)?;
 
-                return Ok(subcrate);
+                    return Ok(subcrate);
+                }
+                Err(err) => warn!("{}", err),
             }
 
             // Try to extract rocrate from bagit
-            if let Ok(rocrate) = try_bagit(archive.clone()) {
-                return Ok(rocrate);
+            match try_bagit(archive.clone()) {
+                Ok(rocrate) => {
+                    return Ok(rocrate);
+                }
+                Err(err) => warn!("{}", err),
             }
 
             // Try finding rocrate in subdirectories

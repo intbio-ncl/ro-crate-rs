@@ -531,8 +531,8 @@ pub fn is_not_url(path: &str) -> bool {
         || path.starts_with("file:");
 
     // If it looks like a file path, return true early
-    if path.contains("ro-crate-metadata.json") || path == "./" {
-        return false;
+    if path == "./" {
+        return true;
     }
 
     if is_extended_windows_path || is_normal_file_path {

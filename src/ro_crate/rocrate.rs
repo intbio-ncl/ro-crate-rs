@@ -307,14 +307,20 @@ impl RoCrate {
                             // specification
                             match entity {
                                 EntityValue::EntityId(Id::Id(crate_path)) => {
-                                    if crate_path.contains("https://w3id.org/ro/crate") {
+                                    // Do not match the root ro-crates metadata json file
+                                    if crate_path.contains("https://w3id.org/ro/crate")
+                                        && (entry.get_id() != "ro-crate-metdata.json")
+                                    {
                                         return Some(entry);
                                     }
                                 }
                                 EntityValue::EntityVec(entity_values) => {
                                     for value in entity_values {
                                         if let EntityValue::EntityId(Id::Id(crate_path)) = value {
-                                            if crate_path.contains("https://w3id.org/ro/crate") {
+                                            // Do not match the root ro-crates metadata json file
+                                            if crate_path.contains("https://w3id.org/ro/crate")
+                                                && (entry.get_id() != "ro-crate-metdata.json")
+                                            {
                                                 return Some(entry);
                                             }
                                         }

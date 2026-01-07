@@ -79,7 +79,12 @@ impl<'a> RdfConverter<'a> {
             .ctx
             .expand_term_checked(term, self.allow_relative)
             .map_err(RdfError::InvalidIri)?;
-        NamedNode::new(&expanded).map_err(|e| RdfError::InvalidIri(e.to_string()))
+        if self.allow_relative {
+            // Skip validation for relative IRIs
+            Ok(NamedNode::new_unchecked(&expanded))
+        } else {
+            NamedNode::new(&expanded).map_err(|e| RdfError::InvalidIri(e.to_string()))
+        }
     }
 
     /// Converts an Id to one or more NamedNodes.
@@ -484,9 +489,12 @@ mod tests {
         ));
         let options = ConversionOptions::AllowRelative;
 
-        // Should fail because "./" is not a valid absolute IRI
+        // AllowRelative permits relative IRIs without validation
         let result = id_to_subject("./", &ctx, &options);
-        assert!(result.is_err());
+        assert!(result.is_ok());
+        if let Ok(NamedOrBlankNode::NamedNode(node)) = result {
+            assert_eq!(node.as_str(), "./");
+        }
     }
 
     #[test]

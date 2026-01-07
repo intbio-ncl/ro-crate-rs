@@ -1,20 +1,18 @@
-//! Example: Exporting an RO-Crate to RDF formats
+//! RO-Crate to RDF export example.
 //!
-//! This example demonstrates how to convert an RO-Crate to RDF triples
-//! and serialize them to various formats (Turtle, N-Triples, RDF/XML).
+//! Demonstrates `ConversionOptions` for handling relative IRIs:
+//! - `Strict` (default): Fails on unresolvable relative IRIs
+//! - `WithBase`: Resolves relative IRIs against a base (recommended)
+//! - `AllowRelative`: Passes IRIs through unresolved
 //!
-//! Run with:
-//! ```bash
-//! cargo run --example rdf_export --features rdf
-//! ```
+//! Run: `cargo run --example rdf_export --features rdf`
 
 #[cfg(feature = "rdf")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     use rocraters::ro_crate::constraints::{DataType, Id, License};
     use rocraters::ro_crate::metadata_descriptor::MetadataDescriptor;
     use rocraters::ro_crate::rdf::{
-        rocrate_to_rdf, rocrate_to_rdf_with_options, ContextResolverBuilder, ConversionOptions,
-        RdfFormat,
+        rocrate_to_rdf_with_options, ContextResolverBuilder, ConversionOptions, RdfFormat,
     };
     use rocraters::ro_crate::rocrate::{GraphVector, RoCrate, RoCrateContext};
     use rocraters::ro_crate::root::RootDataEntity;
@@ -44,25 +42,62 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ],
     };
 
-    // Convert RO-Crate to RDF using default options
-    let resolver = ContextResolverBuilder::default();
-    let rdf_graph = rocrate_to_rdf(&rocrate, resolver)?;
+    // WithBase: resolves relative IRIs against the provided base (recommended)
+    println!("=== Option 1: WithBase (Recommended) ===\n");
 
-    println!("=== RO-Crate to RDF Conversion ===\n");
+    let resolver = ContextResolverBuilder::default();
+    let rdf_graph = rocrate_to_rdf_with_options(
+        &rocrate,
+        resolver,
+        ConversionOptions::with_base("https://example.org/crate/"),
+    )?;
+
     println!("Generated {} triples\n", rdf_graph.len());
 
-    // Export to Turtle format (human-readable)
     println!("--- Turtle Format ---");
     let turtle = rdf_graph.to_string(RdfFormat::Turtle)?;
     println!("{}\n", turtle);
 
-    // Export to N-Triples format (simple, line-based)
     println!("--- N-Triples Format ---");
     let ntriples = rdf_graph.to_string(RdfFormat::NTriples)?;
     println!("{}\n", ntriples);
 
-    // Convert with a custom base IRI
-    println!("--- With Custom Base IRI ---");
+    // Strict: fails on unresolvable relative IRIs (default behavior)
+    println!("=== Option 2: Strict (Default) ===\n");
+
+    let resolver = ContextResolverBuilder::default();
+    let strict_result = rocrate_to_rdf_with_options(
+        &rocrate,
+        resolver,
+        ConversionOptions::Strict,
+    );
+
+    match strict_result {
+        Ok(graph) => println!("Success: {} triples\n", graph.len()),
+        Err(e) => println!("Expected error (no @base defined): {}\n", e),
+    }
+
+    // AllowRelative: passes relative IRIs through unresolved (may produce invalid RDF)
+    println!("=== Option 3: AllowRelative ===\n");
+
+    let resolver = ContextResolverBuilder::default();
+    let rdf_allow_relative = rocrate_to_rdf_with_options(
+        &rocrate, // Same crate with relative IRIs
+        resolver,
+        ConversionOptions::AllowRelative,
+    );
+
+    match rdf_allow_relative {
+        Ok(graph) => {
+            println!("AllowRelative: {} triples (relative IRIs unresolved)", graph.len());
+            let turtle = graph.to_string(RdfFormat::Turtle)?;
+            println!("{}\n", turtle);
+        }
+        Err(e) => println!("AllowRelative failed: {}\n", e),
+    }
+
+    // Same crate with a different base IRI
+    println!("=== Different Base IRI ===\n");
     let resolver = ContextResolverBuilder::default();
     let rdf_with_base = rocrate_to_rdf_with_options(
         &rocrate,

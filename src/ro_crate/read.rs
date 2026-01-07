@@ -399,4 +399,33 @@ mod tests {
         let crate_error: CrateReadError = io_error.into();
         matches!(crate_error, CrateReadError::IoError(_));
     }
+
+    // RO-Crate 1.2 tests
+
+    #[test]
+    fn test_read_crate_1_2_success() {
+        let path = fixture_path("_ro-crate-metadata-minimal-1_2.json");
+
+        let crate_result = read_crate(&path, 0);
+        println!("{:?}", crate_result);
+        assert!(crate_result.is_ok());
+    }
+
+    #[test]
+    fn test_read_crate_1_2_dynamic() {
+        let path = fixture_path("_ro-crate-metadata-dynamic-1_2.json");
+
+        let crate_result = read_crate(&path, 0);
+        println!("{:?}", crate_result);
+        assert!(crate_result.is_ok());
+    }
+
+    #[test]
+    fn test_read_crate_1_2_complex_context() {
+        let path = fixture_path("_ro-crate-metadata-complex-context-1_2.json");
+
+        let crate_result = read_crate(&path, 0);
+        println!("{:?}", crate_result);
+        assert!(crate_result.is_ok());
+    }
 }

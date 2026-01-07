@@ -436,13 +436,18 @@ fn get_noncontained_paths(
 
         // Resolve the absolute path of the current ID
         if let Some(path) = get_absolute_path(Path::new(id)) {
-            // Check if the path exists
-            if path.exists() {
-                debug!("Absolute path: {:?}", path);
-                // Check if the path is outside the base crate directory
-                if is_outside_base_folder(&rocrate_path, &path) || inverse {
-                    nonrels.insert(id.to_string(), path);
-                }
+            // Path exists and was canonicalized
+            debug!("Absolute path: {:?}", path);
+            // Check if the path is outside the base crate directory
+            if is_outside_base_folder(&rocrate_path, &path) || inverse {
+                nonrels.insert(id.to_string(), path);
+            }
+        } else if Path::new(id).is_absolute() {
+            // Path is absolute but doesn't exist - still flag if outside crate
+            debug!("Non-existent absolute path: {:?}", id);
+            let path = Path::new(id).to_path_buf();
+            if is_outside_base_folder(&rocrate_path, &path) || inverse {
+                nonrels.insert(id.to_string(), path);
             }
         } else {
             debug!("ID: {:?}", id);

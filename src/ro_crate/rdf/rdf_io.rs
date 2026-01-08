@@ -257,7 +257,18 @@ enum EntityType {
     Contextual,
 }
 
+/// XSD namespace for datatype IRIs.
+const XSD_NS: &str = "http://www.w3.org/2001/XMLSchema#";
+
 /// Convert an RDF Term to an EntityValue.
+///
+/// This function respects RDF literal datatypes when present, using datatype-first
+/// parsing to ensure typed literals are correctly interpreted. For example:
+/// - `"42"^^xsd:string` is returned as a string (not parsed as integer)
+/// - `"1"^^xsd:boolean` is returned as boolean true
+/// - `"0"^^xsd:boolean` is returned as boolean false
+///
+/// For untyped literals or unknown datatypes, falls back to lexical heuristics.
 ///
 /// # Arguments
 ///
@@ -271,30 +282,105 @@ fn term_to_entity_value(term: &Term) -> EntityValue {
         Term::NamedNode(node) => EntityValue::EntityId(Id::Id(node.as_str().to_string())),
         Term::BlankNode(node) => EntityValue::EntityId(Id::Id(format!("_:{}", node.as_str()))),
         Term::Literal(literal) => {
-            // Try to parse as number or boolean first
             let value_str = literal.value();
+            let datatype = literal.datatype().as_str();
 
-            // Try boolean
-            if value_str == "true" || value_str == "false" {
-                if let Ok(bool_val) = value_str.parse::<bool>() {
-                    return EntityValue::EntityBool(bool_val);
+            // Check datatype FIRST before falling back to lexical heuristics
+            match datatype {
+                // xsd:string - always return as string, never parse
+                dt if dt == format!("{}string", XSD_NS) => {
+                    EntityValue::EntityString(value_str.to_string())
                 }
-            }
 
-            // Try integer
-            if let Ok(int_val) = value_str.parse::<i64>() {
-                return EntityValue::Entityi64(int_val);
-            }
+                // xsd:boolean - handle "true", "false", "1", "0"
+                dt if dt == format!("{}boolean", XSD_NS) => match value_str {
+                    "true" | "1" => EntityValue::EntityBool(true),
+                    "false" | "0" => EntityValue::EntityBool(false),
+                    _ => {
+                        log::warn!(
+                            "Invalid xsd:boolean value '{}', returning as string",
+                            value_str
+                        );
+                        EntityValue::EntityString(value_str.to_string())
+                    }
+                },
 
-            // Try float
-            if let Ok(float_val) = value_str.parse::<f64>() {
-                return EntityValue::Entityf64(float_val);
-            }
+                // xsd:integer and variants (int, long, short, byte, etc.)
+                dt if dt == format!("{}integer", XSD_NS)
+                    || dt == format!("{}int", XSD_NS)
+                    || dt == format!("{}long", XSD_NS)
+                    || dt == format!("{}short", XSD_NS)
+                    || dt == format!("{}byte", XSD_NS)
+                    || dt == format!("{}nonNegativeInteger", XSD_NS)
+                    || dt == format!("{}nonPositiveInteger", XSD_NS)
+                    || dt == format!("{}positiveInteger", XSD_NS)
+                    || dt == format!("{}negativeInteger", XSD_NS)
+                    || dt == format!("{}unsignedLong", XSD_NS)
+                    || dt == format!("{}unsignedInt", XSD_NS)
+                    || dt == format!("{}unsignedShort", XSD_NS)
+                    || dt == format!("{}unsignedByte", XSD_NS) =>
+                {
+                    value_str.parse::<i64>().map_or_else(
+                        |_| {
+                            log::warn!(
+                                "Failed to parse '{}' as integer, returning as string",
+                                value_str
+                            );
+                            EntityValue::EntityString(value_str.to_string())
+                        },
+                        EntityValue::Entityi64,
+                    )
+                }
 
-            // Default to string
-            EntityValue::EntityString(value_str.to_string())
+                // xsd:double, xsd:float, xsd:decimal - parse as f64
+                dt if dt == format!("{}double", XSD_NS)
+                    || dt == format!("{}float", XSD_NS)
+                    || dt == format!("{}decimal", XSD_NS) =>
+                {
+                    value_str.parse::<f64>().map_or_else(
+                        |_| {
+                            log::warn!(
+                                "Failed to parse '{}' as float, returning as string",
+                                value_str
+                            );
+                            EntityValue::EntityString(value_str.to_string())
+                        },
+                        EntityValue::Entityf64,
+                    )
+                }
+
+                // Unknown datatype or plain literal - fall back to lexical heuristics
+                // Note: Plain literals in RDF 1.1 have implicit xsd:string type,
+                // but oxrdf may return a different default. We apply heuristics here
+                // for backwards compatibility with untyped data.
+                _ => parse_literal_heuristically(value_str),
+            }
         }
     }
+}
+
+/// Parse a literal value using lexical heuristics (fallback for untyped literals).
+///
+/// This function attempts to parse the string as boolean, integer, or float
+/// in that order, falling back to string if all parsing attempts fail.
+fn parse_literal_heuristically(value_str: &str) -> EntityValue {
+    // Try boolean
+    if let Ok(bool_val) = value_str.parse::<bool>() {
+        return EntityValue::EntityBool(bool_val);
+    }
+
+    // Try integer
+    if let Ok(int_val) = value_str.parse::<i64>() {
+        return EntityValue::Entityi64(int_val);
+    }
+
+    // Try float
+    if let Ok(float_val) = value_str.parse::<f64>() {
+        return EntityValue::Entityf64(float_val);
+    }
+
+    // Default to string
+    EntityValue::EntityString(value_str.to_string())
 }
 
 /// Extract all properties for a subject IRI from triples (without context compaction).
@@ -1488,25 +1574,28 @@ mod tests {
     fn test_term_to_entity_value() {
         use oxrdf::Literal;
 
-        // Test string literal
+        // Test simple/string literal - "42" with xsd:string type stays as string
+        // (new_simple_literal creates xsd:string typed literal in RDF 1.1)
         let literal = Term::Literal(Literal::new_simple_literal("test"));
         match term_to_entity_value(&literal) {
             EntityValue::EntityString(s) => assert_eq!(s, "test"),
             _ => panic!("Expected EntityString"),
         }
 
-        // Test integer literal
+        // Test xsd:string typed literal - numeric-looking values stay as strings
+        // This is the key fix: "42"^^xsd:string should NOT be parsed as integer
         let literal = Term::Literal(Literal::new_simple_literal("42"));
         match term_to_entity_value(&literal) {
-            EntityValue::Entityi64(i) => assert_eq!(i, 42),
-            _ => panic!("Expected Entityi64"),
+            EntityValue::EntityString(s) => assert_eq!(s, "42"),
+            _ => panic!("Expected EntityString for '42'^^xsd:string"),
         }
 
-        // Test boolean literal
+        // Test xsd:string typed literal with boolean-looking value stays as string
+        // "true"^^xsd:string should NOT be parsed as boolean
         let literal = Term::Literal(Literal::new_simple_literal("true"));
         match term_to_entity_value(&literal) {
-            EntityValue::EntityBool(b) => assert!(b),
-            _ => panic!("Expected EntityBool"),
+            EntityValue::EntityString(s) => assert_eq!(s, "true"),
+            _ => panic!("Expected EntityString for 'true'^^xsd:string"),
         }
 
         // Test named node
@@ -1514,6 +1603,79 @@ mod tests {
         match term_to_entity_value(&node) {
             EntityValue::EntityId(Id::Id(s)) => assert_eq!(s, "http://example.org/thing"),
             _ => panic!("Expected EntityId"),
+        }
+    }
+
+    #[test]
+    fn test_term_to_entity_value_typed_literals() {
+        use oxrdf::Literal;
+
+        let xsd_integer = NamedNode::new_unchecked("http://www.w3.org/2001/XMLSchema#integer");
+        let xsd_boolean = NamedNode::new_unchecked("http://www.w3.org/2001/XMLSchema#boolean");
+        let xsd_double = NamedNode::new_unchecked("http://www.w3.org/2001/XMLSchema#double");
+        let xsd_string = NamedNode::new_unchecked("http://www.w3.org/2001/XMLSchema#string");
+
+        // Test xsd:integer typed literal
+        let literal = Term::Literal(Literal::new_typed_literal("42", xsd_integer.clone()));
+        match term_to_entity_value(&literal) {
+            EntityValue::Entityi64(i) => assert_eq!(i, 42),
+            _ => panic!("Expected Entityi64 for '42'^^xsd:integer"),
+        }
+
+        // Test xsd:boolean typed literal with "true"
+        let literal = Term::Literal(Literal::new_typed_literal("true", xsd_boolean.clone()));
+        match term_to_entity_value(&literal) {
+            EntityValue::EntityBool(b) => assert!(b),
+            _ => panic!("Expected EntityBool(true) for 'true'^^xsd:boolean"),
+        }
+
+        // Test xsd:boolean typed literal with "false"
+        let literal = Term::Literal(Literal::new_typed_literal("false", xsd_boolean.clone()));
+        match term_to_entity_value(&literal) {
+            EntityValue::EntityBool(b) => assert!(!b),
+            _ => panic!("Expected EntityBool(false) for 'false'^^xsd:boolean"),
+        }
+
+        // Test xsd:boolean typed literal with "1" (should be true)
+        let literal = Term::Literal(Literal::new_typed_literal("1", xsd_boolean.clone()));
+        match term_to_entity_value(&literal) {
+            EntityValue::EntityBool(b) => assert!(b),
+            _ => panic!("Expected EntityBool(true) for '1'^^xsd:boolean"),
+        }
+
+        // Test xsd:boolean typed literal with "0" (should be false)
+        let literal = Term::Literal(Literal::new_typed_literal("0", xsd_boolean.clone()));
+        match term_to_entity_value(&literal) {
+            EntityValue::EntityBool(b) => assert!(!b),
+            _ => panic!("Expected EntityBool(false) for '0'^^xsd:boolean"),
+        }
+
+        // Test xsd:double typed literal
+        let literal = Term::Literal(Literal::new_typed_literal("3.14", xsd_double.clone()));
+        match term_to_entity_value(&literal) {
+            EntityValue::Entityf64(f) => assert!((f - 3.14).abs() < 0.0001),
+            _ => panic!("Expected Entityf64 for '3.14'^^xsd:double"),
+        }
+
+        // Test xsd:string explicitly - should NOT parse as number
+        let literal = Term::Literal(Literal::new_typed_literal("42", xsd_string.clone()));
+        match term_to_entity_value(&literal) {
+            EntityValue::EntityString(s) => assert_eq!(s, "42"),
+            _ => panic!("Expected EntityString for '42'^^xsd:string"),
+        }
+    }
+
+    #[test]
+    fn test_term_to_entity_value_language_tagged() {
+        use oxrdf::Literal;
+
+        // Language-tagged literals should use heuristic parsing (fallback)
+        // since they don't have an XSD datatype
+        let literal =
+            Term::Literal(Literal::new_language_tagged_literal_unchecked("hello", "en"));
+        match term_to_entity_value(&literal) {
+            EntityValue::EntityString(s) => assert_eq!(s, "hello"),
+            _ => panic!("Expected EntityString for language-tagged literal"),
         }
     }
 

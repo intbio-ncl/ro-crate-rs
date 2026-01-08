@@ -316,6 +316,17 @@ impl ResolvedContext {
 
         // 4. @base relative
         if let Some(base) = &self.base {
+            // Handle fragments: base might have trailing slash but IRI has fragment without it
+            // e.g., base="http://example.org/crate/" and iri="http://example.org/crate#section"
+            // This is the inverse of resolve_relative_iri which strips trailing slash before #
+            let base_no_slash = base.trim_end_matches('/');
+            if let Some(fragment_part) = iri.strip_prefix(base_no_slash) {
+                if fragment_part.starts_with('#') {
+                    return fragment_part.to_string(); // Returns "#section"
+                }
+            }
+
+            // Original logic for non-fragment cases
             if iri.starts_with(base) {
                 let relative = &iri[base.len()..];
                 if relative.is_empty() {
@@ -442,6 +453,29 @@ mod tests {
             "file.txt"
         );
         assert_eq!(ctx.compact_iri("http://example.org/crate/"), "./");
+    }
+
+    #[test]
+    fn test_compact_fragment_with_trailing_slash_base() {
+        // Test fragment compaction when base has trailing slash
+        // This is the inverse of resolve_relative_iri which strips trailing slash before #
+        // base="http://example.org/crate/" but expanded IRI is "http://example.org/crate#section"
+        let ctx = test_context();
+        assert_eq!(
+            ctx.compact_iri("http://example.org/crate#section"),
+            "#section"
+        );
+    }
+
+    #[test]
+    fn test_fragment_roundtrip() {
+        // Verify that fragments roundtrip correctly with trailing slash base
+        let ctx = test_context();
+        let original = "#section";
+        let expanded = ctx.expand_term(original);
+        assert_eq!(expanded, "http://example.org/crate#section");
+        let compacted = ctx.compact_iri(&expanded);
+        assert_eq!(compacted, original);
     }
 
     #[test]

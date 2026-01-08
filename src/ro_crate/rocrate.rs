@@ -20,7 +20,7 @@ use std::fmt;
 /// with their associated metadata in a machine-readable format. This struct
 /// models the root of an RO-Crate JSON-LD document, containing both the
 /// contextual information and the actual data entities (graph).
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct RoCrate {
     /// JSON-LD context defining the terms used in the RO-Crate.
     ///

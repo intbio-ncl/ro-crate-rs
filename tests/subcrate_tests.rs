@@ -2,7 +2,7 @@
 pub mod subcrate_tests {
     use mockito::Matcher;
     use rocraters::ro_crate::rocrate::RoCrate;
-    use rocraters::ro_crate::subcrate_resolution::fetch_subcrates;
+    use rocraters::ro_crate::subcrate_resolution::{fetch_subcrates, fetch_subcrates_recursive};
     use serde_json::json;
     use sha1::Digest;
     use std::io::Write;
@@ -1159,5 +1159,326 @@ pub mod subcrate_tests {
         for m in mocks {
             m.assert();
         }
+    }
+
+    #[test]
+    fn test_recursive() {
+        let mut outer_graph = vec![
+            json!(
+            {
+              "@id": "ro-crate-metadata.json",
+              "@type": "CreativeWork",
+              "conformsTo": {
+                "@id": "https://w3id.org/ro/crate/1.2"
+              },
+              "about": {
+                "@id": "./"
+              }
+            }),
+            json!({
+              "@id": "./",
+              "@type": "Dataset",
+              "name": format!("Subcrate 1: With External Identifier and Publisher"),
+              "description": "Subcrate that has been published as a separate entity",
+              "identifier": "https://doi.org/10.5281/zenodo.1234567",
+              "datePublished": "2026-01-06",
+              "license": "https://creativecommons.org/licenses/by/4.0/",
+              "publisher": {
+                "@id": "https://zenodo.org"
+              },
+              "conformsTo": {
+                "@id": "https://w3id.org/ro/crate"
+              },
+
+              "hasPart": [
+                {"@id": "README.md"}
+              ]
+            }),
+        ];
+
+        let mut mocks = Vec::new();
+        let mut server = mockito::Server::new();
+        let url = server.url();
+
+        for h in 1..3 {
+            let path = format!("/subcrate{}", h);
+
+            println!("{}", path);
+
+            outer_graph.push(json!(
+                {
+                  "@id": "https://doi.org/10.5281/zenodo.1234567",
+                  "@type": "Dataset",
+                  "name": "Subcrate {h}",
+                  "description": "Subcrate that has been published as a separate entity",
+                  "distribution": {"@id": format!("{}{}",url, path)},
+                  "publisher": {
+                    "@id": "https://zenodo.org"
+                  },
+                  "conformsTo": {
+                    "@id": "https://w3id.org/ro/crate"
+                  },
+                }
+            ));
+
+            let mut inner_sub_layer_graph = vec![
+                json!({
+                  "@id": "ro-crate-metadata.json",
+                  "@type": "CreativeWork",
+                  "conformsTo": {
+                    "@id": "https://w3id.org/ro/crate/1.2"
+                  },
+                  "about": {
+                    "@id": "./"
+                  }
+                }),
+                json!({
+                  "@id": "./",
+                  "@type": "Dataset",
+                  "name": format!("Subcrate {h}"),
+                  "description": "Subcrate that has been published as a separate entity",
+                  "identifier": "https://doi.org/10.5281/zenodo.1234567",
+                  "datePublished": "2026-01-06",
+                  "license": "https://creativecommons.org/licenses/by/4.0/",
+                  "publisher": {
+                    "@id": "https://zenodo.org"
+                  },
+                  "conformsTo": {
+                    "@id": "https://w3id.org/ro/crate"
+                  },
+
+                  "hasPart": [
+                    {"@id": "README.md"}
+                  ]
+                }),
+            ];
+
+            for j in 1..3 {
+                let path = format!("/subcrate{}/subsubcrate{}", h, j);
+                println!("{}", path);
+
+                inner_sub_layer_graph.push(json!(
+                    {
+                      "@id": "https://doi.org/10.5281/zenodo.1234567",
+                      "@type": "Dataset",
+                      "name": "SubSubcrate {j}",
+                      "description": "Subcrate that has been published as a separate entity",
+                      "distribution": {"@id": format!("{}{}",url, path)},
+                      "publisher": {
+                        "@id": "https://zenodo.org"
+                      },
+                      "conformsTo": {
+                        "@id": "https://w3id.org/ro/crate"
+                      },
+                    }
+                ));
+
+                let mut inner_sub_sub_layer_graph = vec![
+                    json!({
+                      "@id": "ro-crate-metadata.json",
+                      "@type": "CreativeWork",
+                      "conformsTo": {
+                        "@id": "https://w3id.org/ro/crate/1.2"
+                      },
+                      "about": {
+                        "@id": "./"
+                      }
+                    }),
+                    json!({
+                      "@id": "./",
+                      "@type": "Dataset",
+                      "name": format!("SubSubcrate {j}"),
+                      "description": "Subcrate that has been published as a separate entity",
+                      "identifier": "https://doi.org/10.5281/zenodo.1234567",
+                      "datePublished": "2026-01-06",
+                      "license": "https://creativecommons.org/licenses/by/4.0/",
+                      "publisher": {
+                        "@id": "https://zenodo.org"
+                      },
+                      "conformsTo": {
+                        "@id": "https://w3id.org/ro/crate"
+                      },
+
+                      "hasPart": [
+                        {"@id": "README.md"}
+                      ]
+                    }),
+                ];
+                for k in 1..3 {
+                    let path = format!("/subcrate{}/subsubcrate{}/subsubsubcrate{}", h, j, k);
+                    println!("{}", path);
+
+                    inner_sub_sub_layer_graph.push(json!(
+                        {
+                          "@id": "https://doi.org/10.5281/zenodo.1234567",
+                          "@type": "Dataset",
+                          "name": "SubSubSubcrate {k}",
+                          "description": "Subcrate that has been published as a separate entity",
+                          "distribution": {"@id": format!("{}{}",url, path)},
+                          "publisher": {
+                            "@id": "https://zenodo.org"
+                          },
+                          "conformsTo": {
+                            "@id": "https://w3id.org/ro/crate"
+                          },
+                        }
+                    ));
+
+                    let mut inner_sub_sub_sub_layer_graph = vec![
+                        json!({
+                          "@id": "ro-crate-metadata.json",
+                          "@type": "CreativeWork",
+                          "conformsTo": {
+                            "@id": "https://w3id.org/ro/crate/1.2"
+                          },
+                          "about": {
+                            "@id": "./"
+                          }
+                        }),
+                        json!({
+                          "@id": "./",
+                          "@type": "Dataset",
+                          "name": format!("SubSubSubcrate {k}"),
+                          "description": "Subcrate that has been published as a separate entity",
+                          "identifier": "https://doi.org/10.5281/zenodo.1234567",
+                          "datePublished": "2026-01-06",
+                          "license": "https://creativecommons.org/licenses/by/4.0/",
+                          "publisher": {
+                            "@id": "https://zenodo.org"
+                          },
+                          "conformsTo": {
+                            "@id": "https://w3id.org/ro/crate"
+                          },
+
+                          "hasPart": [
+                            {"@id": "README.md"}
+                          ]
+                        }),
+                    ];
+                    for l in 1..3 {
+                        let path = format!(
+                            "/subcrate{}/subsubcrate{}/subsubsubcrate{}/subsubsubsubcrate{}",
+                            h, j, k, l
+                        );
+                        println!("{}", path);
+
+                        inner_sub_sub_sub_layer_graph.push(json!(
+                        {
+                          "@id": "https://doi.org/10.5281/zenodo.1234567",
+                          "@type": "Dataset",
+                          "name": "SubSubSubcrate {k}",
+                          "description": "Subcrate that has been published as a separate entity",
+                          "distribution": {"@id": format!("{}{}",url, path)},
+                          "publisher": {
+                            "@id": "https://zenodo.org"
+                          },
+                          "conformsTo": {
+                            "@id": "https://w3id.org/ro/crate"
+                          },
+                        }
+                    ));
+
+                        let subsubsubsubcrate = json!({
+                        "@context": "https://w3id.org/ro/crate/1.2/context",
+                        "@graph": [{
+                                        "@id": "ro-crate-metadata.json",
+                                        "@type": "CreativeWork",
+                                        "conformsTo": {
+                                          "@id": "https://w3id.org/ro/crate/1.2"
+                                        },
+                                        "about": {
+                                          "@id": "./"
+                                        }
+                                      },
+                                      {
+                                        "@id": "./",
+                                        "@type": "Dataset",
+                                        "name": format!("SubSubSubcrate {k}"),
+                                        "description": "Subcrate that has been published as a separate entity",
+                                        "identifier": "https://doi.org/10.5281/zenodo.1234567",
+                                        "datePublished": "2026-01-06",
+                                        "license": "https://creativecommons.org/licenses/by/4.0/",
+                                        "publisher": {
+                                          "@id": "https://zenodo.org"
+                                        },
+                                        "conformsTo": {
+                                          "@id": "https://w3id.org/ro/crate"
+                                        },
+
+                                        "hasPart": [
+                                          {"@id": "README.md"}
+                                        ]
+                                      }]});
+
+                        let _: RoCrate = serde_json::from_value(subsubsubsubcrate.clone()).unwrap();
+
+                        // Direct delivery of ro-crate
+                        let mock = server
+                            .mock("GET", path.as_str())
+                            .with_header("Content-Type", "application/json+ld")
+                            .with_body(serde_json::to_string_pretty(&subsubsubsubcrate).unwrap())
+                            .create();
+                        mocks.push(mock);
+                    }
+
+                    let subsubsubcrate = json!({
+              "@context": "https://w3id.org/ro/crate/1.2/context",
+              "@graph": inner_sub_sub_sub_layer_graph});
+
+                    let _: RoCrate = serde_json::from_value(subsubsubcrate.clone()).unwrap();
+
+                    // Direct delivery of ro-crate
+                    let mock = server
+                        .mock("GET", path.as_str())
+                        .with_header("Content-Type", "application/json+ld")
+                        .with_body(serde_json::to_string_pretty(&subsubsubcrate).unwrap())
+                        .create();
+                    mocks.push(mock);
+                }
+
+                let subsubcrate = json!({
+              "@context": "https://w3id.org/ro/crate/1.2/context",
+              "@graph": inner_sub_sub_layer_graph});
+
+                let _: RoCrate = serde_json::from_value(subsubcrate.clone()).unwrap();
+
+                // Direct delivery of ro-crate
+                let mock = server
+                    .mock("GET", path.as_str())
+                    .with_header("Content-Type", "application/json+ld")
+                    .with_body(serde_json::to_string_pretty(&subsubcrate).unwrap())
+                    .create();
+                mocks.push(mock);
+            }
+
+            let subcrate = json!({
+              "@context": "https://w3id.org/ro/crate/1.2/context",
+              "@graph": inner_sub_layer_graph});
+
+            let _: RoCrate = serde_json::from_value(subcrate.clone()).unwrap();
+
+            // Direct delivery of ro-crate
+            let mock = server
+                .mock("GET", path.as_str())
+                .with_header("Content-Type", "application/json+ld")
+                .with_body(serde_json::to_string_pretty(&subcrate).unwrap())
+                .create();
+            mocks.push(mock);
+        }
+
+        let base_crate = json!({
+        "@context": "https://w3id.org/ro/crate/1.2/context",
+        "@graph": outer_graph});
+
+        let root: RoCrate = serde_json::from_value(base_crate).unwrap();
+
+        let subcrates = fetch_subcrates_recursive(&root).unwrap();
+
+        assert_eq!(subcrates.len(), 30);
+
+        for m in mocks {
+            m.assert();
+        }
+
     }
 }

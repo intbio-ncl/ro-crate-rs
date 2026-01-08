@@ -102,26 +102,30 @@ impl From<regex::Error> for FetchError {
 
 /// Fails when a subcrate cannot be resolved
 pub fn fetch_subcrates_recursive(rocrate: &RoCrate) -> Result<Vec<RoCrate>, FetchError> {
-    let mut subcrates = fetch_subcrates(rocrate)?;
+    let mut flattened = Vec::new();
+    let subcrates = fetch_subcrates(rocrate)?;
 
-    while let Some(subcrate) = subcrates.iter().next() {
-        let mut crates = fetch_subcrates_recursive(subcrate)?;
-        subcrates.append(&mut crates);
+    for subcrate in &subcrates {
+        flattened.push(subcrate.clone());
+        let mut crates = fetch_subcrates_recursive(&subcrate)?;
+        flattened.append(&mut crates);
     }
 
-    Ok(subcrates)
+    Ok(flattened)
 }
 
 /// Does not fail when a subcrate cannot be resolved
 pub fn try_fetch_subcrates_recursive(rocrate: &RoCrate) -> Vec<RoCrate> {
-    let mut subcrates = try_fetch_subcrates(rocrate);
+    let mut flattened = Vec::new();
+    let subcrates = try_fetch_subcrates(rocrate);
 
-    while let Some(subcrate) = subcrates.iter().next() {
-        let mut crates = try_fetch_subcrates_recursive(subcrate);
-        subcrates.append(&mut crates);
+    for subcrate in &subcrates {
+        flattened.push(subcrate.clone());
+        let mut crates = try_fetch_subcrates_recursive(&subcrate);
+        flattened.append(&mut crates);
     }
 
-    subcrates
+    flattened
 }
 
 /// Fails when a subcrate cannot be resolved

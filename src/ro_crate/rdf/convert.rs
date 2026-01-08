@@ -130,6 +130,7 @@ impl<'a> RdfConverter<'a> {
     }
 
     /// Adds a string literal triple.
+    /// Skips creating the triple if the value is empty, preserving "missing" semantics.
     fn add_string_triple(
         &self,
         triples: &mut Vec<Triple>,
@@ -137,6 +138,9 @@ impl<'a> RdfConverter<'a> {
         predicate: &str,
         value: &str,
     ) -> Result<(), RdfError> {
+        if value.is_empty() {
+            return Ok(());
+        }
         triples.push(Triple::new(
             subject.clone(),
             self.named_node(predicate)?,

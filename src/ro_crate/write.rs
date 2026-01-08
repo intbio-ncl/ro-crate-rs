@@ -451,16 +451,26 @@ fn get_noncontained_paths(
             }
         } else {
             debug!("ID: {:?}", id);
-            let path: Result<PathBuf, ()> = match Path::new(id).canonicalize() {
-                Ok(resolved) => Ok(resolved),
-                Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(resolve_tilde_path(id)),
+            let expanded_path = match Path::new(id).canonicalize() {
+                Ok(resolved) => resolved,
+                Err(e) if e.kind() == io::ErrorKind::NotFound => resolve_tilde_path(id),
                 Err(e) => {
                     error!("{e}");
                     continue;
                 }
             };
-            debug!("Pre Resolved path: {:?}", path);
-            let resolved_path = rocrate_path.join(path.unwrap()).canonicalize();
+            debug!("Pre Resolved path: {:?}", expanded_path);
+
+            // If the expanded path is absolute (e.g., tilde-expanded), handle it like other
+            // absolute paths - check if outside base folder even if it doesn't exist
+            if expanded_path.is_absolute() {
+                if is_outside_base_folder(&rocrate_path, &expanded_path) || inverse {
+                    nonrels.insert(id.to_string(), expanded_path);
+                }
+                continue;
+            }
+
+            let resolved_path = rocrate_path.join(expanded_path).canonicalize();
             debug!("Resolved path: {:?}", resolved_path);
             match resolved_path {
                 Ok(abs_path) => {
@@ -849,7 +859,7 @@ mod write_crate_tests {
     fn user_root_unix(mut path_types: HashMap<&str, bool>) -> HashMap<&str, bool> {
         if !cfg!(windows) {
             path_types.insert("~/.cargo/env", true); // Relative Path
-            path_types.insert("/var/log/syslog", true); // Windows Backslash Path
+            path_types.insert("/var/log/syslog", true); // Linux Absolute Path
         }
         path_types
     }

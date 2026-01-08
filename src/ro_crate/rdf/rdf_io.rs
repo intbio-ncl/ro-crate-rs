@@ -395,19 +395,21 @@ fn extract_entity_properties_simple(
     let mut properties: HashMap<String, Vec<EntityValue>> = HashMap::new();
 
     for triple in triples {
-        if let NamedOrBlankNode::NamedNode(subject) = &triple.subject {
-            if subject.as_str() == subject_iri {
-                // Skip rdf:type as it's handled separately
-                if triple.predicate == rdf_type {
-                    continue;
-                }
-
-                // Use full IRI as property name (no compaction needed for traversal)
-                let property_name = triple.predicate.as_str().to_string();
-                let value = term_to_entity_value(&triple.object);
-
-                properties.entry(property_name).or_default().push(value);
+        let subject_str = match &triple.subject {
+            NamedOrBlankNode::NamedNode(n) => n.as_str().to_string(),
+            NamedOrBlankNode::BlankNode(n) => format!("_:{}", n.as_str()),
+        };
+        if subject_str == subject_iri {
+            // Skip rdf:type as it's handled separately
+            if triple.predicate == rdf_type {
+                continue;
             }
+
+            // Use full IRI as property name (no compaction needed for traversal)
+            let property_name = triple.predicate.as_str().to_string();
+            let value = term_to_entity_value(&triple.object);
+
+            properties.entry(property_name).or_default().push(value);
         }
     }
 
@@ -441,16 +443,13 @@ fn extract_iris_from_entity_value(value: &EntityValue, iris: &mut HashSet<String
             EntityValue::EntityId(id) => {
                 match id {
                     Id::Id(iri) => {
-                        // Only skip blank nodes - vocabulary filtering happens in caller
-                        if !iri.starts_with("_:") {
-                            iris.insert(iri.clone());
-                        }
+                        // Include blank nodes as well - they are valid entity references
+                        iris.insert(iri.clone());
                     }
                     Id::IdArray(iris_vec) => {
                         for iri in iris_vec {
-                            if !iri.starts_with("_:") {
-                                iris.insert(iri.clone());
-                            }
+                            // Include blank nodes as well - they are valid entity references
+                            iris.insert(iri.clone());
                         }
                     }
                 }
@@ -498,10 +497,16 @@ fn is_vocabulary_iri(iri: &str, context: &ResolvedContext) -> bool {
 ///
 /// An IRI that is referenced but doesn't exist as a subject is a "dangling reference"
 /// pointing to an external resource not defined in this RO-Crate.
+///
+/// Handles both named nodes and blank nodes (with `_:` prefix).
 fn is_entity_subject(iri: &str, triples: &[Triple]) -> bool {
-    triples
-        .iter()
-        .any(|t| matches!(&t.subject, NamedOrBlankNode::NamedNode(n) if n.as_str() == iri))
+    triples.iter().any(|t| {
+        let subject_str = match &t.subject {
+            NamedOrBlankNode::NamedNode(n) => n.as_str().to_string(),
+            NamedOrBlankNode::BlankNode(n) => format!("_:{}", n.as_str()),
+        };
+        subject_str == iri
+    })
 }
 
 /// Walk the graph from root, collecting all reachable entity IRIs.
@@ -676,12 +681,14 @@ fn extract_types(
     let mut types = Vec::new();
 
     for triple in triples {
-        if let NamedOrBlankNode::NamedNode(subject) = &triple.subject {
-            if subject.as_str() == iri && triple.predicate == rdf_type {
-                if let Term::NamedNode(type_node) = &triple.object {
-                    let compacted_type = context.compact_iri(type_node.as_str());
-                    types.push(compacted_type);
-                }
+        let subject_str = match &triple.subject {
+            NamedOrBlankNode::NamedNode(n) => n.as_str().to_string(),
+            NamedOrBlankNode::BlankNode(n) => format!("_:{}", n.as_str()),
+        };
+        if subject_str == iri && triple.predicate == rdf_type {
+            if let Term::NamedNode(type_node) = &triple.object {
+                let compacted_type = context.compact_iri(type_node.as_str());
+                types.push(compacted_type);
             }
         }
     }
@@ -793,19 +800,21 @@ fn extract_entity_properties_with_context(
     let mut properties: HashMap<String, Vec<EntityValue>> = HashMap::new();
 
     for triple in triples {
-        if let NamedOrBlankNode::NamedNode(subject) = &triple.subject {
-            if subject.as_str() == subject_iri {
-                // Skip rdf:type as it's handled separately
-                if triple.predicate == rdf_type {
-                    continue;
-                }
-
-                // Use context to compact the predicate IRI
-                let property_name = context.compact_iri(triple.predicate.as_str());
-                let value = term_to_entity_value(&triple.object);
-
-                properties.entry(property_name).or_default().push(value);
+        let subject_str = match &triple.subject {
+            NamedOrBlankNode::NamedNode(n) => n.as_str().to_string(),
+            NamedOrBlankNode::BlankNode(n) => format!("_:{}", n.as_str()),
+        };
+        if subject_str == subject_iri {
+            // Skip rdf:type as it's handled separately
+            if triple.predicate == rdf_type {
+                continue;
             }
+
+            // Use context to compact the predicate IRI
+            let property_name = context.compact_iri(triple.predicate.as_str());
+            let value = term_to_entity_value(&triple.object);
+
+            properties.entry(property_name).or_default().push(value);
         }
     }
 
@@ -988,13 +997,15 @@ fn rdf_to_rocrate_with_context(
     let reachable_iris = collect_reachable_entities(&root_iri, &triples, &context);
 
     // Find all entity IRIs in the graph (exclude metadata and root)
+    // This includes both named nodes and blank nodes
     let mut all_iris = HashSet::new();
     for triple in &triples {
-        if let NamedOrBlankNode::NamedNode(subject) = &triple.subject {
-            let iri = subject.as_str();
-            if iri != metadata_iri && iri != root_iri {
-                all_iris.insert(iri.to_string());
-            }
+        let subject_iri = match &triple.subject {
+            NamedOrBlankNode::NamedNode(node) => node.as_str().to_string(),
+            NamedOrBlankNode::BlankNode(node) => format!("_:{}", node.as_str()),
+        };
+        if subject_iri != metadata_iri && subject_iri != root_iri {
+            all_iris.insert(subject_iri);
         }
     }
 
@@ -2572,6 +2583,149 @@ mod tests {
         assert!(
             readme.id.ends_with(".md"),
             ".md file with MediaObject type classified as DataEntity"
+        );
+    }
+
+    #[test]
+    fn test_blank_node_subject_collected() {
+        use oxrdf::{BlankNode, NamedOrBlankNode, Term};
+
+        let bn = BlankNode::new_unchecked("Geometry-1");
+        let rdf_type = NamedNode::new_unchecked("http://www.w3.org/1999/02/22-rdf-syntax-ns#type");
+        let schema_geo = NamedNode::new_unchecked("http://schema.org/GeoCoordinates");
+
+        let triples = vec![Triple::new(
+            NamedOrBlankNode::BlankNode(bn.clone()),
+            rdf_type,
+            Term::NamedNode(schema_geo),
+        )];
+
+        // Verify the blank node subject can be identified using the same logic as in the code
+        let subjects: Vec<String> = triples
+            .iter()
+            .map(|t| match &t.subject {
+                NamedOrBlankNode::NamedNode(n) => n.as_str().to_string(),
+                NamedOrBlankNode::BlankNode(n) => format!("_:{}", n.as_str()),
+            })
+            .collect();
+
+        assert!(subjects.contains(&"_:Geometry-1".to_string()));
+    }
+
+    #[test]
+    fn test_is_entity_subject_with_blank_node() {
+        use oxrdf::{BlankNode, NamedOrBlankNode, Term};
+
+        let bn = BlankNode::new_unchecked("TestBlankNode");
+        let rdf_type = NamedNode::new_unchecked("http://www.w3.org/1999/02/22-rdf-syntax-ns#type");
+        let schema_thing = NamedNode::new_unchecked("http://schema.org/Thing");
+
+        let triples = vec![Triple::new(
+            NamedOrBlankNode::BlankNode(bn.clone()),
+            rdf_type,
+            Term::NamedNode(schema_thing),
+        )];
+
+        // Test that is_entity_subject works with blank nodes
+        assert!(is_entity_subject("_:TestBlankNode", &triples));
+        assert!(!is_entity_subject("_:NonExistent", &triples));
+        assert!(!is_entity_subject("http://example.org/named", &triples));
+    }
+
+    #[test]
+    fn test_extract_entity_properties_simple_with_blank_node() {
+        use oxrdf::{BlankNode, NamedOrBlankNode, Term};
+
+        let bn = BlankNode::new_unchecked("TestEntity");
+        let name_pred = NamedNode::new_unchecked("http://schema.org/name");
+        let name_value = Literal::new_simple_literal("Test Name");
+
+        let triples = vec![Triple::new(
+            NamedOrBlankNode::BlankNode(bn.clone()),
+            name_pred,
+            Term::Literal(name_value),
+        )];
+
+        // Test that extract_entity_properties_simple works with blank node subjects
+        let properties = extract_entity_properties_simple("_:TestEntity", &triples);
+        assert!(properties.contains_key("http://schema.org/name"));
+    }
+
+    #[test]
+    fn test_blank_node_roundtrip() {
+        use crate::ro_crate::read::read_crate_obj;
+        use crate::ro_crate::rdf::convert::{rocrate_to_rdf_with_options, ConversionOptions};
+        use crate::ro_crate::rdf::resolver::ContextResolverBuilder;
+        use oxrdf::NamedOrBlankNode;
+
+        // Create an RoCrate JSON with a blank node entity
+        let json = r#"{
+            "@context": "https://w3id.org/ro/crate/1.1/context",
+            "@graph": [
+                {
+                    "@id": "ro-crate-metadata.json",
+                    "@type": "CreativeWork",
+                    "about": {"@id": "./"},
+                    "conformsTo": {"@id": "https://w3id.org/ro/crate/1.1"}
+                },
+                {
+                    "@id": "./",
+                    "@type": "Dataset",
+                    "name": "Test Crate",
+                    "description": "A test crate with blank node",
+                    "datePublished": "2024-01-01",
+                    "license": {"@id": "https://creativecommons.org/licenses/by/4.0/"},
+                    "contentLocation": {"@id": "_:place1"}
+                },
+                {
+                    "@id": "_:place1",
+                    "@type": "Place",
+                    "name": "Test Location"
+                }
+            ]
+        }"#;
+
+        // Parse to RoCrate (validation_level 0 = no validation)
+        let crate1 = read_crate_obj(json, 0).expect("Failed to parse RoCrate");
+
+        // Verify blank node entity exists in original
+        let has_blank_entity_original = crate1.graph.iter().any(|e| match e {
+            GraphVector::ContextualEntity(ce) => ce.id == "_:place1",
+            GraphVector::DataEntity(de) => de.id == "_:place1",
+            _ => false,
+        });
+        assert!(
+            has_blank_entity_original,
+            "Original crate should have blank node entity"
+        );
+
+        // Convert to RDF with a base IRI
+        let resolver = ContextResolverBuilder::default();
+        let graph = rocrate_to_rdf_with_options(
+            &crate1,
+            resolver,
+            ConversionOptions::WithBase("http://example.org/".to_string()),
+        )
+        .expect("Failed to convert to RDF");
+
+        // Verify blank node triple exists in RDF
+        let has_blank_subject = graph.iter().any(|t| {
+            matches!(&t.subject, NamedOrBlankNode::BlankNode(bn) if bn.as_str() == "place1")
+        });
+        assert!(has_blank_subject, "RDF graph should have blank node subject");
+
+        // Convert back to RoCrate
+        let crate2 = rdf_graph_to_rocrate(graph).expect("Failed to convert back to RoCrate");
+
+        // Verify blank node entity preserved after roundtrip
+        let has_blank_entity_roundtrip = crate2.graph.iter().any(|e| match e {
+            GraphVector::ContextualEntity(ce) => ce.id == "_:place1",
+            GraphVector::DataEntity(de) => de.id == "_:place1",
+            _ => false,
+        });
+        assert!(
+            has_blank_entity_roundtrip,
+            "Roundtrip crate should preserve blank node entity"
         );
     }
 }

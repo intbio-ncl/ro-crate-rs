@@ -43,8 +43,6 @@ pub enum RdfError {
     Context(ContextError),
     /// Invalid IRI encountered.
     InvalidIri(String),
-    /// Blank nodes are not supported.
-    BlankNode(String),
     /// Serialization failed.
     Serialization(String),
     /// RDF parsing failed.
@@ -58,7 +56,6 @@ impl fmt::Display for RdfError {
         match self {
             RdfError::Context(e) => write!(f, "Context error: {}", e),
             RdfError::InvalidIri(iri) => write!(f, "Invalid IRI: {}", iri),
-            RdfError::BlankNode(id) => write!(f, "Blank nodes not supported: {}", id),
             RdfError::Serialization(msg) => write!(f, "Serialization error: {}", msg),
             RdfError::ParseError(msg) => write!(f, "Parse error: {}", msg),
             RdfError::MissingRootEntities(msg) => write!(f, "Missing root entities: {}", msg),
@@ -99,9 +96,6 @@ mod tests {
 
     #[test]
     fn test_rdf_error_display() {
-        let err = RdfError::BlankNode("_:b0".to_string());
-        assert!(err.to_string().contains("_:b0"));
-
         let err = RdfError::InvalidIri("not a valid iri".to_string());
         assert!(err.to_string().contains("not a valid iri"));
     }

@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use log::warn;
-use oxrdf::{Literal, NamedNode, NamedOrBlankNode, Term, Triple};
+use oxrdf::{BlankNode, Literal, NamedNode, NamedOrBlankNode, Term, Triple};
 
 use crate::ro_crate::constraints::{DataType, EntityValue, Id, License};
 use crate::ro_crate::graph_vector::GraphVector;
@@ -95,6 +95,23 @@ impl<'a> RdfConverter<'a> {
         }
     }
 
+    /// Converts an ID string to an RDF Term, handling blank nodes.
+    fn id_string_to_term(&self, id: &str) -> Result<Term, RdfError> {
+        if let Some(local_name) = id.strip_prefix("_:") {
+            Ok(Term::BlankNode(BlankNode::new_unchecked(local_name)))
+        } else {
+            Ok(Term::NamedNode(self.named_node(id)?))
+        }
+    }
+
+    /// Converts an Id to one or more Terms, handling blank nodes.
+    fn id_to_terms(&self, id: &Id) -> Result<Vec<Term>, RdfError> {
+        match id {
+            Id::Id(single) => Ok(vec![self.id_string_to_term(single)?]),
+            Id::IdArray(arr) => arr.iter().map(|s| self.id_string_to_term(s)).collect(),
+        }
+    }
+
     /// Creates a typed literal.
     fn typed_literal<T: ToString>(&self, value: T, datatype: &NamedNode) -> Literal {
         Literal::new_typed_literal(value.to_string(), datatype.clone())
@@ -102,8 +119,10 @@ impl<'a> RdfConverter<'a> {
 
     /// Converts an entity @id to an RDF subject.
     fn id_to_subject(&self, id: &str) -> Result<NamedOrBlankNode, RdfError> {
-        if id.starts_with("_:") {
-            return Err(RdfError::BlankNode(id.to_string()));
+        if let Some(local_name) = id.strip_prefix("_:") {
+            return Ok(NamedOrBlankNode::BlankNode(
+                BlankNode::new_unchecked(local_name),
+            ));
         }
         Ok(NamedOrBlankNode::NamedNode(self.named_node(id)?))
     }
@@ -241,11 +260,7 @@ impl<'a> RdfConverter<'a> {
             )]),
 
             // References (Id, License, DataType)
-            EntityValue::EntityId(id) => Ok(self
-                .id_to_nodes(id)?
-                .into_iter()
-                .map(Term::NamedNode)
-                .collect()),
+            EntityValue::EntityId(id) => self.id_to_terms(id),
             EntityValue::EntityLicense(license) => match license {
                 License::Id(id) => Ok(self
                     .id_to_nodes(id)?
@@ -502,12 +517,21 @@ mod tests {
     }
 
     #[test]
-    fn test_id_to_subject_rejects_blank_nodes() {
+    fn test_id_to_subject_accepts_blank_nodes() {
         let ctx = test_context_with_base();
         let options = ConversionOptions::default();
+        let converter = RdfConverter::new(&ctx, &options);
 
-        let result = id_to_subject("_:b0", &ctx, &options);
-        assert!(matches!(result, Err(RdfError::BlankNode(_))));
+        let result = converter.id_to_subject("_:Geometry-1");
+        assert!(result.is_ok());
+
+        let subject = result.unwrap();
+        match subject {
+            NamedOrBlankNode::BlankNode(bn) => {
+                assert_eq!(bn.as_str(), "Geometry-1");
+            }
+            _ => panic!("Expected BlankNode, got NamedNode"),
+        }
     }
 
     #[test]
@@ -540,6 +564,24 @@ mod tests {
         let terms = entity_value_to_terms(&value, "testPred", &ctx, &options).unwrap();
         assert_eq!(terms.len(), 1);
         assert!(matches!(terms[0], Term::NamedNode(_)));
+    }
+
+    #[test]
+    fn test_entity_value_blank_node_object() {
+        let ctx = test_context_with_base();
+        let options = ConversionOptions::default();
+        let converter = RdfConverter::new(&ctx, &options);
+
+        let value = EntityValue::EntityId(Id::Id("_:Geometry-1".to_string()));
+        let terms = converter.entity_value_to_terms(&value, "geo").unwrap();
+
+        assert_eq!(terms.len(), 1);
+        match &terms[0] {
+            Term::BlankNode(bn) => {
+                assert_eq!(bn.as_str(), "Geometry-1");
+            }
+            _ => panic!("Expected Term::BlankNode, got {:?}", terms[0]),
+        }
     }
 
     #[test]

@@ -1,3 +1,4 @@
+#[cfg(feature = "subcrate-resolution")]
 #[cfg(test)]
 pub mod subcrate_tests {
     use mockito::Matcher;
@@ -1203,7 +1204,6 @@ pub mod subcrate_tests {
         for h in 1..3 {
             let path = format!("/subcrate{}", h);
 
-            println!("{}", path);
 
             outer_graph.push(json!(
                 {
@@ -1255,7 +1255,6 @@ pub mod subcrate_tests {
 
             for j in 1..3 {
                 let path = format!("/subcrate{}/subsubcrate{}", h, j);
-                println!("{}", path);
 
                 inner_sub_layer_graph.push(json!(
                     {
@@ -1306,7 +1305,6 @@ pub mod subcrate_tests {
                 ];
                 for k in 1..3 {
                     let path = format!("/subcrate{}/subsubcrate{}/subsubsubcrate{}", h, j, k);
-                    println!("{}", path);
 
                     inner_sub_sub_layer_graph.push(json!(
                         {
@@ -1360,7 +1358,6 @@ pub mod subcrate_tests {
                             "/subcrate{}/subsubcrate{}/subsubsubcrate{}/subsubsubsubcrate{}",
                             h, j, k, l
                         );
-                        println!("{}", path);
 
                         inner_sub_sub_sub_layer_graph.push(json!(
                         {

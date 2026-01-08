@@ -101,17 +101,31 @@ impl From<regex::Error> for FetchError {
 }
 
 /// Fails when a subcrate cannot be resolved
-pub fn fetch_subcrates_recursive(rocrate: RoCrate) -> Result<Vec<RoCrate>, FetchError> {
-    todo!()
+pub fn fetch_subcrates_recursive(rocrate: &RoCrate) -> Result<Vec<RoCrate>, FetchError> {
+    let mut subcrates = fetch_subcrates(rocrate)?;
+
+    while let Some(subcrate) = subcrates.iter().next() {
+        let mut crates = fetch_subcrates_recursive(subcrate)?;
+        subcrates.append(&mut crates);
+    }
+
+    Ok(subcrates)
 }
 
 /// Does not fail when a subcrate cannot be resolved
-pub fn try_fetch_subcrates_recursive(rocrate: RoCrate) -> Result<Vec<RoCrate>, FetchError> {
-    todo!()
+pub fn try_fetch_subcrates_recursive(rocrate: &RoCrate) -> Vec<RoCrate> {
+    let mut subcrates = try_fetch_subcrates(rocrate);
+
+    while let Some(subcrate) = subcrates.iter().next() {
+        let mut crates = try_fetch_subcrates_recursive(subcrate);
+        subcrates.append(&mut crates);
+    }
+
+    subcrates
 }
 
 /// Fails when a subcrate cannot be resolved
-pub fn fetch_subcrates(rocrate: RoCrate) -> Result<Vec<RoCrate>, FetchError> {
+pub fn fetch_subcrates(rocrate: &RoCrate) -> Result<Vec<RoCrate>, FetchError> {
     let subcrates = rocrate.get_subcrates();
 
     let mut collected_subcrates = Vec::new();
@@ -136,7 +150,7 @@ pub fn fetch_subcrates(rocrate: RoCrate) -> Result<Vec<RoCrate>, FetchError> {
 }
 
 /// Does not fail when a subcrate is not found
-pub fn try_fetch_subcrates(rocrate: RoCrate) -> Result<Vec<RoCrate>, FetchError> {
+pub fn try_fetch_subcrates(rocrate: &RoCrate) -> Vec<RoCrate> {
     let subcrates = rocrate.get_subcrates();
 
     let mut collected_subcrates = Vec::new();
@@ -169,7 +183,7 @@ pub fn try_fetch_subcrates(rocrate: RoCrate) -> Result<Vec<RoCrate>, FetchError>
         }
     }
 
-    Ok(collected_subcrates)
+    collected_subcrates
 }
 
 fn try_resolve_local(id: &str) -> Result<RoCrate, FetchError> {

@@ -1,16 +1,10 @@
 #[cfg(test)]
 pub mod subcrate_tests {
-    use bytes::Buf;
     use mockito::Matcher;
-    use rocraters::ro_crate::constraints::{DataType, EntityValue, Id};
-    use rocraters::ro_crate::data_entity::DataEntity;
-    use rocraters::ro_crate::modify::DynamicEntityManipulation;
     use rocraters::ro_crate::rocrate::RoCrate;
     use rocraters::ro_crate::subcrate_resolution::fetch_subcrates;
     use serde_json::json;
     use sha1::Digest;
-    use sha2::Sha256;
-    use std::collections::HashMap;
     use std::io::Write;
     use tempfile::tempdir;
     use zip::write::SimpleFileOptions;
@@ -316,7 +310,7 @@ pub mod subcrate_tests {
         });
 
         let root: RoCrate = serde_json::from_value(base_crate).unwrap();
-        let subcrates = fetch_subcrates(root).unwrap();
+        let subcrates = fetch_subcrates(&root).unwrap();
 
         assert_eq!(subcrates.len(), 3);
 
@@ -428,7 +422,7 @@ pub mod subcrate_tests {
 
         let root: RoCrate = serde_json::from_value(base_crate).unwrap();
 
-        let subcrates = fetch_subcrates(root).unwrap();
+        let subcrates = fetch_subcrates(&root).unwrap();
         assert_eq!(subcrates.len(), 1);
 
         mock.assert();
@@ -612,7 +606,7 @@ pub mod subcrate_tests {
         });
 
         let root: RoCrate = serde_json::from_value(base_crate).unwrap();
-        let subcrates = fetch_subcrates(root).unwrap();
+        let subcrates = fetch_subcrates(&root).unwrap();
 
         assert_eq!(subcrates.len(), 3);
 
@@ -763,7 +757,7 @@ pub mod subcrate_tests {
         });
 
         let root: RoCrate = serde_json::from_value(base_crate).unwrap();
-        let subcrates = fetch_subcrates(root).unwrap();
+        let subcrates = fetch_subcrates(&root).unwrap();
 
         assert_eq!(subcrates.len(), 2);
 
@@ -907,7 +901,7 @@ pub mod subcrate_tests {
         });
 
         let root: RoCrate = serde_json::from_value(base_crate).unwrap();
-        let subcrates = fetch_subcrates(root).unwrap();
+        let subcrates = fetch_subcrates(&root).unwrap();
 
         assert_eq!(subcrates.len(), 1);
         for mock in mocks {
@@ -1160,7 +1154,7 @@ pub mod subcrate_tests {
 
         let root: RoCrate = serde_json::from_value(base_crate).unwrap();
 
-        let subcrates = fetch_subcrates(root).unwrap();
+        let subcrates = fetch_subcrates(&root).unwrap();
         assert_eq!(subcrates.len(), 4);
         for m in mocks {
             m.assert();

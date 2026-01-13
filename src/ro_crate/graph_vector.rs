@@ -4,6 +4,7 @@ use crate::ro_crate::data_entity::DataEntity;
 use crate::ro_crate::metadata_descriptor::MetadataDescriptor;
 use crate::ro_crate::modify::DynamicEntityManipulation;
 use crate::ro_crate::root::RootDataEntity;
+use log::error;
 use serde::de::Error as SerdeError;
 use serde::ser::Serializer;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -142,10 +143,18 @@ impl GraphVector {
     /// Adds a type to the entity
     pub fn add_type(&mut self, new_type: String) {
         match self {
-            GraphVector::MetadataDescriptor(entity) => entity.type_.add_type(new_type),
-            GraphVector::RootDataEntity(entity) => entity.type_.add_type(new_type),
-            GraphVector::DataEntity(entity) => entity.type_.add_type(new_type),
-            GraphVector::ContextualEntity(entity) => entity.type_.add_type(new_type),
+            GraphVector::MetadataDescriptor(entity) => {
+                entity.type_ = entity.type_.add_type(new_type);
+            }
+            GraphVector::RootDataEntity(entity) => {
+                entity.type_ = entity.type_.add_type(new_type);
+            }
+            GraphVector::DataEntity(entity) => {
+                entity.type_ = entity.type_.add_type(new_type);
+            }
+            GraphVector::ContextualEntity(entity) => {
+                entity.type_ = entity.type_.add_type(new_type);
+            }
         }
     }
 
@@ -283,7 +292,7 @@ impl GraphVector {
                 GraphVector::ContextualEntity(entity) => entity.find_value_details(&entity_value),
             }
         } else {
-            eprintln!("Failed to parse value into EntityValue: {}", value);
+            error!("Failed to parse value into EntityValue: {}", value);
             None
         }
     }
@@ -322,14 +331,10 @@ impl<'de> Deserialize<'de> for GraphVector {
     {
         let value = Value::deserialize(deserializer)?;
 
-        try_deserialize_into_graph_vector(&value)
-            .or_else(|e| {
-                return Err(e);
-            })
-            .map_err(|e: SerdeJsonError| {
-                // Use the error type from the deserializer's context
-                D::Error::custom(format!("Failed to deserialize: {}", e))
-            })
+        try_deserialize_into_graph_vector(&value).map_err(|e: SerdeJsonError| {
+            // Use the error type from the deserializer's context
+            D::Error::custom(format!("Failed to deserialize: {}", e))
+        })
     }
 }
 

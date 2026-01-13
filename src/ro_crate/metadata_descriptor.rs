@@ -137,7 +137,6 @@ impl MetadataDescriptor {
             _ => {}
         }
     }
-
 }
 
 /// Implementation of the `CustomSerialize` trait for `MetadataDescriptor`.

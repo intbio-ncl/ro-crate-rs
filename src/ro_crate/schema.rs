@@ -4,7 +4,8 @@ use crate::ro_crate::constraints::{Id, License};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
-const ROCRATE_SCHEMA_1_1: &str = include_str!("../resources/ro_crate_1_1.jsonld");
+pub(crate) const ROCRATE_SCHEMA_1_1: &str = include_str!("../resources/ro_crate_1_1.jsonld");
+pub(crate) const ROCRATE_SCHEMA_1_2: &str = include_str!("../resources/ro_crate_1_2.jsonld");
 
 /// Represents the JSON-LD context of the RO-Crate schema.
 ///
@@ -27,13 +28,24 @@ pub struct RoCrateJSONLDContext {
     pub context: HashMap<String, String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RoCrateSchemaVersion {
+    V1_1,
+    V1_2,
+}
+
 /// Loads in RO-Crate schema for validation.
 ///
 /// This function fetches the JSON-LD context defining the RO-Crate schema, attempting to parse it
 /// into an `RoCrateJSONLDContext` struct. It is a synchronous operation and may block the thread
 /// during the request and subsequent parsing.
-pub fn load_rocrate_schema() -> Result<RoCrateJSONLDContext, SchemaLoadError> {
-    load_rocrate_schema_from_str(ROCRATE_SCHEMA_1_1)
+pub fn load_rocrate_schema(
+    version: RoCrateSchemaVersion,
+) -> Result<RoCrateJSONLDContext, SchemaLoadError> {
+    match version {
+        RoCrateSchemaVersion::V1_1 => load_rocrate_schema_from_str(ROCRATE_SCHEMA_1_1),
+        RoCrateSchemaVersion::V1_2 => load_rocrate_schema_from_str(ROCRATE_SCHEMA_1_2),
+    }
 }
 
 pub fn load_rocrate_schema_from_str(

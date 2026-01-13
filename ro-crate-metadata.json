@@ -1,8 +1,8 @@
 {
   "@context": [
-    "https://w3id.org/ro/crate/1.2/context",
+    "https://w3id.org/ro/crate/1.1/context",
     {
-      "@base": "urn:uuid:0195f0d0-c3e7-75c8-b2bb-0346dd3297aa"
+      "@base": "urn:uuid:019b9918-c22c-7440-8750-314d68c771d2"
     }
   ],
   "@graph": [
@@ -10,7 +10,7 @@
       "@id": "ro-crate-metadata.json",
       "@type": "CreativeWork",
       "conformsTo": {
-        "@id": "https://w3id.org/ro/crate/1.2"
+        "@id": "https://w3id.org/ro/crate/1.1"
       },
       "about": {
         "@id": "./"
@@ -32,8 +32,8 @@
       "@type": "CreativeWork",
       "description": "This work is licensed under the Creative Commons Attribution-NonCommercial-ShareAlike 3.0 Australia License. To view a copy of this license, visit http://creativecommons.org/licenses/by-nc-sa/3.0/au/ or send a letter to Creative Commons, PO Box 1866, Mountain View, CA 94042, USA.",
       "name": "Attribution-NonCommercial-ShareAlike 3.0 Australia (CC BY-NC-SA 3.0 AU)",
-      "identifier": "https://creativecommons.org/licenses/by-nc-sa/3.0/au/",
-      "value": null
+      "value": null,
+      "identifier": "https://creativecommons.org/licenses/by-nc-sa/3.0/au/"
     },
     {
       "@id": "../external.txt",

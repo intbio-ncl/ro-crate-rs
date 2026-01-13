@@ -7,6 +7,7 @@
 pub mod constraints;
 pub mod context;
 pub mod contextual_entity;
+#[cfg(feature = "parquet")]
 pub mod convert;
 pub mod data_entity;
 pub mod graph_vector;

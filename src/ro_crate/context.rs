@@ -1,7 +1,10 @@
+use log::debug;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
 use uuid::Uuid;
+
+use crate::ro_crate::schema::{self, RoCrateSchemaVersion};
 /// Defines the JSON-LD contexts in an RO-Crate, facilitating flexible context specification.
 ///
 /// This enum models the `@context` field's variability in RO-Crates, enabling the use of external URLs,
@@ -118,12 +121,12 @@ impl RoCrateContext {
         }
     }
 
-    pub fn get_all_context(&mut self) -> Vec<String> {
+    pub fn get_all_context(&self) -> Vec<String> {
         let mut valid_context: Vec<String> = Vec::new();
-        println!("Self: {:?}", self);
+        debug!("Self: {:?}", self);
         match &self {
             RoCrateContext::EmbeddedContext(context) => {
-                println!("Found Embedded Context");
+                debug!("Found Embedded Context");
                 for map in context {
                     for key in map.keys() {
                         valid_context.push(key.to_string());
@@ -131,25 +134,25 @@ impl RoCrateContext {
                 }
             }
             RoCrateContext::ExtendedContext(context) => {
-                println!("Found Extended Context");
+                debug!("Found Extended Context");
                 for map in context {
-                    println!("This is current map: {:?}", map);
+                    debug!("This is current map: {:?}", map);
                     match map {
                         ContextItem::EmbeddedContext(context) => {
-                            println!("Inside Embedded Context: {:?}", context);
+                            debug!("Inside Embedded Context: {:?}", context);
                             for value in context.values() {
                                 valid_context.push(value.to_string());
                             }
                         }
                         ContextItem::ReferenceItem(context) => {
-                            println!("Inside Reference Item: {:?}", context);
+                            debug!("Inside Reference Item: {:?}", context);
                             valid_context.push(context.to_string());
                         }
                     }
                 }
             }
             RoCrateContext::ReferenceContext(context) => {
-                println!("Found Reference Context");
+                debug!("Found Reference Context");
                 valid_context.push(context.to_string());
             }
         }
@@ -210,23 +213,34 @@ impl RoCrateContext {
                 ]);
             }
             RoCrateContext::EmbeddedContext(context) => {
-                println!("EmbeddedContext legacy of {:?}", context)
+                debug!("EmbeddedContext legacy of {:?}", context)
             }
         }
     }
 
     pub fn get_urn_uuid(&self) -> Option<String> {
         let base = self.get_specific_context("@base");
-        match base {
-            Some(uuid) => Some(uuid.strip_prefix("urn:uuid:").unwrap().to_string()),
-            None => None,
-        }
+        base.map(|uuid| uuid.strip_prefix("urn:uuid:").unwrap().to_string())
+    }
+
+    /// Get the schema version from the context URLs
+    pub fn get_schema_version(&self) -> Option<schema::RoCrateSchemaVersion> {
+        self.get_all_context().iter().find_map(|context_url| {
+            if context_url.contains("ro/crate/1.1") {
+                Some(RoCrateSchemaVersion::V1_1)
+            } else if context_url.contains("ro/crate/1.2") {
+                Some(RoCrateSchemaVersion::V1_2)
+            } else {
+                None
+            }
+        })
     }
 }
 
 #[cfg(test)]
 mod write_crate_tests {
     use crate::ro_crate::read::read_crate;
+    use crate::ro_crate::schema;
     use std::path::Path;
     use std::path::PathBuf;
 
@@ -237,7 +251,7 @@ mod write_crate_tests {
     #[test]
     fn test_get_all_context() {
         let path = fixture_path("_ro-crate-metadata-complex-context.json");
-        let mut rocrate = read_crate(&path, 0).unwrap();
+        let rocrate = read_crate(&path, 0).unwrap();
 
         let mut context = rocrate.context.get_all_context();
         context.sort();
@@ -269,7 +283,7 @@ mod write_crate_tests {
     #[test]
     fn test_get_context_from_key() {
         let path = fixture_path("_ro-crate-metadata-complex-context.json");
-        let mut rocrate = read_crate(&path, 0).unwrap();
+        let rocrate = read_crate(&path, 0).unwrap();
 
         let specific_context = rocrate.context.get_specific_context("education");
 
@@ -277,5 +291,15 @@ mod write_crate_tests {
             specific_context.unwrap(),
             "https://criminalcharacters.com/vocab#education"
         );
+    }
+
+    #[test]
+    fn test_schema_version() {
+        let path = fixture_path("_ro-crate-metadata-complex-context.json");
+        let rocrate = read_crate(&path, 0).unwrap();
+
+        let schema_version = rocrate.context.get_schema_version();
+
+        assert_eq!(schema_version.unwrap(), schema::RoCrateSchemaVersion::V1_1);
     }
 }

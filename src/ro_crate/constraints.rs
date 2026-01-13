@@ -135,15 +135,15 @@ pub enum DataType {
 }
 
 impl DataType {
-    pub fn add_type(&self, new_type: String) {
+    pub fn add_type(&self, new_type: String) -> DataType {
         match self {
             DataType::Term(existing_type) => {
-                DataType::TermArray(vec![existing_type.clone(), new_type]);
+                DataType::TermArray(vec![existing_type.clone(), new_type])
             }
             DataType::TermArray(existing_types) => {
                 let mut updated_types = existing_types.clone();
                 updated_types.push(new_type);
-                DataType::TermArray(updated_types);
+                DataType::TermArray(updated_types)
             }
         }
     }

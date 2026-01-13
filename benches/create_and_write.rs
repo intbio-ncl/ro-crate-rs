@@ -24,7 +24,7 @@ mod tests {
             // Create empty RoCrate
             let mut rocrate = RoCrate {
                 context: RoCrateContext::ReferenceContext(
-                    "https://w3id.org/ro/crate/1.1/context".to_string(),
+                    "https://w3id.org/ro/crate/1.2/context".to_string(),
                 ),
                 graph: Vec::new(),
             };
@@ -34,7 +34,7 @@ mod tests {
                 id: "ro-crate-metadata.json".to_string(),
                 type_: DataType::Term("CreativeWork".to_string()),
                 conforms_to: Id::Id(IdValue {
-                    id: "https://w3id.org/ro/crate/1.1".to_string(),
+                    id: "https://w3id.org/ro/crate/1.2".to_string(),
                 }),
                 about: Id::Id(IdValue {
                     id: "./".to_string(),

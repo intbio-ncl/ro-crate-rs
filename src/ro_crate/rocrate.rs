@@ -81,8 +81,10 @@ impl RoCrate {
         valid_context
     }
 
-    /// TODO
-    pub fn add_context(&self) {}
+    /// Adds a context item to the RO-Crate.
+    pub fn add_context(&mut self, context: ContextItem) {
+        self.context.add_context(&context);
+    }
 
     /// Returns entity based on ID
     pub fn get_entity(&self, id: &str) -> Option<&GraphVector> {
@@ -279,6 +281,12 @@ impl RoCrate {
         }
     }
 
+    /// Get the schema version of the RO-Crate based on the context
+    pub fn get_rocrate_version(&self) -> Option<crate::ro_crate::schema::RoCrateSchemaVersion> {
+        self.context.get_schema_version()
+    }
+
+    #[cfg(feature = "parquet")]
     pub fn to_parquet(&mut self) {}
 }
 
@@ -290,7 +298,7 @@ impl Default for RoCrate {
     fn default() -> Self {
         RoCrate {
             context: RoCrateContext::ReferenceContext(String::from(
-                "https://w3id.org/ro/crate/1.1/context",
+                "https://w3id.org/ro/crate/1.2/context",
             )),
             graph: Vec::new(),
         }
@@ -307,7 +315,7 @@ impl Default for RoCrate {
 /// ```
 /// let ro_crate = RoCrate::default();
 /// println!("{}", ro_crate);
-/// // Outputs: RO-Crate: context="https://w3id.org/ro/crate/1.1/context", graph=[]
+/// // Outputs: RO-Crate: context="https://w3id.org/ro/crate/1.2/context", graph=[]
 impl fmt::Display for RoCrate {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(

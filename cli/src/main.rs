@@ -10,6 +10,7 @@ use clap::Parser;
 use constraints::{DataType, EntityValue, Id, License};
 use data_entity::DataEntity;
 use json_to_table::json_to_table;
+use log::debug;
 use read::{crate_path, read_crate};
 use rocraters::ro_crate::context::{ContextItem, RoCrateContext};
 use rocraters::ro_crate::graph_vector::GraphVector;
@@ -39,12 +40,12 @@ fn main() {
 
             if init_command.default {
                 let rocrate = RoCrate::default();
-                println!("{:?}", rocrate);
+                debug!("{:?}", rocrate);
 
                 write_crate(&rocrate, "ro-crate-metadata.json".to_string())
             } else {
                 if let Some(input) = init_command.context_type {
-                    println!("Recieved context_type {}", input);
+                    debug!("Recieved context_type {}", input);
                     let mut rocrate = create_rocrate_with_context(input);
                     if init_command.minimal {
                         rocrate = create_default_crate(rocrate)
@@ -327,7 +328,7 @@ fn create_rocrate_with_context(context_type: ContextType) -> RoCrate {
                 Ok(num) => {
                     if num == 1 {
                         answer.clear();
-                        answer.push_str("https://w3id.org/ro/crate/1.1/context");
+                        answer.push_str("https://w3id.org/ro/crate/1.2/context");
                     }
                 }
                 Err(e) => println!("Error: {}", e),
@@ -388,7 +389,7 @@ fn create_default_crate(mut rocrate: RoCrate) -> RoCrate {
     let description = metadata_descriptor::MetadataDescriptor {
         id: "ro-crate-metadata.json".to_string(),
         type_: DataType::Term("CreativeWork".to_string()),
-        conforms_to: Id::Id("https://w3id.org/ro/crate/1.1".to_string()),
+        conforms_to: Id::Id("https://w3id.org/ro/crate/1.2".to_string()),
         about: Id::Id("./".to_string()),
         dynamic_entity: None,
     };

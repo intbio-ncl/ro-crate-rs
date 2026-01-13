@@ -3,6 +3,7 @@
 use crate::ro_crate::constraints::EntityValue;
 use crate::ro_crate::constraints::{DataType, License};
 use crate::ro_crate::modify::{search_dynamic_entity_for_key, DynamicEntityManipulation};
+use log::debug;
 use serde::ser::SerializeMap;
 use serde::{
     de::{self, MapAccess, Visitor},
@@ -23,7 +24,7 @@ use super::constraints::Id;
 // change.
 #[derive(Debug, Clone)]
 pub struct RootDataEntity {
-    // A string that SHOULD be ./ and MUST end with /
+    // A string identifying the root (typically "./" for attached crates, or absolute URI for detached)
     pub id: String,
     // A string that MUST be Dataset
     pub type_: DataType,
@@ -271,7 +272,7 @@ impl<'de> Deserialize<'de> for RootDataEntity {
             where
                 A: MapAccess<'de>,
             {
-                println!("entered map");
+                debug!("entered map");
                 let mut id = None;
                 let mut type_ = None;
                 let mut name = None;

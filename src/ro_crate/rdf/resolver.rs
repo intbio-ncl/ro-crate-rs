@@ -469,7 +469,10 @@ mod tests {
         let context = RoCrateContext::ReferenceContext(ROCRATE_1_1_CONTEXT_URL.to_string());
         let resolved = ContextResolverBuilder::default().resolve(&context).unwrap();
 
-        assert_eq!(resolved.expand_term("name"), "http://schema.org/name");
+        assert_eq!(
+            resolved.expand_term("name").unwrap(),
+            "http://schema.org/name"
+        );
     }
 
     #[test]
@@ -477,7 +480,7 @@ mod tests {
         let context = RoCrateContext::ReferenceContext(ROCRATE_1_1_CONTEXT_URL.to_string());
         let resolved = ContextResolverBuilder::default().resolve(&context).unwrap();
 
-        let expanded = resolved.expand_term("schema:Person");
+        let expanded = resolved.expand_term("schema:Person").unwrap();
         assert!(expanded.contains("Person"));
     }
 
@@ -491,7 +494,7 @@ mod tests {
         let resolved = ContextResolverBuilder::new().resolve(&context).unwrap();
 
         assert_eq!(
-            resolved.expand_term("unknownTerm"),
+            resolved.expand_term("unknownTerm").unwrap(),
             "http://schema.org/unknownTerm"
         );
     }
@@ -502,9 +505,12 @@ mod tests {
         let resolved = ContextResolverBuilder::default().resolve(&context).unwrap();
 
         assert_eq!(
-            resolved.expand_term("http://other.org/x"),
+            resolved.expand_term("http://other.org/x").unwrap(),
             "http://other.org/x"
         );
-        assert_eq!(resolved.expand_term("urn:uuid:123"), "urn:uuid:123");
+        assert_eq!(
+            resolved.expand_term("urn:uuid:123").unwrap(),
+            "urn:uuid:123"
+        );
     }
 }

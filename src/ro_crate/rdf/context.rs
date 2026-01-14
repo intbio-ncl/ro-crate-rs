@@ -3,8 +3,10 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
+use url::Url;
 
 use crate::ro_crate::context::RoCrateContext;
+use crate::ro_crate::rdf::error::ContextError;
 
 /// Holds resolved term and prefix mappings from JSON-LD contexts.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,39 +31,55 @@ pub struct ResolvedContext {
 
 /// Resolves a relative IRI against a base IRI.
 ///
-/// This implements a simplified version of RFC 3986 reference resolution.
-fn resolve_relative_iri(base: &str, relative: &str) -> String {
+/// Uses the `url` crate for URLs with schemes, falls back to manual
+/// resolution for filesystem-like paths.
+///
+/// # Errors
+/// Returns `ContextError::RelativeResolutionError` if the relative path
+/// attempts to navigate above the root (more `../` than path segments).
+fn resolve_relative_iri(base: &str, relative: &str) -> Result<String, ContextError> {
     // Handle fragment-only references: base + #fragment
     if relative.starts_with('#') {
-        // Remove any existing fragment from base before appending
         let base_without_fragment = base.split('#').next().unwrap_or(base);
-        // Strip trailing slash before fragment (http://example.org/ + #x -> http://example.org#x)
         let base_clean = base_without_fragment.trim_end_matches('/');
-        return format!("{}{}", base_clean, relative);
+        return Ok(format!("{}{}", base_clean, relative));
     }
 
-    // Handle "./" (current directory) - returns the base as-is
-    if relative == "./" {
-        return base.to_string();
+    // Try URL-based resolution for bases with schemes
+    if let Ok(base_url) = Url::parse(base) {
+        // Validate parent directory references before resolution
+        if relative.contains("../") {
+            let parent_refs = relative.matches("../").count();
+            let path_segments: usize = base_url
+                .path_segments()
+                .map(|segs| segs.filter(|s| !s.is_empty()).count())
+                .unwrap_or(0);
+
+            if parent_refs > path_segments {
+                return Err(ContextError::RelativeResolutionError {
+                    base: base.to_string(),
+                    relative: relative.to_string(),
+                });
+            }
+        }
+
+        // join() should never fail for a valid parsed base URL
+        let resolved = base_url
+            .join(relative)
+            .expect("URL join should succeed for valid base URL");
+        return Ok(resolved.to_string());
     }
 
-    // Handle relative paths starting with "./"
-    if let Some(rel_path) = relative.strip_prefix("./") {
-        // Remove trailing filename from base if present
-        let base_dir = if let Some(last_slash) = base.rfind('/') {
-            &base[..=last_slash]
-        } else {
-            base
-        };
-        return format!("{}{}", base_dir, rel_path);
-    }
-
-    // Handle parent directory references
-    if relative.starts_with("../") {
+    // Manual resolution for paths without schemes
+    let result = if relative == "./" {
+        base.to_string()
+    } else if let Some(rel_path) = relative.strip_prefix("./") {
+        let base_dir = base.rfind('/').map(|i| &base[..=i]).unwrap_or(base);
+        format!("{}{}", base_dir, rel_path)
+    } else if relative.starts_with("../") {
         let mut base_parts: Vec<&str> = base.split('/').collect();
         let mut rel_remaining = relative;
 
-        // Remove the last component (file or empty) from base
         if !base_parts.is_empty() {
             base_parts.pop();
         }
@@ -75,18 +93,24 @@ fn resolve_relative_iri(base: &str, relative: &str) -> String {
 
         let base_rebuilt = base_parts.join("/");
         if base_rebuilt.is_empty() {
-            return rel_remaining.to_string();
+            rel_remaining.to_string()
+        } else {
+            format!("{}/{}", base_rebuilt, rel_remaining)
         }
-        return format!("{}/{}", base_rebuilt, rel_remaining);
+    } else {
+        let base_dir = base.rfind('/').map(|i| &base[..=i]).unwrap_or(base);
+        format!("{}{}", base_dir, relative)
+    };
+
+    // If the result is still relative, we navigated above the root
+    if !is_absolute_iri(&result) && !result.starts_with('/') {
+        return Err(ContextError::RelativeResolutionError {
+            base: base.to_string(),
+            relative: relative.to_string(),
+        });
     }
 
-    // For other relative references, append to base directory
-    let base_dir = if let Some(last_slash) = base.rfind('/') {
-        &base[..=last_slash]
-    } else {
-        base
-    };
-    format!("{}{}", base_dir, relative)
+    Ok(result)
 }
 
 /// Checks if a term is an absolute IRI with a valid URI scheme.
@@ -163,63 +187,11 @@ impl ResolvedContext {
     /// 5. For simple terms -> @vocab fallback
     /// 6. For remaining terms -> resolve against @base (treats as relative IRI)
     /// 7. Return unchanged
-    pub fn expand_term(&self, term: &str) -> String {
-        // 1. Direct term mapping
-        if let Some(iri) = self.terms.get(term) {
-            return iri.clone();
-        }
-
-        // 2. Prefixed term (prefix:local) with known prefix
-        if let Some(colon_pos) = term.find(':') {
-            let prefix = &term[..colon_pos];
-            let local = &term[colon_pos + 1..];
-
-            if let Some(namespace) = self.prefixes.get(prefix) {
-                return format!("{}{}", namespace, local);
-            }
-        }
-
-        // 3. Absolute IRI (now that we've ruled out known prefixes)
-        if is_absolute_iri(term) {
-            return term.to_string();
-        }
-
-        // 4. Path-like relative IRIs -> resolve against @base
-        if is_relative_iri(term) {
-            if let Some(base) = &self.base {
-                return resolve_relative_iri(base, term);
-            }
-            return term.to_string();
-        }
-
-        // 5. Simple terms -> @vocab fallback
-        if let Some(vocab) = &self.vocab {
-            return format!("{}{}", vocab, term);
-        }
-
-        // 6. No @vocab - treat remaining unknown terms as relative IRIs
-        // This handles cases like "file.json" which are filenames
-        if let Some(base) = &self.base {
-            return resolve_relative_iri(base, term);
-        }
-
-        // 7. Return unchanged
-        term.to_string()
-    }
-
-    /// Expands a term to its full IRI with strict validation.
     ///
-    /// Unlike `expand_term`, this method returns an error if:
-    /// - A relative IRI is encountered and no @base is set
-    /// - `allow_relative` is false and the result is still a relative IRI
-    ///
-    /// # Arguments
-    /// * `term` - The term to expand
-    /// * `allow_relative` - If true, relative IRIs without a base are allowed (returned as-is)
-    ///
-    /// # Returns
-    /// The expanded IRI or an error if expansion fails
-    pub fn expand_term_checked(&self, term: &str, allow_relative: bool) -> Result<String, String> {
+    /// # Errors
+    /// Returns `ContextError::RelativeResolutionError` if resolving a relative IRI
+    /// would navigate above the root.
+    pub fn expand_term(&self, term: &str) -> Result<String, ContextError> {
         // 1. Direct term mapping
         if let Some(iri) = self.terms.get(term) {
             return Ok(iri.clone());
@@ -243,13 +215,7 @@ impl ResolvedContext {
         // 4. Path-like relative IRIs -> resolve against @base
         if is_relative_iri(term) {
             if let Some(base) = &self.base {
-                return Ok(resolve_relative_iri(base, term));
-            }
-            if !allow_relative {
-                return Err(format!(
-                    "Cannot resolve relative IRI '{}': no @base defined in context",
-                    term
-                ));
+                return resolve_relative_iri(base, term);
             }
             return Ok(term.to_string());
         }
@@ -262,15 +228,81 @@ impl ResolvedContext {
         // 6. No @vocab - treat remaining unknown terms as relative IRIs
         // This handles cases like "file.json" which are filenames
         if let Some(base) = &self.base {
-            return Ok(resolve_relative_iri(base, term));
+            return resolve_relative_iri(base, term);
+        }
+
+        // 7. Return unchanged
+        Ok(term.to_string())
+    }
+
+    /// Expands a term to its full IRI with strict validation.
+    ///
+    /// Unlike `expand_term`, this method returns an error if:
+    /// - A relative IRI is encountered and no @base is set
+    /// - `allow_relative` is false and the result is still a relative IRI
+    ///
+    /// # Arguments
+    /// * `term` - The term to expand
+    /// * `allow_relative` - If true, relative IRIs without a base are allowed (returned as-is)
+    ///
+    /// # Returns
+    /// The expanded IRI or an error if expansion fails
+    pub fn expand_term_checked(
+        &self,
+        term: &str,
+        allow_relative: bool,
+    ) -> Result<String, ContextError> {
+        // 1. Direct term mapping
+        if let Some(iri) = self.terms.get(term) {
+            return Ok(iri.clone());
+        }
+
+        // 2. Prefixed term (prefix:local) with known prefix
+        if let Some(colon_pos) = term.find(':') {
+            let prefix = &term[..colon_pos];
+            let local = &term[colon_pos + 1..];
+
+            if let Some(namespace) = self.prefixes.get(prefix) {
+                return Ok(format!("{}{}", namespace, local));
+            }
+        }
+
+        // 3. Absolute IRI (now that we've ruled out known prefixes)
+        if is_absolute_iri(term) {
+            return Ok(term.to_string());
+        }
+
+        // 4. Path-like relative IRIs -> resolve against @base
+        if is_relative_iri(term) {
+            if let Some(base) = &self.base {
+                return resolve_relative_iri(base, term);
+            }
+            if !allow_relative {
+                return Err(ContextError::InvalidContext(format!(
+                    "Cannot resolve relative IRI '{}': no @base defined in context",
+                    term
+                )));
+            }
+            return Ok(term.to_string());
+        }
+
+        // 5. Simple terms -> @vocab fallback
+        if let Some(vocab) = &self.vocab {
+            return Ok(format!("{}{}", vocab, term));
+        }
+
+        // 6. No @vocab - treat remaining unknown terms as relative IRIs
+        // This handles cases like "file.json" which are filenames
+        if let Some(base) = &self.base {
+            return resolve_relative_iri(base, term);
         }
 
         // 7. No @base available for unknown term
         if !allow_relative {
-            return Err(format!(
+            return Err(ContextError::InvalidContext(format!(
                 "Cannot resolve term '{}': no @vocab or @base defined in context",
                 term
-            ));
+            )));
         }
 
         Ok(term.to_string())
@@ -364,13 +396,16 @@ mod tests {
     #[test]
     fn test_expand_direct_term() {
         let ctx = test_context();
-        assert_eq!(ctx.expand_term("name"), "http://schema.org/name");
+        assert_eq!(ctx.expand_term("name").unwrap(), "http://schema.org/name");
     }
 
     #[test]
     fn test_expand_prefixed_term() {
         let ctx = test_context();
-        assert_eq!(ctx.expand_term("schema:Person"), "http://schema.org/Person");
+        assert_eq!(
+            ctx.expand_term("schema:Person").unwrap(),
+            "http://schema.org/Person"
+        );
     }
 
     #[test]
@@ -379,7 +414,7 @@ mod tests {
         ctx.vocab = Some("http://schema.org/".to_string());
 
         assert_eq!(
-            ctx.expand_term("unknownTerm"),
+            ctx.expand_term("unknownTerm").unwrap(),
             "http://schema.org/unknownTerm"
         );
     }
@@ -388,7 +423,7 @@ mod tests {
     fn test_expand_full_iri_unchanged() {
         let ctx = test_context();
         assert_eq!(
-            ctx.expand_term("http://example.org/thing"),
+            ctx.expand_term("http://example.org/thing").unwrap(),
             "http://example.org/thing"
         );
     }
@@ -396,7 +431,7 @@ mod tests {
     #[test]
     fn test_expand_urn_unchanged() {
         let ctx = test_context();
-        assert_eq!(ctx.expand_term("urn:uuid:123"), "urn:uuid:123");
+        assert_eq!(ctx.expand_term("urn:uuid:123").unwrap(), "urn:uuid:123");
     }
 
     #[test]
@@ -404,12 +439,15 @@ mod tests {
         let ctx = test_context();
         // All these should be returned as-is (not expanded)
         assert_eq!(
-            ctx.expand_term("mailto:user@example.com"),
+            ctx.expand_term("mailto:user@example.com").unwrap(),
             "mailto:user@example.com"
         );
-        assert_eq!(ctx.expand_term("tel:+1234567890"), "tel:+1234567890");
         assert_eq!(
-            ctx.expand_term("data:text/plain,hello"),
+            ctx.expand_term("tel:+1234567890").unwrap(),
+            "tel:+1234567890"
+        );
+        assert_eq!(
+            ctx.expand_term("data:text/plain,hello").unwrap(),
             "data:text/plain,hello"
         );
     }
@@ -419,7 +457,7 @@ mod tests {
         let ctx = test_context();
         // No @vocab set but @base is set, unknown term resolves against base
         assert_eq!(
-            ctx.expand_term("unknownTerm"),
+            ctx.expand_term("unknownTerm").unwrap(),
             "http://example.org/crate/unknownTerm"
         );
     }
@@ -430,7 +468,7 @@ mod tests {
             "https://w3id.org/ro/crate/1.1/context".to_string(),
         ));
         // No @vocab and no @base, unknown term returns unchanged
-        assert_eq!(ctx.expand_term("unknownTerm"), "unknownTerm");
+        assert_eq!(ctx.expand_term("unknownTerm").unwrap(), "unknownTerm");
     }
 
     #[test]
@@ -472,7 +510,7 @@ mod tests {
         // Verify that fragments roundtrip correctly with trailing slash base
         let ctx = test_context();
         let original = "#section";
-        let expanded = ctx.expand_term(original);
+        let expanded = ctx.expand_term(original).unwrap();
         assert_eq!(expanded, "http://example.org/crate#section");
         let compacted = ctx.compact_iri(&expanded);
         assert_eq!(compacted, original);
@@ -494,7 +532,7 @@ mod tests {
         let base = "http://example.org/crate/";
         // Trailing slash is stripped before fragment
         assert_eq!(
-            resolve_relative_iri(base, "#section1"),
+            resolve_relative_iri(base, "#section1").unwrap(),
             "http://example.org/crate#section1"
         );
     }
@@ -503,7 +541,7 @@ mod tests {
     fn test_resolve_relative_fragment_no_trailing_slash() {
         let base = "http://example.org/crate";
         assert_eq!(
-            resolve_relative_iri(base, "#section1"),
+            resolve_relative_iri(base, "#section1").unwrap(),
             "http://example.org/crate#section1"
         );
     }
@@ -512,7 +550,7 @@ mod tests {
     fn test_resolve_relative_fragment_replaces_existing() {
         let base = "http://example.org/crate/#old";
         assert_eq!(
-            resolve_relative_iri(base, "#new"),
+            resolve_relative_iri(base, "#new").unwrap(),
             "http://example.org/crate#new"
         );
     }
@@ -521,7 +559,7 @@ mod tests {
     fn test_resolve_relative_current_dir() {
         let base = "http://example.org/crate/";
         assert_eq!(
-            resolve_relative_iri(base, "./"),
+            resolve_relative_iri(base, "./").unwrap(),
             "http://example.org/crate/"
         );
     }
@@ -530,7 +568,7 @@ mod tests {
     fn test_resolve_relative_dot_slash_path() {
         let base = "http://example.org/crate/";
         assert_eq!(
-            resolve_relative_iri(base, "./file.txt"),
+            resolve_relative_iri(base, "./file.txt").unwrap(),
             "http://example.org/crate/file.txt"
         );
     }
@@ -539,7 +577,7 @@ mod tests {
     fn test_resolve_relative_parent_dir() {
         let base = "http://example.org/crate/subdir/";
         assert_eq!(
-            resolve_relative_iri(base, "../file.txt"),
+            resolve_relative_iri(base, "../file.txt").unwrap(),
             "http://example.org/crate/file.txt"
         );
     }
@@ -548,7 +586,7 @@ mod tests {
     fn test_resolve_relative_plain_filename() {
         let base = "http://example.org/crate/";
         assert_eq!(
-            resolve_relative_iri(base, "data.csv"),
+            resolve_relative_iri(base, "data.csv").unwrap(),
             "http://example.org/crate/data.csv"
         );
     }
@@ -631,7 +669,7 @@ mod tests {
         ctx.base = None;
         let result = ctx.expand_term_checked("./file.txt", false);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("no @base defined"));
+        assert!(result.unwrap_err().to_string().contains("no @base defined"));
     }
 
     #[test]
@@ -668,8 +706,19 @@ mod tests {
         let ctx = test_context();
         // expand_term should also resolve relative IRIs when base is available
         assert_eq!(
-            ctx.expand_term("./file.txt"),
+            ctx.expand_term("./file.txt").unwrap(),
             "http://example.org/crate/file.txt"
         );
+    }
+
+    #[test]
+    fn test_resolve_relative_above_root_error() {
+        let base = "http://example.org/crate/";
+        let result = resolve_relative_iri(base, "../../../file.txt");
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            ContextError::RelativeResolutionError { .. }
+        ));
     }
 }

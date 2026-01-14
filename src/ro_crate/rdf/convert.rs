@@ -78,7 +78,7 @@ impl<'a> RdfConverter<'a> {
         let expanded = self
             .ctx
             .expand_term_checked(term, self.allow_relative)
-            .map_err(RdfError::InvalidIri)?;
+            .map_err(|e| RdfError::InvalidIri(e.to_string()))?;
         if self.allow_relative {
             // Skip validation for relative IRIs
             Ok(NamedNode::new_unchecked(&expanded))

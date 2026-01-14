@@ -13,6 +13,8 @@ pub enum ContextError {
     JsonParseError(String),
     /// The context document is invalid.
     InvalidContext(String),
+    /// Failed to resolve a relative IRI (e.g., too many `../` segments).
+    RelativeResolutionError { base: String, relative: String },
 }
 
 impl fmt::Display for ContextError {
@@ -29,6 +31,13 @@ impl fmt::Display for ContextError {
             }
             ContextError::InvalidContext(msg) => {
                 write!(f, "Invalid context: {}", msg)
+            }
+            ContextError::RelativeResolutionError { base, relative } => {
+                write!(
+                    f,
+                    "Cannot resolve '{}' against '{}': relative path navigates above root",
+                    relative, base
+                )
             }
         }
     }

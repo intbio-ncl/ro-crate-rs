@@ -146,18 +146,20 @@ fn is_absolute_iri(term: &str) -> bool {
     chars.all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '-' || c == '.')
 }
 
-/// Checks if a term is a relative IRI that needs base resolution.
+/// Checks if a term has a relative path component that needs base resolution.
 ///
-/// A relative IRI is one that:
-/// - Starts with `./` (current directory)
-/// - Starts with `../` (parent directory)
-/// - Starts with `#` (fragment)
-/// - Starts with `/` (root-relative)
-/// - Contains `/` (path-like)
+/// Returns true for:
+/// - `./` (current directory)
+/// - `../` (parent directory)
+/// - `#` (fragment)
+/// - `/` (root-relative or contains path segments)
 ///
-/// Plain terms like `unknownTerm` and `file.txt` are NOT relative IRIs -
+/// Plain terms like `unknownTerm` and `file.txt` return false -
 /// they should fall through to @vocab resolution.
-fn is_relative_iri(term: &str) -> bool {
+fn has_relative_component(term: &str) -> bool {
+    if is_absolute_iri(term) {
+        return false;
+    }
     term.starts_with("./")
         || term.starts_with("../")
         || term.starts_with('#')
@@ -213,7 +215,7 @@ impl ResolvedContext {
         }
 
         // 4. Path-like relative IRIs -> resolve against @base
-        if is_relative_iri(term) {
+        if has_relative_component(term) {
             if let Some(base) = &self.base {
                 return resolve_relative_iri(base, term);
             }
@@ -273,7 +275,7 @@ impl ResolvedContext {
         }
 
         // 4. Path-like relative IRIs -> resolve against @base
-        if is_relative_iri(term) {
+        if has_relative_component(term) {
             if let Some(base) = &self.base {
                 return resolve_relative_iri(base, term);
             }
@@ -628,28 +630,28 @@ mod tests {
     }
 
     #[test]
-    fn test_is_relative_iri() {
+    fn test_has_relative_component() {
         // Path-like relative IRIs
-        assert!(is_relative_iri("./"));
-        assert!(is_relative_iri("./file.txt"));
-        assert!(is_relative_iri("../parent"));
-        assert!(is_relative_iri("#fragment"));
-        assert!(is_relative_iri("/absolute/path"));
-        assert!(is_relative_iri("path/to/file.txt"));
-        assert!(is_relative_iri("subdir/file.txt"));
+        assert!(has_relative_component("./"));
+        assert!(has_relative_component("./file.txt"));
+        assert!(has_relative_component("../parent"));
+        assert!(has_relative_component("#fragment"));
+        assert!(has_relative_component("/absolute/path"));
+        assert!(has_relative_component("path/to/file.txt"));
+        assert!(has_relative_component("subdir/file.txt"));
 
         // Plain terms are NOT relative IRIs (should go to @vocab)
-        assert!(!is_relative_iri("file.txt"));
-        assert!(!is_relative_iri("unknownTerm"));
-        assert!(!is_relative_iri("Person"));
+        assert!(!has_relative_component("file.txt"));
+        assert!(!has_relative_component("unknownTerm"));
+        assert!(!has_relative_component("Person"));
 
         // Terms with colons but no slashes are not relative
-        assert!(!is_relative_iri("schema:Person"));
-        assert!(!is_relative_iri("urn:uuid:123"));
+        assert!(!has_relative_component("schema:Person"));
+        assert!(!has_relative_component("urn:uuid:123"));
 
-        // Note: is_relative_iri is called AFTER is_absolute_iri in expand logic,
+        // Note: has_relative_component is called AFTER is_absolute_iri in expand logic,
         // so http://example.org would be caught by is_absolute_iri first.
-        // is_relative_iri itself just checks for path-like patterns.
+        // has_relative_component itself just checks for path-like patterns.
     }
 
     // Tests for expand_term_checked

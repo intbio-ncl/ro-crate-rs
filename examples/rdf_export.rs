@@ -66,11 +66,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Option 2: Strict (Default) ===\n");
 
     let resolver = ContextResolverBuilder::default();
-    let strict_result = rocrate_to_rdf_with_options(
-        &rocrate,
-        resolver,
-        ConversionOptions::Strict,
-    );
+    let strict_result = rocrate_to_rdf_with_options(&rocrate, resolver, ConversionOptions::Strict);
 
     match strict_result {
         Ok(graph) => println!("Success: {} triples\n", graph.len()),
@@ -89,7 +85,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match rdf_allow_relative {
         Ok(graph) => {
-            println!("AllowRelative: {} triples (relative IRIs unresolved)", graph.len());
+            println!(
+                "AllowRelative: {} triples (relative IRIs unresolved)",
+                graph.len()
+            );
             let turtle = graph.to_string(RdfFormat::Turtle)?;
             println!("{}\n", turtle);
         }

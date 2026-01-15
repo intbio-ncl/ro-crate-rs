@@ -15,6 +15,8 @@ pub enum ContextError {
     InvalidContext(String),
     /// Failed to resolve a relative IRI (e.g., too many `../` segments).
     RelativeResolutionError { base: String, relative: String },
+    /// HTTP client not initialized (call `allow_remote()` first).
+    MissingClient,
 }
 
 impl fmt::Display for ContextError {
@@ -38,6 +40,9 @@ impl fmt::Display for ContextError {
                     "Cannot resolve '{}' against '{}': relative path navigates above root",
                     relative, base
                 )
+            }
+            ContextError::MissingClient => {
+                write!(f, "HTTP client not initialized: call allow_remote() first")
             }
         }
     }

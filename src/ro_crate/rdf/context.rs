@@ -308,7 +308,7 @@ impl ResolvedContext {
         for (prefix, namespace) in &self.prefixes {
             if iri.starts_with(namespace) {
                 let len = namespace.len();
-                if best.map_or(true, |(_, _, best_len)| len > best_len) {
+                if best.is_none_or(|(_, _, best_len)| len > best_len) {
                     best = Some((prefix, namespace, len));
                 }
             }

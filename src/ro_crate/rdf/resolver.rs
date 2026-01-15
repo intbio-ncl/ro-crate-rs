@@ -21,7 +21,7 @@ pub const ROCRATE_1_2_CONTEXT_URL: &str = "https://w3id.org/ro/crate/1.2/context
 pub struct ContextResolverBuilder {
     cache: HashMap<String, CachedContext>,
     allow_remote: bool,
-    client: reqwest::blocking::Client,
+    client: Option<reqwest::blocking::Client>,
 }
 
 #[derive(Clone)]
@@ -43,10 +43,7 @@ impl ContextResolverBuilder {
         Self {
             cache: HashMap::new(),
             allow_remote: false,
-            client: reqwest::blocking::Client::builder()
-                .timeout(std::time::Duration::from_secs(30))
-                .build()
-                .expect("Failed to create HTTP client"),
+            client: None,
         }
     }
 
@@ -57,9 +54,17 @@ impl ContextResolverBuilder {
         Ok(self)
     }
 
-    /// Sets whether remote context fetching is allowed.
-    pub fn allow_remote(mut self, allow: bool) -> Self {
-        self.allow_remote = allow;
+    /// Enables remote context fetching.
+    pub fn allow_remote(mut self) -> Self {
+        self.allow_remote = true;
+        if self.client.is_none() {
+            self.client = Some(
+                reqwest::blocking::Client::builder()
+                    .timeout(std::time::Duration::from_secs(30))
+                    .build()
+                    .expect("Failed to create HTTP client"),
+            );
+        }
         self
     }
 
@@ -189,12 +194,13 @@ impl ContextResolverBuilder {
     }
 
     fn fetch_remote(&self, url: &str) -> Result<CachedContext, ContextError> {
-        let response = self
-            .client
+        let client = self.client.as_ref().ok_or(ContextError::MissingClient)?;
+
+        let response = client
             .get(url)
             .header("Accept", "application/ld+json, application/json")
             .send()
-            .map_err(|e| ContextError::FetchFailed {
+            .map_err(|e: reqwest::Error| ContextError::FetchFailed {
                 url: url.to_string(),
                 reason: e.to_string(),
             })?;

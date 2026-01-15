@@ -120,9 +120,9 @@ impl<'a> RdfConverter<'a> {
     /// Converts an entity @id to an RDF subject.
     fn id_to_subject(&self, id: &str) -> Result<NamedOrBlankNode, RdfError> {
         if let Some(local_name) = id.strip_prefix("_:") {
-            return Ok(NamedOrBlankNode::BlankNode(
-                BlankNode::new_unchecked(local_name),
-            ));
+            return Ok(NamedOrBlankNode::BlankNode(BlankNode::new_unchecked(
+                local_name,
+            )));
         }
         Ok(NamedOrBlankNode::NamedNode(self.named_node(id)?))
     }

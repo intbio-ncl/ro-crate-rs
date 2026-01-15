@@ -331,16 +331,14 @@ fn extract_entity_properties_simple(
     }
 
     // Convert Vec<EntityValue> to EntityValue (single or array)
-    let mut result = HashMap::new();
-    for (key, values) in properties {
-        if values.len() == 1 {
-            result.insert(key, values.into_iter().next().unwrap());
-        } else if values.len() > 1 {
-            result.insert(key, EntityValue::EntityVec(values));
-        }
-    }
-
-    result
+    properties
+        .into_iter()
+        .filter_map(|(key, values)| match <[EntityValue; 1]>::try_from(values) {
+            Ok([single]) => Some((key, single)),
+            Err(values) if values.is_empty() => None,
+            Err(values) => Some((key, EntityValue::EntityVec(values))),
+        })
+        .collect()
 }
 
 /// Extract all IRI references from an EntityValue.
@@ -731,16 +729,14 @@ fn extract_entity_properties_with_context(
     }
 
     // Convert Vec<EntityValue> to EntityValue (single or array)
-    let mut result = HashMap::new();
-    for (key, values) in properties {
-        if values.len() == 1 {
-            result.insert(key, values.into_iter().next().unwrap());
-        } else if values.len() > 1 {
-            result.insert(key, EntityValue::EntityVec(values));
-        }
-    }
-
-    result
+    properties
+        .into_iter()
+        .filter_map(|(key, values)| match <[EntityValue; 1]>::try_from(values) {
+            Ok([single]) => Some((key, single)),
+            Err(values) if values.is_empty() => None,
+            Err(values) => Some((key, EntityValue::EntityVec(values))),
+        })
+        .collect()
 }
 
 /// Build MetadataDescriptor from triples.

@@ -1020,11 +1020,10 @@ pub fn rdf_to_rocrate(
     // Find root entities to infer base IRI
     let (metadata_iri, _) = find_root_entities(&triples)?;
 
-    // Determine the base IRI for context resolution
+    // Determine the base IRI for context resolution (None if not determinable)
     let base_iri = base
         .map(|b| b.to_string())
-        .or_else(|| infer_base_from_metadata(&metadata_iri))
-        .unwrap_or_else(|| "http://example.org/".to_string());
+        .or_else(|| infer_base_from_metadata(&metadata_iri));
 
     // Create a ResolvedContext with RO-Crate 1.2 default context + base IRI
     let ro_context =
@@ -1035,8 +1034,8 @@ pub fn rdf_to_rocrate(
         .resolve(&ro_context)
         .map_err(|e| RdfError::ParseError(format!("Failed to resolve context: {}", e)))?;
 
-    // Set the base IRI in the context for proper compaction
-    context.base = Some(base_iri);
+    // Set the base IRI in the context for proper compaction (if available)
+    context.base = base_iri;
 
     // Use the internal implementation with the resolved context
     rdf_to_rocrate_with_context(triples, context)

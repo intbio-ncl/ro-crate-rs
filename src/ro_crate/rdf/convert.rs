@@ -26,8 +26,8 @@ pub enum ConversionOptions {
     /// Use for debugging or when relative IRIs are acceptable in output.
     AllowRelative,
 
-    /// Resolve relative IRIs against the provided base IRI.
-    /// This takes precedence over @base defined in the context.
+    /// Resolve relative IRIs against the provided base IRI as a fallback.
+    /// The @base defined in the document's context takes precedence over this.
     WithBase(String),
 }
 
@@ -386,8 +386,11 @@ pub fn rocrate_to_rdf_with_options(
 ) -> Result<RdfGraph, RdfError> {
     let mut context = resolver.resolve(&crate_.context)?;
 
-    if let Some(base) = options.base_iri() {
-        context.base = Some(base.to_string());
+    // Only use WithBase as a fallback if the document doesn't define @base
+    if context.base.is_none() {
+        if let Some(base) = options.base_iri() {
+            context.base = Some(base.to_string());
+        }
     }
 
     let converter = RdfConverter::new(&context, &options);

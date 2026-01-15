@@ -370,23 +370,7 @@ impl<'a> RdfConverter<'a> {
 }
 
 /// Converts an RoCrate to RDF triples.
-///
-/// # Arguments
-/// * `crate_` - The RoCrate to convert
-/// * `resolver` - The context resolver builder (will auto-detect RO-Crate version)
-///
-/// # Returns
-/// An `RdfGraph` containing the triples and resolved context.
-///
-/// # Example
-/// ```ignore
-/// use rocraters::ro_crate::rdf::{rocrate_to_rdf, ContextResolverBuilder};
-///
-/// let graph = rocrate_to_rdf(&rocrate, ContextResolverBuilder::default())?;
-/// for triple in graph.iter() {
-///     println!("{}", triple);
-/// }
-/// ```
+/// Returns an `RdfGraph` containing the triples and resolved context.
 pub fn rocrate_to_rdf(
     crate_: &RoCrate,
     resolver: ContextResolverBuilder,
@@ -395,14 +379,6 @@ pub fn rocrate_to_rdf(
 }
 
 /// Converts an RoCrate to RDF triples with custom options.
-///
-/// # Arguments
-/// * `crate_` - The RoCrate to convert
-/// * `resolver` - The context resolver builder (will auto-detect RO-Crate version)
-/// * `options` - Conversion options controlling behavior like relative IRI handling
-///
-/// # Returns
-/// An `RdfGraph` containing the triples and resolved context.
 pub fn rocrate_to_rdf_with_options(
     crate_: &RoCrate,
     resolver: ContextResolverBuilder,

@@ -1,39 +1,11 @@
-//! RDF support for RO-Crate.
+//! RDF support for RO-Crate (RDF ↔ RO-Crate conversion).
 //!
-//! This module provides functionality for converting RO-Crates to/from RDF triples.
-//! The RO-Crate version (1.1 or 1.2) is auto-detected from the context URL.
-//!
-//! # Feature Flag
-//!
-//! RDF conversion requires the `rdf` feature:
+//! The RO-Crate version is auto-detected from the context URL.
+//! Requires the `rdf` feature flag.
 //!
 //! ```toml
 //! [dependencies]
 //! ro-crate-rs = { version = "0.4", features = ["rdf"] }
-//! ```
-//!
-//! # Example: RO-Crate to RDF
-//!
-//! ```ignore
-//! use rocraters::ro_crate::rdf::{rocrate_to_rdf, ContextResolverBuilder};
-//!
-//! // Convert an RO-Crate to RDF triples
-//! let graph = rocrate_to_rdf(&rocrate, ContextResolverBuilder::default())?;
-//!
-//! println!("Generated {} triples", graph.len());
-//! for triple in graph.iter() {
-//!     println!("{}", triple);
-//! }
-//! ```
-//!
-//! # Example: RDF to RO-Crate
-//!
-//! ```ignore
-//! use rocraters::ro_crate::rdf::{rdf_to_rocrate, RdfFormat};
-//!
-//! // Parse RDF and convert to RO-Crate
-//! let turtle_data = "..."; // Turtle format RDF
-//! let rocrate = rdf_to_rocrate(turtle_data, RdfFormat::Turtle, None)?;
 //! ```
 
 pub mod context;

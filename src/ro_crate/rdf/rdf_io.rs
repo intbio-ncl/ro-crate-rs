@@ -1,7 +1,4 @@
-//! RDF serialization and parsing support for RdfGraph.
-//!
-//! This module provides functionality to serialize RdfGraph instances to various RDF formats
-//! and parse RDF data into RO-Crate structures using the oxrdfio library.
+//! RDF serialization and parsing for `RdfGraph` using oxrdfio.
 
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
@@ -22,15 +19,7 @@ use crate::ro_crate::metadata_descriptor::MetadataDescriptor;
 use crate::ro_crate::rocrate::RoCrate;
 use crate::ro_crate::root::RootDataEntity;
 
-/// Supported RDF serialization formats.
-///
-/// This enum wraps oxrdfio's `RdfFormat` type rather than re-exporting it directly for:
-///
-/// 1. **API stability**: If oxrdfio changes their format enum, our public API remains stable
-/// 2. **Subset selection**: Only exposes formats we actively support and test for RO-Crate use
-/// 3. **Custom documentation**: Allows RO-Crate specific documentation and examples
-///
-/// Use this type to specify the desired format when serializing or parsing RDF data.
+/// Supported RDF serialization formats for RO-Crate I/O.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RdfFormat {
     /// Turtle format (.ttl) - compact and human-readable
@@ -56,27 +45,8 @@ impl RdfFormat {
 }
 
 impl RdfGraph {
-    /// Writes the RDF graph to the provided writer in the specified format.
-    ///
-    /// # Arguments
-    ///
-    /// * `writer` - The writer to output the serialized RDF to
-    /// * `format` - The RDF format to use for serialization
-    ///
-    /// # Errors
-    ///
-    /// Returns `RdfError::Serialization` if writing fails.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// use std::fs::File;
-    /// use rocraters::ro_crate::rdf::{RdfGraph, RdfFormat};
-    ///
-    /// let graph = /* ... */;
-    /// let file = File::create("output.ttl")?;
-    /// graph.write(file, RdfFormat::Turtle)?;
-    /// ```
+    /// Writes the RDF graph to `writer` in the chosen `format`.
+    /// Returns `RdfError::Serialization` on write/flush failure.
     pub fn write<W: Write>(&self, writer: W, format: RdfFormat) -> Result<(), RdfError> {
         let mut serializer =
             RdfSerializer::from_format(format.to_oxrdf_format()).for_writer(writer);
@@ -96,29 +66,8 @@ impl RdfGraph {
         Ok(())
     }
 
-    /// Serializes the RDF graph to a string in the specified format.
-    ///
-    /// This is a convenience method that uses `write()` internally with a
-    /// byte buffer and converts the result to a UTF-8 string.
-    ///
-    /// # Arguments
-    ///
-    /// * `format` - The RDF format to use for serialization
-    ///
-    /// # Errors
-    ///
-    /// Returns `RdfError::Serialization` if serialization fails or the output
-    /// is not valid UTF-8.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// use rocraters::ro_crate::rdf::{RdfGraph, RdfFormat};
-    ///
-    /// let graph = /* ... */;
-    /// let turtle = graph.to_string(RdfFormat::Turtle)?;
-    /// println!("{}", turtle);
-    /// ```
+    /// Serializes the RDF graph to a UTF-8 string in the chosen `format`.
+    /// Returns `RdfError::Serialization` on serialization or UTF-8 failure.
     pub fn to_string(&self, format: RdfFormat) -> Result<String, RdfError> {
         let mut buffer = Vec::new();
         self.write(&mut buffer, format)?;
@@ -129,15 +78,6 @@ impl RdfGraph {
 }
 
 /// Parse RDF triples from input string.
-///
-/// # Arguments
-///
-/// * `input` - The RDF data as a string
-/// * `format` - The RDF format of the input
-/// * `base` - Optional base IRI for resolving relative IRIs
-///
-/// # Errors
-///
 /// Returns `RdfError::ParseError` if parsing fails.
 fn parse_rdf(input: &str, format: RdfFormat, base: Option<&str>) -> Result<Vec<Triple>, RdfError> {
     let mut parser = RdfParser::from_format(format.to_oxrdf_format());
@@ -168,10 +108,16 @@ fn parse_rdf(input: &str, format: RdfFormat, base: Option<&str>) -> Result<Vec<T
 
 /// Find the metadata descriptor and root data entity IRIs from RDF triples.
 ///
-/// Implements the RO-Crate 1.2 spec algorithm:
-/// 1. Find metadata file IRI containing "ro-crate-metadata.json"
-/// 2. Find the root crate IRI via schema:about predicate
-/// 3. Verify the root is a schema:Dataset
+/// Implements the RO-Crate 1.2 spec SPARQL query pattern:
+/// ```sparql
+/// PREFIX schema: <http://schema.org/>
+/// SELECT ?crate ?metadatafile
+/// WHERE {
+///   ?crate        a                  schema:Dataset .
+///   ?metadatafile schema:about       ?crate .
+///   filter(contains(str(?metadatafile), "ro-crate-metadata.json"))
+/// }
+/// ```
 ///
 /// # Arguments
 ///
@@ -180,74 +126,58 @@ fn parse_rdf(input: &str, format: RdfFormat, base: Option<&str>) -> Result<Vec<T
 /// # Errors
 ///
 /// Returns `RdfError::MissingRootEntities` if required entities are not found.
-///
-/// NOTE: This function might be not so performant on very large graphs due to multiple passes.
 fn find_root_entities(triples: &[Triple]) -> Result<(String, String), RdfError> {
-    // Define important IRIs
     let schema_about = NamedNode::new_unchecked("http://schema.org/about");
     let rdf_type = NamedNode::new_unchecked("http://www.w3.org/1999/02/22-rdf-syntax-ns#type");
     let schema_dataset = NamedNode::new_unchecked("http://schema.org/Dataset");
 
-    // Step 1: Find metadata file IRI containing "ro-crate-metadata.json"
-    let mut metadata_iri: Option<String> = None;
+    // Step 1: Find all (?metadatafile, ?crate) pairs where:
+    //   - ?metadatafile contains "ro-crate-metadata.json"
+    //   - ?metadatafile schema:about ?crate
+    let mut candidates: Vec<(String, String)> = Vec::new();
     for triple in triples {
-        if let NamedOrBlankNode::NamedNode(subject) = &triple.subject {
-            let subject_str = subject.as_str();
-            if subject_str.contains("ro-crate-metadata.json") {
-                metadata_iri = Some(subject_str.to_string());
-                break;
-            }
-        }
-    }
-
-    let metadata_iri = metadata_iri.ok_or_else(|| {
-        RdfError::MissingRootEntities(
-            "Could not find metadata file IRI containing 'ro-crate-metadata.json'".to_string(),
-        )
-    })?;
-
-    // Step 2: Find root crate IRI via schema:about predicate
-    let mut root_iri: Option<String> = None;
-    for triple in triples {
-        if let NamedOrBlankNode::NamedNode(subject) = &triple.subject {
-            if subject.as_str() == metadata_iri && triple.predicate == schema_about {
-                if let Term::NamedNode(object) = &triple.object {
-                    root_iri = Some(object.as_str().to_string());
-                    break;
-                }
-            }
-        }
-    }
-
-    let root_iri = root_iri.ok_or_else(|| {
-        RdfError::MissingRootEntities(
-            "Could not find root crate IRI via schema:about predicate".to_string(),
-        )
-    })?;
-
-    // Step 3: Verify the root is a schema:Dataset
-    let mut is_dataset = false;
-    for triple in triples {
-        if let NamedOrBlankNode::NamedNode(subject) = &triple.subject {
-            if subject.as_str() == root_iri && triple.predicate == rdf_type {
-                if let Term::NamedNode(object) = &triple.object {
-                    if object == &schema_dataset {
-                        is_dataset = true;
-                        break;
+        if triple.predicate == schema_about {
+            if let NamedOrBlankNode::NamedNode(subject) = &triple.subject {
+                let metadatafile = subject.as_str();
+                if metadatafile.contains("ro-crate-metadata.json") {
+                    if let Term::NamedNode(object) = &triple.object {
+                        candidates.push((metadatafile.to_string(), object.as_str().to_string()));
                     }
                 }
             }
         }
     }
 
-    if !is_dataset {
-        return Err(RdfError::MissingRootEntities(format!(
-            "Root IRI '{}' is not a schema:Dataset",
-            root_iri
-        )));
+    if candidates.is_empty() {
+        return Err(RdfError::MissingRootEntities(
+            "Could not find metadata file with schema:about referencing a crate".to_string(),
+        ));
     }
 
-    Ok((metadata_iri, root_iri))
+    // Step 2: Filter candidates where ?crate is a schema:Dataset
+    let mut result: Option<(String, String)> = None;
+    for (metadatafile, crate_iri) in &candidates {
+        for triple in triples {
+            if let NamedOrBlankNode::NamedNode(subject) = &triple.subject {
+                if subject.as_str() == crate_iri
+                    && triple.predicate == rdf_type
+                    && triple.object == Term::NamedNode(schema_dataset.clone())
+                {
+                    result = Some((metadatafile.clone(), crate_iri.clone()));
+                    break;
+                }
+            }
+        }
+        if result.is_some() {
+            break;
+        }
+    }
+
+    result.ok_or_else(|| {
+        RdfError::MissingRootEntities(
+            "Could not find root crate (schema:Dataset) referenced by metadata file".to_string(),
+        )
+    })
 }
 
 /// Entity classification for determining whether an entity is a DataEntity or ContextualEntity.
@@ -262,21 +192,8 @@ const XSD_NS: &str = "http://www.w3.org/2001/XMLSchema#";
 
 /// Convert an RDF Term to an EntityValue.
 ///
-/// This function respects RDF literal datatypes when present, using datatype-first
-/// parsing to ensure typed literals are correctly interpreted. For example:
-/// - `"42"^^xsd:string` is returned as a string (not parsed as integer)
-/// - `"1"^^xsd:boolean` is returned as boolean true
-/// - `"0"^^xsd:boolean` is returned as boolean false
-///
-/// For untyped literals or unknown datatypes, falls back to lexical heuristics.
-///
-/// # Arguments
-///
-/// * `term` - The RDF term to convert
-///
-/// # Returns
-///
-/// An EntityValue representing the RDF term
+/// Typed literals are parsed by datatype; untyped/unknown literals fall back
+/// to lexical heuristics.
 fn term_to_entity_value(term: &Term) -> EntityValue {
     match term {
         Term::NamedNode(node) => EntityValue::EntityId(Id::Id(node.as_str().to_string())),
@@ -428,13 +345,8 @@ fn extract_entity_properties_simple(
 
 /// Extract all IRI references from an EntityValue.
 ///
-/// This iteratively searches through EntityValue structures to find all
-/// IRI references (EntityId values). Uses an explicit stack to avoid
-/// stack overflow on deeply nested structures.
-///
-/// Note: This extracts ALL IRIs including vocabulary terms. Filtering
-/// (e.g., checking if IRIs are actual entity subjects) should be done
-/// by the caller.
+/// Uses an explicit stack to avoid recursion. Includes vocabulary IRIs and
+/// blank nodes; callers can filter to entity subjects as needed.
 fn extract_iris_from_entity_value(value: &EntityValue, iris: &mut HashSet<String>) {
     let mut stack: Vec<&EntityValue> = vec![value];
 
@@ -1682,8 +1594,9 @@ mod tests {
 
         // Language-tagged literals should use heuristic parsing (fallback)
         // since they don't have an XSD datatype
-        let literal =
-            Term::Literal(Literal::new_language_tagged_literal_unchecked("hello", "en"));
+        let literal = Term::Literal(Literal::new_language_tagged_literal_unchecked(
+            "hello", "en",
+        ));
         match term_to_entity_value(&literal) {
             EntityValue::EntityString(s) => assert_eq!(s, "hello"),
             _ => panic!("Expected EntityString for language-tagged literal"),
@@ -2653,9 +2566,9 @@ mod tests {
 
     #[test]
     fn test_blank_node_roundtrip() {
-        use crate::ro_crate::read::read_crate_obj;
         use crate::ro_crate::rdf::convert::{rocrate_to_rdf_with_options, ConversionOptions};
         use crate::ro_crate::rdf::resolver::ContextResolverBuilder;
+        use crate::ro_crate::read::read_crate_obj;
         use oxrdf::NamedOrBlankNode;
 
         // Create an RoCrate JSON with a blank node entity
@@ -2709,10 +2622,13 @@ mod tests {
         .expect("Failed to convert to RDF");
 
         // Verify blank node triple exists in RDF
-        let has_blank_subject = graph.iter().any(|t| {
-            matches!(&t.subject, NamedOrBlankNode::BlankNode(bn) if bn.as_str() == "place1")
-        });
-        assert!(has_blank_subject, "RDF graph should have blank node subject");
+        let has_blank_subject = graph.iter().any(
+            |t| matches!(&t.subject, NamedOrBlankNode::BlankNode(bn) if bn.as_str() == "place1"),
+        );
+        assert!(
+            has_blank_subject,
+            "RDF graph should have blank node subject"
+        );
 
         // Convert back to RoCrate
         let crate2 = rdf_graph_to_rocrate(graph).expect("Failed to convert back to RoCrate");

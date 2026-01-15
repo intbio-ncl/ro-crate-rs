@@ -181,18 +181,9 @@ impl ResolvedContext {
 
     /// Expands a term to its full IRI.
     ///
-    /// Resolution order:
-    /// 1. Direct term mapping
-    /// 2. Prefixed term (prefix:local) with known prefix
-    /// 3. Absolute IRI with valid scheme (http:, urn:, mailto:, etc.) -> return as-is
-    /// 4. For path-like relative IRIs (./file, path/to) -> resolve against @base
-    /// 5. For simple terms -> @vocab fallback
-    /// 6. For remaining terms -> resolve against @base (treats as relative IRI)
-    /// 7. Return unchanged
-    ///
-    /// # Errors
-    /// Returns `ContextError::RelativeResolutionError` if resolving a relative IRI
-    /// would navigate above the root.
+    /// Prefers explicit term/prefix mappings, then absolute IRIs, then @base/@vocab.
+    /// Returns `ContextError::RelativeResolutionError` if resolution would
+    /// navigate above the root.
     pub fn expand_term(&self, term: &str) -> Result<String, ContextError> {
         // 1. Direct term mapping
         if let Some(iri) = self.terms.get(term) {
@@ -239,16 +230,8 @@ impl ResolvedContext {
 
     /// Expands a term to its full IRI with strict validation.
     ///
-    /// Unlike `expand_term`, this method returns an error if:
-    /// - A relative IRI is encountered and no @base is set
-    /// - `allow_relative` is false and the result is still a relative IRI
-    ///
-    /// # Arguments
-    /// * `term` - The term to expand
-    /// * `allow_relative` - If true, relative IRIs without a base are allowed (returned as-is)
-    ///
-    /// # Returns
-    /// The expanded IRI or an error if expansion fails
+    /// Errors if a relative IRI is encountered without @base and `allow_relative`
+    /// is false, or if the result remains relative.
     pub fn expand_term_checked(
         &self,
         term: &str,
@@ -310,14 +293,8 @@ impl ResolvedContext {
         Ok(term.to_string())
     }
 
-    /// Compacts a full IRI back to a short term.
-    ///
-    /// Resolution order:
-    /// 1. Exact term match
-    /// 2. Prefix match (longest namespace wins)
-    /// 3. @vocab strip
-    /// 4. @base relative
-    /// 5. Return unchanged
+    /// Compacts a full IRI back to a short term, using exact term/prefix matches
+    /// first, then @vocab/@base when possible.
     pub fn compact_iri(&self, iri: &str) -> String {
         // 1. Exact term match
         for (term, term_iri) in &self.terms {
@@ -331,7 +308,7 @@ impl ResolvedContext {
         for (prefix, namespace) in &self.prefixes {
             if iri.starts_with(namespace) {
                 let len = namespace.len();
-                if best.is_none() || len > best.unwrap().2 {
+                if best.map_or(true, |(_, _, best_len)| len > best_len) {
                     best = Some((prefix, namespace, len));
                 }
             }

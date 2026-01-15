@@ -8,8 +8,7 @@ use super::context::ResolvedContext;
 
 /// Result of converting an RoCrate to RDF.
 ///
-/// Contains the set of RDF triples and the resolved context used for the conversion.
-/// The context is preserved for potential serialization or further processing.
+/// Contains deduplicated triples and the resolved context used for conversion.
 #[derive(Debug)]
 pub struct RdfGraph {
     /// The RDF triples. Uses HashSet for automatic deduplication.

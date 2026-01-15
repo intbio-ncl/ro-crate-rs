@@ -1081,14 +1081,6 @@ mod write_crate_tests {
             assert_eq!(test, value);
         }
     }
-    fn user_root_unix(mut path_types: HashMap<&str, bool>) -> HashMap<&str, bool> {
-        if !cfg!(windows) {
-            path_types.insert("~/.cargo/env", true); // Relative Path
-            path_types.insert("/var/log/syslog", true); // Linux Absolute Path
-        }
-        path_types
-    }
-
     #[test]
     fn test_get_noncontained_paths() {
         let mut path_types: HashMap<&str, bool> = HashMap::new();

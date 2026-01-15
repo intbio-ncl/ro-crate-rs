@@ -1,11 +1,4 @@
 //! Context resolution for JSON-LD to RDF conversion.
-//!
-//! # Example
-//!
-//! ```ignore
-//! let resolved = ContextResolverBuilder::default()
-//!     .resolve(&rocrate.context)?;
-//! ```
 
 use std::collections::{HashMap, HashSet};
 
@@ -23,23 +16,8 @@ pub const ROCRATE_1_2_CONTEXT_URL: &str = "https://w3id.org/ro/crate/1.2/context
 
 /// Builder for resolving RO-Crate contexts.
 ///
-/// Accumulates pre-cached contexts and configuration, then resolves
-/// an `RoCrateContext` into a `ResolvedContext` in a single pass.
-/// The RO-Crate version (1.1 or 1.2) is auto-detected from the context URL,
-/// defaulting to 1.2 if not specified.
-///
-/// # Example
-///
-/// ```ignore
-/// // Auto-detects RO-Crate version from context
-/// let resolved = ContextResolverBuilder::default()
-///     .resolve(&rocrate.context)?;
-///
-/// // Or add custom contexts
-/// let resolved = ContextResolverBuilder::new()
-///     .with_context("https://custom.org/ctx", custom_json)?
-///     .resolve(&rocrate.context)?;
-/// ```
+/// Resolves an `RoCrateContext` into a `ResolvedContext` in a single pass,
+/// auto-detecting the RO-Crate version (defaulting to 1.2).
 pub struct ContextResolverBuilder {
     cache: HashMap<String, CachedContext>,
     allow_remote: bool,

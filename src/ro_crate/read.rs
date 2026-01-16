@@ -127,7 +127,6 @@ pub fn read_crate_obj(crate_obj: &str, validation_level: i8) -> Result<RoCrate, 
     }
 }
 
-
 /// Reads and deserialises an RO-Crate from a remote location.
 ///
 /// This function attempts to load an RO-Crate from remote location.
@@ -201,8 +200,7 @@ pub enum CrateReadError {
     VocabNotValid(String),
     #[error("{0}")]
     SchemaError(String),
-    ReqwestError(reqwest::Error)
-
+    ReqwestError(reqwest::Error),
 }
 
 impl std::fmt::Display for CrateReadError {
@@ -222,7 +220,6 @@ impl std::fmt::Display for CrateReadError {
 /// This allows `ZipError` to integrate with Rust's error handling ecosystem, enabling it to be
 /// returned and handled in contexts where a standard error type is expected.
 impl std::error::Error for CrateReadError {}
-
 
 impl PartialEq for CrateReadError {
     fn eq(&self, other: &Self) -> bool {
@@ -247,7 +244,7 @@ pub fn validate_crate_keys(rocrate: &RoCrate) -> ValidationResult {
         None => {
             return ValidationResult::Error(
                 "Could not determine RO-Crate schema version from context".to_string(),
-            )
+            );
         }
     };
     match load_rocrate_schema(version) {

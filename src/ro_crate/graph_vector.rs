@@ -10,8 +10,6 @@ use serde::ser::Serializer;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Error as SerdeJsonError, Value};
 use std::collections::HashMap;
-use std::path::Path;
-use url::Url;
 
 /// Represents the various types of entities contained within the graph of an RO-Crate.
 ///

@@ -8,8 +8,8 @@ pub mod subcrate_tests {
     use sha1::Digest;
     use std::io::Write;
     use tempfile::tempdir;
-    use zip::write::SimpleFileOptions;
     use zip::ZipWriter;
+    use zip::write::SimpleFileOptions;
 
     #[test]
     fn test_try_resolve_local_files() {
@@ -1204,7 +1204,6 @@ pub mod subcrate_tests {
         for h in 1..3 {
             let path = format!("/subcrate{}", h);
 
-
             outer_graph.push(json!(
                 {
                   "@id": "https://doi.org/10.5281/zenodo.1234567",
@@ -1476,6 +1475,5 @@ pub mod subcrate_tests {
         for m in mocks {
             m.assert();
         }
-
     }
 }

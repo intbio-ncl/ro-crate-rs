@@ -2,12 +2,12 @@
 
 use crate::ro_crate::constraints::EntityValue;
 use crate::ro_crate::constraints::{DataType, License};
-use crate::ro_crate::modify::{search_dynamic_entity_for_key, DynamicEntityManipulation};
+use crate::ro_crate::modify::{DynamicEntityManipulation, search_dynamic_entity_for_key};
 use log::debug;
 use serde::ser::SerializeMap;
 use serde::{
-    de::{self, MapAccess, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
+    de::{self, MapAccess, Visitor},
 };
 use std::collections::HashMap;
 use std::fmt;

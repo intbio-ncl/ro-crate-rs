@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 use url::Url;
 use walkdir::WalkDir;
-use zip::{write::SimpleFileOptions, ZipWriter};
+use zip::{ZipWriter, write::SimpleFileOptions};
 
 #[derive(Error, Debug)]
 pub enum WriteError {

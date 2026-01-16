@@ -7,8 +7,8 @@ use crate::ro_crate::read::read_crate;
 use crate::ro_crate::rocrate::RoCrate;
 use dirs;
 use log::{debug, error};
+use thiserror::Error;
 use std::collections::HashMap;
-use std::fmt;
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -273,54 +273,22 @@ fn directory_walk(
     Ok(data_vec)
 }
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum ZipError {
+    #[error("Directory vector is empty")]
     EmptyDirectoryVector,
+    #[error("File name not found")]
     FileNameNotFound,
+    #[error("Failed to convert file name")]
     FileNameConversionFailed,
-    PathError(std::path::StripPrefixError),
+    #[error( "Path error: {0}")]
+    PathError(#[from] std::path::StripPrefixError),
+    #[error("Zip operation Error: {0}")]
     ZipOperationError(String),
-    IoError(io::Error),
+    #[error( "IO error: {0}")]
+    IoError(#[from] io::Error),
 }
 
-impl fmt::Display for ZipError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            ZipError::EmptyDirectoryVector => write!(f, "Directory vector is empty"),
-            ZipError::FileNameNotFound => write!(f, "File name not found"),
-            ZipError::FileNameConversionFailed => write!(f, "Failed to convert file name"),
-            ZipError::ZipOperationError(ref msg) => write!(f, "Zip operation Error: {}", msg),
-            ZipError::PathError(ref err) => write!(f, "Path error: {}", err),
-            ZipError::IoError(ref err) => write!(f, "IO error: {}", err),
-        }
-    }
-}
-
-/// Implements the standard Error trait for ZipError.
-///
-/// This allows `ZipError` to integrate with Rust's error handling ecosystem, enabling it to be
-/// returned and handled in contexts where a standard error type is expected.
-impl std::error::Error for ZipError {}
-
-/// Converts an `io::Error` into a `ZipError`.
-///
-/// This is particularly useful when dealing with file I/O operations that may fail,
-/// allowing these errors to be seamlessly converted and handled as `ZipError`s.
-impl From<io::Error> for ZipError {
-    fn from(err: io::Error) -> ZipError {
-        ZipError::IoError(err)
-    }
-}
-
-/// Converts a `std::path::StripPrefixError` into a `ZipError`.
-///
-/// This conversion is necessary when manipulating file paths, especially when needing
-/// to work with relative paths and encountering errors stripping prefixes from them.
-impl From<std::path::StripPrefixError> for ZipError {
-    fn from(err: std::path::StripPrefixError) -> ZipError {
-        ZipError::PathError(err)
-    }
-}
 
 /// Packages an RO-Crate and its external files into a zip archive, updating IDs as necessary.
 ///

@@ -1,7 +1,7 @@
 use log::debug;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use std::collections::HashMap;
-use std::fmt;
 use uuid::Uuid;
 
 use crate::ro_crate::schema::{self, RoCrateSchemaVersion};
@@ -39,17 +39,10 @@ pub enum ContextItem {
     EmbeddedContext(HashMap<String, String>),
 }
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum ContextError {
+    #[error("{0}")]
     NotFound(String),
-}
-
-impl fmt::Display for ContextError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            ContextError::NotFound(e) => write!(f, "Could not find Context to replace {}", e),
-        }
-    }
 }
 
 impl RoCrateContext {

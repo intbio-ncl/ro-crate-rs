@@ -41,25 +41,25 @@ impl GraphVector {
     /// entity is correctly referenced in the root data entity's `hasPart` property if it is not already listed.
     pub fn overwrite(&mut self, new_data: GraphVector) -> bool {
         match self {
-            GraphVector::DataEntity(ref mut existing_entity) => {
+            GraphVector::DataEntity(existing_entity) => {
                 if let GraphVector::DataEntity(new_entity) = new_data {
                     *existing_entity = new_entity;
                     return true;
                 }
             }
-            GraphVector::ContextualEntity(ref mut existing_entity) => {
+            GraphVector::ContextualEntity(existing_entity) => {
                 if let GraphVector::ContextualEntity(new_entity) = new_data {
                     *existing_entity = new_entity;
                     return true;
                 }
             }
-            GraphVector::RootDataEntity(ref mut existing_entity) => {
+            GraphVector::RootDataEntity(existing_entity) => {
                 if let GraphVector::RootDataEntity(new_entity) = new_data {
                     *existing_entity = new_entity;
                     return true;
                 }
             }
-            GraphVector::MetadataDescriptor(ref mut existing_entity) => {
+            GraphVector::MetadataDescriptor(existing_entity) => {
                 if let GraphVector::MetadataDescriptor(new_entity) = new_data {
                     *existing_entity = new_entity;
                     return true;
@@ -383,9 +383,9 @@ fn try_deserialize_into_graph_vector(value: &Value) -> Result<GraphVector, Serde
 /// So the file path does not need to exist, and even if it exists, this library does not
 /// necessarily know the root of the crate. Also ContextualEntities can contain valid URIs as
 /// the documentation says [here](https://www.researchobject.org/ro-crate/specification/1.2/contextual-entities.html#identifiers-for-contextual-entities)
-fn _is_valid_url_or_path(s: &str) -> bool {
-    Url::parse(s).is_ok() || Path::new(s).exists()
-}
+// fn _is_valid_url_or_path(s: &str) -> bool {
+//     Url::parse(s).is_ok() || Path::new(s).exists()
+// }
 fn is_data_entity(entity_type: &Value, id: &str) -> bool {
     if id.starts_with('#') {
         return false;

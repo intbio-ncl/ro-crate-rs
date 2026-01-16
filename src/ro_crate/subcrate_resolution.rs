@@ -6,10 +6,11 @@ use log::warn;
 use reqwest::blocking::Response;
 use reqwest::header::{HeaderMap, ToStrError};
 use sha2::Digest;
+use std::collections::VecDeque;
 use std::io::Read;
 use std::string::FromUtf8Error;
-use zip::result::ZipError;
 use zip::ZipArchive;
+use zip::result::ZipError;
 
 #[derive(Debug)]
 pub enum FetchError {
@@ -103,12 +104,16 @@ impl From<regex::Error> for FetchError {
 /// Fails when a subcrate cannot be resolved
 pub fn fetch_subcrates_recursive(rocrate: &RoCrate) -> Result<Vec<RoCrate>, FetchError> {
     let mut flattened = Vec::new();
-    let subcrates = fetch_subcrates(rocrate)?;
+    let mut queue = fetch_subcrates(rocrate)?
+        .into_iter()
+        .collect::<VecDeque<RoCrate>>();
 
-    for subcrate in &subcrates {
-        flattened.push(subcrate.clone());
-        let mut crates = fetch_subcrates_recursive(&subcrate)?;
-        flattened.append(&mut crates);
+    while let Some(subcrate) = queue.pop_front() {
+        let subsubcrates = fetch_subcrates(&subcrate)?;
+        for sub in subsubcrates {
+            queue.push_back(sub);
+        }
+        flattened.push(subcrate);
     }
 
     Ok(flattened)
@@ -117,12 +122,16 @@ pub fn fetch_subcrates_recursive(rocrate: &RoCrate) -> Result<Vec<RoCrate>, Fetc
 /// Does not fail when a subcrate cannot be resolved
 pub fn try_fetch_subcrates_recursive(rocrate: &RoCrate) -> Vec<RoCrate> {
     let mut flattened = Vec::new();
-    let subcrates = try_fetch_subcrates(rocrate);
+    let mut queue = try_fetch_subcrates(rocrate)
+        .into_iter()
+        .collect::<VecDeque<RoCrate>>();
 
-    for subcrate in &subcrates {
-        flattened.push(subcrate.clone());
-        let mut crates = try_fetch_subcrates_recursive(&subcrate);
-        flattened.append(&mut crates);
+    while let Some(subcrate) = queue.pop_front() {
+        let subsubcrates = try_fetch_subcrates(&subcrate);
+        for sub in subsubcrates {
+            queue.push_back(sub);
+        }
+        flattened.push(subcrate);
     }
 
     flattened
@@ -233,25 +242,18 @@ fn try_resolve_remote(id: &str) -> Result<RoCrate, FetchError> {
     }
 
     // Try signposting
-    if let Ok(response) = try_signposting(&headers) {
-        // Try dir
-        if let Ok(ro_crate) = try_direct_resolve_or_zip(response) {
-            return Ok(ro_crate);
-        }
+    if let Ok(ro_crate) = try_signposting(&headers).and_then(try_direct_resolve_or_zip) {
+        return Ok(ro_crate);
     }
 
     // Try content negotiation
-    if let Ok(response) = try_content_negotiation(&id) {
-        if let Ok(ro_crate) = try_direct_resolve_or_zip(response) {
-            return Ok(ro_crate);
-        }
+    if let Ok(ro_crate) = try_content_negotiation(&id).and_then(try_direct_resolve_or_zip) {
+        return Ok(ro_crate);
     }
 
     // Guess location
-    if let Ok(response) = guess_location(&redirect_url) {
-        if let Ok(ro_crate) = try_direct_resolve_or_zip(response) {
-            return Ok(ro_crate);
-        }
+    if let Ok(ro_crate) = guess_location(&redirect_url).and_then(try_direct_resolve_or_zip) {
+        return Ok(ro_crate);
     }
 
     Err(FetchError::NotFound(format!(
@@ -420,7 +422,7 @@ fn try_bagit(
 ) -> Result<RoCrate, FetchError> {
     if archive.by_name("bagit.txt").is_ok() {
         // 5. If retrieved resource is a BagIt archive, extract and verify checksums,
-        //    then return data/ro-crate-metdata.json
+        //    then return data/ro-crate-metadata.json
         let mut rocrate = archive.by_name("data/ro-crate-metadata.json")?;
         // Parse ro-crate
         let mut ro_crate_buffer = Vec::new();
@@ -473,7 +475,7 @@ fn try_verify_hash(
     let hash = hashes
         .lines()
         .find_map(|line| {
-            if line.contains("ro-crate-metdata.json") {
+            if line.contains("ro-crate-metadata.json") {
                 if let Some((hash, _)) = line.split_once(' ') {
                     Some(hash.to_string())
                 } else {

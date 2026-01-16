@@ -291,47 +291,40 @@ impl RoCrate {
 
     /// Returns all entities that are referenced rocrates
     pub fn get_subcrates(&self) -> Vec<&GraphVector> {
+        let is_rocrate_spec = |path: &str| path.contains("https://w3id.org/ro/crate");
         // DataEntity::get_property_value() searches recursive, so if we have a DataEntity with
         // a nested custom field that also contains on any lower level `subjectOf`
         // we also get a match. But in this case we only want to get first level matches
         self.graph
             .iter()
-            .filter_map(|entry| {
-                if let GraphVector::DataEntity(data_entitiy) = entry {
-                    if let Some(dynamic) = &data_entitiy.dynamic_entity {
-                        if let Some(entity) = dynamic.get("conformsTo") {
-                            // There are two variants here:
-                            // Either we have an EntityId entry with just one Id
-                            // that matches an ro-crate specification or we have an
-                            // entity vec where some entities may match an ro-crate
-                            // specification
-                            match entity {
-                                EntityValue::EntityId(Id::Id(crate_path)) => {
-                                    // Do not match the root ro-crates metadata json file
-                                    if crate_path.contains("https://w3id.org/ro/crate")
-                                        && (entry.get_id() != "ro-crate-metdata.json")
-                                    {
-                                        return Some(entry);
-                                    }
-                                }
-                                EntityValue::EntityVec(entity_values) => {
-                                    for value in entity_values {
-                                        if let EntityValue::EntityId(Id::Id(crate_path)) = value {
-                                            // Do not match the root ro-crates metadata json file
-                                            if crate_path.contains("https://w3id.org/ro/crate")
-                                                && (entry.get_id() != "ro-crate-metdata.json")
-                                            {
-                                                return Some(entry);
-                                            }
-                                        }
-                                    }
-                                }
-                                _ => {}
-                            }
+            .filter(|entry| {
+                if let GraphVector::DataEntity(data_entity) = entry
+                    && let Some(dynamic) = &data_entity.dynamic_entity
+                    && let Some(entity) = dynamic.get("conformsTo")
+                {
+                    // There are two variants here:
+                    // Either we have an EntityId entry with just one Id
+                    // that matches an ro-crate specification or we have an
+                    // entity vec where some entities may match an ro-crate
+                    // specification
+                    let conforms_to = match entity {
+                        EntityValue::EntityId(Id::Id(crate_path)) => {
+                            is_rocrate_spec(&crate_path)
                         }
-                    }
+                        EntityValue::EntityVec(entity_values) => {
+                            entity_values.iter().any(|v|{
+                                matches!(v, EntityValue::EntityId(Id::Id(path)) if is_rocrate_spec(path))
+                            })
+                        }
+                        _ => false
+                    };
+                    // Do not match the root ro-crates metadata json file
+                    let id = entry.get_id();
+                    conforms_to && id != "ro-crate-metadata.json" && id != "ro-crate-metadata.jsonld"
+
+                } else {
+                    false
                 }
-                None
             })
             .collect()
     }

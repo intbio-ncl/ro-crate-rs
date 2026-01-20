@@ -7,11 +7,11 @@ use crate::ro_crate::read::read_crate;
 use crate::ro_crate::rocrate::RoCrate;
 use dirs;
 use log::{debug, error};
-use thiserror::Error;
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use thiserror::Error;
 use url::Url;
 use walkdir::WalkDir;
 use zip::{write::SimpleFileOptions, ZipWriter};
@@ -162,7 +162,7 @@ pub struct RoCrateZipPaths {
 }
 
 fn construct_paths(crate_path: &Path) -> Result<RoCrateZipPaths, Box<dyn std::error::Error>> {
-    // TODO: add multile options for walking/compression e.g follow symbolic links etc.
+    // TODO: add multiple options for walking/compression e.g follow symbolic links etc.
     let absolute_path = get_absolute_path(crate_path).unwrap();
     let root_path = absolute_path.parent().unwrap().to_path_buf();
 
@@ -281,14 +281,13 @@ pub enum ZipError {
     FileNameNotFound,
     #[error("Failed to convert file name")]
     FileNameConversionFailed,
-    #[error( "Path error: {0}")]
+    #[error("Path error: {0}")]
     PathError(#[from] std::path::StripPrefixError),
     #[error("Zip operation Error: {0}")]
     ZipOperationError(String),
-    #[error( "IO error: {0}")]
+    #[error("IO error: {0}")]
     IoError(#[from] io::Error),
 }
-
 
 /// Packages an RO-Crate and its external files into a zip archive, updating IDs as necessary.
 ///
@@ -587,23 +586,326 @@ fn add_directory_recursively(
 
 #[cfg(test)]
 mod write_crate_tests {
-    use super::*;
-    use crate::ro_crate::read::parse_zip;
-    use crate::ro_crate::read::read_crate;
+    use dirs::home_dir;
     use std::collections::HashMap;
-    use std::env;
     use std::fs;
     use std::path::Path;
+    use super::*;
+    use crate::ro_crate::read::{parse_zip, read_crate};
     use std::path::PathBuf;
 
-    fn fixture_path(relative_path: &str) -> PathBuf {
-        Path::new("tests/fixtures").join(relative_path)
+    use std::io::Write;
+
+    use serde_json::{json, Value};
+
+    pub fn minimal_test_experiment_rocrate() -> Value {
+        json!({
+           "@context": "https://w3id.org/ro/crate/1.1/context",
+           "@graph": [
+              {
+                 "@type": "CreativeWork",
+                 "@id": "ro-crate-metadata.json",
+                 "conformsTo": {"@id": "https://w3id.org/ro/crate/1.1"},
+                 "about": {"@id": "./"}
+              },
+              {
+                 "@id": "./",
+                 "identifier": "https://doi.org/10.4225/59/59672c09f4a4b",
+                 "@type": "Dataset",
+                 "datePublished": "2017",
+                 "name": "Data files associated with the manuscript:Effects of facilitated family case conferencing for ...",
+                 "description": "Palliative care planning for nursing home residents with advanced dementia ...",
+                 "license": {"@id": "https://creativecommons.org/licenses/by-nc-sa/3.0/au/"}
+              },
+              {
+                 "@id": "https://creativecommons.org/licenses/by-nc-sa/3.0/au/",
+                 "@type": "CreativeWork",
+                 "description": "This work is licensed under the Creative Commons Attribution-NonCommercial-ShareAlike 3.0 Australia License. To view a copy of this license, visit http://creativecommons.org/licenses/by-nc-sa/3.0/au/ or send a letter to Creative Commons, PO Box 1866, Mountain View, CA 94042, USA.",
+                 "identifier": "https://creativecommons.org/licenses/by-nc-sa/3.0/au/",
+                 "name": "Attribution-NonCommercial-ShareAlike 3.0 Australia (CC BY-NC-SA 3.0 AU)",
+                 "value": null
+              },
+              {
+                 "@id": "../external.txt",
+                 "@type": "File",
+                 "name": "External data"
+              },
+                    {
+                 "@id": "/home/matt/dev/ial/ro-crate-rs/tests/fixtures/test_experiment/data.csv",
+                 "@type": "File",
+                 "name": "CSV data"
+              },      {
+                 "@id": "text_1.txt",
+                 "@type": "File",
+                 "name": "text data"
+              }
+           ]
+        })
+    }
+
+    pub fn create_tempcrate(value: Value) -> tempfile::TempDir {
+        let tempdir = tempfile::tempdir().unwrap();
+        let mut ro_crate =
+            std::fs::File::create_new(tempdir.path().join("ro-crate-metadata.json")).unwrap();
+        ro_crate
+            .write_all(&serde_json::to_vec(&value).unwrap())
+            .unwrap();
+        tempdir
+    }
+
+    fn ro_crate_minimal() -> serde_json::Value {
+        serde_json::json!(
+        { "@context": "https://w3id.org/ro/crate/1.1/context",
+          "@graph": [
+
+         {
+            "@type": "CreativeWork",
+            "@id": "ro-crate-metadata.json",
+            "conformsTo": {"@id": "https://w3id.org/ro/crate/1.1"},
+            "about": {"@id": "./"}
+         },
+         {
+            "@id": "./",
+            "identifier": "https://doi.org/10.4225/59/59672c09f4a4b",
+            "@type": "Dataset",
+            "datePublished": "2017",
+            "name": "Data files associated with the manuscript:Effects of facilitated family case conferencing for ...",
+            "description": "Palliative care planning for nursing home residents with advanced dementia ...",
+            "license": {"@id": "https://creativecommons.org/licenses/by-nc-sa/3.0/au/"},
+            "value": null
+         },
+         {
+          "@id": "https://creativecommons.org/licenses/by-nc-sa/3.0/au/",
+          "@type": "CreativeWork",
+          "description": "This work is licensed under the Creative Commons Attribution-NonCommercial-ShareAlike 3.0 Australia License. To view a copy of this license, visit http://creativecommons.org/licenses/by-nc-sa/3.0/au/ or send a letter to Creative Commons, PO Box 1866, Mountain View, CA 94042, USA.",
+          "identifier": "https://creativecommons.org/licenses/by-nc-sa/3.0/au/",
+          "name": "Attribution-NonCommercial-ShareAlike 3.0 Australia (CC BY-NC-SA 3.0 AU)",
+          "value": null
+         }
+         ]
+        }
+            )
+    }
+
+    #[test]
+    fn test_construct_paths() {
+        let workdir = tempfile::tempdir().unwrap();
+
+        // Create test_experiment dir
+        let dir_path = workdir.path().join("test_experiment");
+        std::fs::create_dir(&dir_path).unwrap();
+
+        let file_path = workdir
+            .path()
+            .join("test_experiment/_ro-crate-metadata-minimal.json");
+        let _file = std::fs::File::create_new(&file_path).unwrap();
+
+        let paths = construct_paths(&file_path).unwrap();
+
+        assert_eq!(paths.absolute_path, file_path.canonicalize().unwrap());
+        assert_eq!(paths.root_path, dir_path.canonicalize().unwrap());
+        assert_eq!(
+            paths.zip_file_name,
+            dir_path.canonicalize().unwrap().join("test_experiment.zip")
+        );
+    }
+
+    #[test]
+    fn test_directory_walk() {
+        let workdir = tempfile::tempdir().unwrap();
+
+        // Create test_experiment dir
+        let dir_path = workdir.path().join("test_experiment");
+        std::fs::create_dir(&dir_path).unwrap();
+
+        // Create test files
+        let file_path = workdir
+            .path()
+            .join("test_experiment/_ro-crate-metadata-minimal.json");
+        let mut file = std::fs::File::create_new(&file_path).unwrap();
+        file.write_all(&serde_json::to_vec(&ro_crate_minimal()).unwrap())
+            .unwrap();
+        let data = workdir.path().join("test_experiment/data.csv");
+        std::fs::File::create_new(&data).unwrap();
+        let text = workdir.path().join("test_experiment/text_1.txt");
+        std::fs::File::create_new(&text).unwrap();
+
+        let zip_paths = RoCrateZipPaths {
+            absolute_path: file_path.clone(),
+            root_path: dir_path.clone(),
+            zip_file_name: dir_path.clone().join(PathBuf::from("test_experiment.zip")),
+        };
+
+        let mut zip_data = RoCrateZip {
+            zip: ZipWriter::new(File::create(&zip_paths.zip_file_name).unwrap()),
+            options: SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated),
+        };
+
+        let mut rocrate = read_crate(&file_path, 0).unwrap();
+
+        let mut directory_contents =
+            directory_walk(&mut rocrate, &zip_paths, &mut zip_data, false).unwrap();
+
+        let mut test_vec: Vec<PathBuf> = vec![
+            dir_path.join(PathBuf::from("data.csv")),
+            dir_path.join(PathBuf::from("text_1.txt")),
+        ];
+
+        directory_contents.sort();
+        test_vec.sort();
+
+        assert_eq!(directory_contents, test_vec);
+    }
+
+    fn user_root_unix(mut path_types: HashMap<String, bool>) -> HashMap<String, bool> {
+        if !cfg!(windows) {
+            // root path
+            let mut tempfile = tempfile::NamedTempFile::new().unwrap();
+            tempfile.write_all(b"hello root temp").unwrap();
+            path_types.insert(
+                tempfile
+                    .path()
+                    .canonicalize()
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .to_string(),
+                true,
+            );
+
+            // tilde path
+            let home = home_dir().unwrap();
+            let home_dir = tempfile::tempdir_in(home).unwrap();
+            let mut file =
+                std::fs::File::create_new(&home_dir.path().join("tempfile.txt")).unwrap();
+            file.write_all(b"hello user temp").unwrap();
+            let temp_base = home_dir.path().file_name().unwrap().to_string_lossy();
+            path_types.insert(format!("~/{}/tempfile.txt", temp_base), true);
+        }
+        path_types
+    }
+
+    #[test]
+    fn test_get_noncontained_paths() {
+        let workdir = tempfile::tempdir().unwrap();
+
+        // Create test_experiment dir
+        let dir_path = workdir.path().join("test_experiment");
+        std::fs::create_dir(&dir_path).unwrap();
+
+        // Create test files
+        let crate_path = workdir
+            .path()
+            .join("test_experiment/_ro-crate-metadata-minimal.json");
+        let mut file = std::fs::File::create_new(&crate_path).unwrap();
+        file.write_all(&serde_json::to_vec(&ro_crate_minimal()).unwrap())
+            .unwrap();
+        let data = workdir.path().join("test_experiment/data.csv");
+        std::fs::File::create_new(&data).unwrap();
+        let text = workdir.path().join("test_experiment/text_1.txt");
+        std::fs::File::create_new(&text).unwrap();
+        let readme = workdir.path().join("README.md");
+        std::fs::File::create_new(&readme).unwrap();
+        let external = workdir.path().join("external.txt");
+        let mut file = std::fs::File::create_new(&external).unwrap();
+        file.write_all("external data test".as_bytes()).unwrap();
+        let invalid = workdir.path().join("invalid.json");
+        let mut file = std::fs::File::create_new(&invalid).unwrap();
+        file.write_all("Invalid JSON".as_bytes()).unwrap();
+
+        let mut path_types: HashMap<String, bool> = HashMap::new();
+
+        path_types.insert("../invalid.json".to_string(), true); // Windows File Path
+        path_types.insert("../external.txt".to_string(), true); // Windows File Path
+        path_types.insert("./data.csv".to_string(), false); // macOS File Path
+        path_types.insert("./text_1.txt".to_string(), false); // Linux Absolute Path
+        path_types.insert("text_1.txt".to_string(), false); // Linux Absolute Path
+        path_types.insert("#fragment".to_string(), false); // Relative Path
+
+        path_types = user_root_unix(path_types); //Check tilde paths
+
+        // abs path but not relative
+        let abs_not = workdir
+            .path()
+            .join(PathBuf::from("README.md"))
+            .to_str()
+            .unwrap()
+            .to_string();
+        path_types.insert(abs_not, true);
+
+        // abs path rel
+        let abs_is = dir_path
+            .join(PathBuf::from("data.csv"))
+            .canonicalize()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        path_types.insert(abs_is, false);
+
+        for (key, value) in path_types {
+            let mut input_vec: Vec<&String> = Vec::new();
+            let target = key.to_string();
+            input_vec.push(&target);
+
+            let test = get_noncontained_paths(input_vec.clone(), &dir_path, false);
+            println!("{:?}", test);
+            if test.is_empty() {
+                println!("Test is empty for relative ID: {}", key);
+                assert_eq!(value, false)
+            } else {
+                println!("Test is successful for relative ID: {}", key);
+                assert_eq!(value, true)
+            }
+        }
+    }
+    #[test]
+    fn test_zip_crate_external_func() {
+        let workdir = tempfile::tempdir().unwrap();
+
+        // Create test_experiment dir
+        let dir_path = workdir.path().join("test_experiment");
+        std::fs::create_dir(&dir_path).unwrap();
+
+        // Create test files
+        let crate_path = workdir
+            .path()
+            .join("test_experiment/_ro-crate-metadata-minimal.json");
+        let mut file = std::fs::File::create_new(&crate_path).unwrap();
+        file.write_all(&serde_json::to_vec(&ro_crate_minimal()).unwrap())
+            .unwrap();
+        let data = workdir.path().join("test_experiment/data.csv");
+        std::fs::File::create_new(&data).unwrap();
+        let text = workdir.path().join("test_experiment/text_1.txt");
+        std::fs::File::create_new(&text).unwrap();
+        let readme = workdir.path().join("README.md");
+        std::fs::File::create_new(&readme).unwrap();
+
+        let mut rocrate = read_crate(&crate_path, 0).unwrap();
+        let zip_paths = RoCrateZipPaths {
+            absolute_path: crate_path,
+            root_path: dir_path.clone(),
+            zip_file_name: dir_path.join(PathBuf::from("test_experiment.zip")),
+        };
+
+        let zip_data = RoCrateZip {
+            zip: ZipWriter::new(File::create(&zip_paths.zip_file_name).unwrap()),
+            options: SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated),
+        };
+
+        assert!(zip_crate_external(&mut rocrate, zip_data, &zip_paths).is_ok());
     }
 
     #[test]
     fn test_write_crate_success() {
-        let path = fixture_path("_ro-crate-metadata-minimal.json");
-        let rocrate = read_crate(&path, 0).unwrap();
+        let tempfile = create_tempcrate(ro_crate_minimal());
+        let rocrate = read_crate(
+            &tempfile.path().join("ro-crate-metadata.json").to_path_buf(),
+            0,
+        )
+        .unwrap();
         let file_name = "test_rocrate_output.json";
 
         // Call the function to write the crate to a file
@@ -624,119 +926,36 @@ mod write_crate_tests {
 
     #[test]
     fn test_zip_crate_basic() {
-        let path = fixture_path("test_experiment/_ro-crate-metadata-minimal.json");
-        let path_zip = fixture_path("test_experiment/test_experiment.zip");
+        let path = create_tempcrate(minimal_test_experiment_rocrate());
+        let ro_path = path.path().join("ro-crate-metadata.json");
+        let base = path.path().file_name().unwrap().to_string_lossy();
+        let zip_path = format!("{}/{}.zip", path.path().to_string_lossy(), base);
 
-        let zipped = zip_crate(&path, false, 0, false, false);
+        let zipped = zip_crate(&ro_path, false, 0, false, false);
         println!("{:?}", zipped);
-        assert!(parse_zip(path_zip.to_str().unwrap(), 0).is_ok());
+        assert!(parse_zip(&zip_path, 0).is_ok());
     }
 
     #[test]
-    #[ignore]
     fn test_zip_crate_external_full() {
-        let path = fixture_path("test_experiment/_ro-crate-metadata-minimal.json");
-        let path_zip = fixture_path("test_experiment/test_experiment.zip");
+        let path = create_tempcrate(minimal_test_experiment_rocrate());
+        let ro_path = path.path().join("ro-crate-metadata.json");
+        let base = path.path().file_name().unwrap().to_string_lossy();
+        let zip_path = format!("{}/{}.zip", path.path().to_string_lossy(), base);
 
-        let zipped = zip_crate(&path, true, 0, false, false);
+        let zipped = zip_crate(&ro_path, true, 0, false, false);
         println!("{:?}", zipped);
-        assert!(parse_zip(path_zip.to_str().unwrap(), 0).is_ok());
+        assert!(parse_zip(&zip_path, 0).is_ok());
     }
 
     #[test]
-    #[ignore]
     fn test_zip_crate_external_full_unique() {
-        let path = fixture_path("unique_zips/_ro-crate-metadata-minimal.json");
+        let path = create_tempcrate(minimal_test_experiment_rocrate());
+        let ro_path = path.path().join("ro-crate-metadata.json");
 
-        let zipped = zip_crate(&path, true, 0, false, true);
+        let zipped = zip_crate(&ro_path, true, 0, false, true);
         println!("{:?}", zipped);
         assert!(zipped.is_ok())
-    }
-
-    #[test]
-    fn test_construct_paths() {
-        let cwd = env::current_dir().unwrap();
-        let path = fixture_path("test_experiment/_ro-crate-metadata-minimal.json")
-            .canonicalize()
-            .unwrap();
-
-        let paths = construct_paths(&path).unwrap();
-
-        assert_eq!(paths.absolute_path, cwd.join(&path));
-        assert_eq!(
-            paths.root_path,
-            cwd.join(PathBuf::from("tests/fixtures/test_experiment"))
-                .canonicalize()
-                .unwrap()
-        );
-        assert_eq!(
-            paths.zip_file_name,
-            cwd.join(
-                PathBuf::from("tests/fixtures/test_experiment/test_experiment.zip")
-                    .canonicalize()
-                    .unwrap()
-            )
-        );
-    }
-
-    #[test]
-    fn test_directory_walk() {
-        let cwd = env::current_dir().unwrap();
-        let path = fixture_path("test_experiment/_ro-crate-metadata-minimal.json");
-
-        let zip_paths = RoCrateZipPaths {
-            absolute_path: cwd.join(&path),
-            root_path: cwd.join(PathBuf::from("tests/fixtures/test_experiment")),
-            zip_file_name: cwd.join(PathBuf::from(
-                "tests/fixtures/test_experiment/test_experiment.zip",
-            )),
-        };
-
-        let mut zip_data = RoCrateZip {
-            zip: ZipWriter::new(File::create(&zip_paths.zip_file_name).unwrap()),
-            options: SimpleFileOptions::default()
-                .compression_method(zip::CompressionMethod::Deflated),
-        };
-
-        let path = fixture_path("test_experiment/_ro-crate-metadata-minimal.json");
-
-        let mut rocrate = read_crate(&path, 0).unwrap();
-        /*
-        let mut contained: HashMap<String, PathBuf> = HashMap::new();
-        contained.insert(
-            "../external.txt".to_string(),
-            cwd.join(PathBuf::from("tests/fixtures/external.txt")),
-        );
-        contained.insert(
-            cwd.display().to_string() + "/tests/fixtures/test_experiment/data.csv",
-            cwd.join(PathBuf::from("tests/fixtures/test_experiment/data.csv")),
-        );
-        contained.insert(
-            "text_1.txt".to_string(),
-            cwd.join(PathBuf::from("tests/fixtures/test_experiment/text_1.txt")),
-        );
-        */
-
-        let mut directory_contents =
-            directory_walk(&mut rocrate, &zip_paths, &mut zip_data, false).unwrap();
-
-        let mut test_vec: Vec<PathBuf> = vec![
-            cwd.join(
-                PathBuf::from("tests/fixtures/test_experiment/data.csv")
-                    .canonicalize()
-                    .unwrap(),
-            ),
-            cwd.join(
-                PathBuf::from("tests/fixtures/test_experiment/text_1.txt")
-                    .canonicalize()
-                    .unwrap(),
-            ),
-        ];
-
-        directory_contents.sort();
-        test_vec.sort();
-
-        assert_eq!(directory_contents, test_vec);
     }
 
     #[test]
@@ -822,83 +1041,5 @@ mod write_crate_tests {
             println!("Func result: {}, testing: {}, {}", test, key, value);
             assert_eq!(test, value);
         }
-    }
-
-    fn user_root_unix(mut path_types: HashMap<&str, bool>) -> HashMap<&str, bool> {
-        if !cfg!(windows) {
-            path_types.insert("~/.cargo/env", true); // Relative Path
-            path_types.insert("/var/log/syslog", true); // Linux Absolute Path
-        }
-        path_types
-    }
-
-    #[test]
-    fn test_get_noncontained_paths() {
-        let mut path_types: HashMap<&str, bool> = HashMap::new();
-        let cwd = env::current_dir().unwrap();
-        let crate_path = cwd.join(PathBuf::from("tests/fixtures/test_experiment"));
-
-        path_types.insert("../invalid.json", true); // Windows File Path
-        path_types.insert("../external.txt", true); // Windows File Path
-        path_types.insert("./data.csv", false); // macOS File Path
-        path_types.insert("./text_1.txt", false); // Linux Absolute Path
-        path_types.insert("text_1.txt", false); // Linux Absolute Path
-        path_types.insert("#fragment", false); // Relative Path
-
-        path_types = user_root_unix(path_types); //Check tilde paths
-
-        // abs path but not relative
-        let abs_not = cwd
-            .join(PathBuf::from("README.md"))
-            .to_str()
-            .unwrap()
-            .to_string();
-        path_types.insert(&abs_not, true);
-
-        // abs path rel
-        let abs_is = cwd
-            .join(crate_path.join(PathBuf::from("data.csv")))
-            .to_str()
-            .unwrap()
-            .to_string();
-        path_types.insert(&abs_is, false);
-
-        for (key, value) in path_types {
-            let mut input_vec: Vec<&String> = Vec::new();
-            let target = key.to_string();
-            input_vec.push(&target);
-
-            let test = get_noncontained_paths(input_vec.clone(), &crate_path, false);
-            if test.is_empty() {
-                println!("Test is empty for relative ID: {}", key);
-                assert_eq!(value, false)
-            } else {
-                println!("Test is successful for relative ID: {}", key);
-                assert_eq!(value, true)
-            }
-        }
-    }
-
-    #[test]
-    fn test_zip_crate_external_func() {
-        let cwd = env::current_dir().unwrap();
-        let path = fixture_path("test_experiment/_ro-crate-metadata-minimal.json");
-
-        let mut rocrate = read_crate(&path, 0).unwrap();
-        let zip_paths = RoCrateZipPaths {
-            absolute_path: cwd.join(&path),
-            root_path: cwd.join(PathBuf::from("tests/fixtures/test_experiment")),
-            zip_file_name: cwd.join(PathBuf::from(
-                "tests/fixtures/test_experiment/test_experiment.zip",
-            )),
-        };
-
-        let zip_data = RoCrateZip {
-            zip: ZipWriter::new(File::create(&zip_paths.zip_file_name).unwrap()),
-            options: SimpleFileOptions::default()
-                .compression_method(zip::CompressionMethod::Deflated),
-        };
-
-        assert!(zip_crate_external(&mut rocrate, zip_data, &zip_paths).is_ok());
     }
 }

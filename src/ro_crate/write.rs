@@ -599,6 +599,12 @@ mod write_crate_tests {
     use serde_json::{json, Value};
 
     fn minimal_test_experiment_rocrate(tempdir: PathBuf) -> Value {
+        let mut data = std::fs::File::create_new(tempdir.join("data.csv")).unwrap();
+        data.write_all(
+            b"subject,object
+1,2",
+        )
+        .unwrap();
         json!({
            "@context": "https://w3id.org/ro/crate/1.1/context",
            "@graph": [

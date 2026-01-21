@@ -16,6 +16,14 @@ use url::Url;
 use walkdir::WalkDir;
 use zip::{write::SimpleFileOptions, ZipWriter};
 
+#[derive(Error, Debug)]
+pub enum WriteError {
+    #[error("IO error: {0}")]
+    IoError(#[from] io::Error),
+    #[error("IO error: {0}")]
+    Serialization(#[from] serde_json::Error),
+}
+
 /// Serializes and writes an RO-Crate object to a JSON file.
 ///
 /// This function serializes the given `RoCrate` object into a pretty-printed JSON format and writes it
@@ -31,18 +39,11 @@ use zip::{write::SimpleFileOptions, ZipWriter};
 /// Current error handling within this function is minimal, relying on printing to stderr. It is recommended
 /// to update this function to return a `Result` type in future revisions for better error handling and integration
 /// with calling code.
-pub fn write_crate(rocrate: &RoCrate, name: String) {
-    match serde_json::to_string_pretty(&rocrate) {
-        Ok(json_ld) => match File::create(name) {
-            Ok(mut file) => {
-                if writeln!(file, "{}", json_ld).is_err() {
-                    error!("Failed to write to the file.");
-                }
-            }
-            Err(e) => error!("Failed to create file: {}", e),
-        },
-        Err(e) => error!("Serialization failed: {}", e),
-    }
+pub fn write_crate(rocrate: &RoCrate, name: String) -> Result<(), WriteError> {
+    let json_ld = serde_json::to_string_pretty(&rocrate)?;
+    let mut file = File::create(name)?;
+    writeln!(file, "{}", json_ld)?;
+    Ok(())
 }
 
 /// Serializes an RO-Crate object and writes it directly to a zip file.
@@ -119,6 +120,7 @@ pub fn zip_crate(
 ) -> Result<(), ZipError> {
     // After prepping create the initial zip file
     let mut zip_paths = construct_paths(crate_path).unwrap();
+    debug!("{:?}", &zip_paths);
 
     // Opens target crate ready for update
     let mut rocrate = read_crate(&zip_paths.absolute_path, validation_level).unwrap();
@@ -127,7 +129,14 @@ pub fn zip_crate(
     rocrate.context.add_urn_uuid();
     // This saves a modified copy with the updated urn -> prevents duplicate if already
     // present
-    write_crate(&rocrate, "ro-crate-metadata.json".to_string());
+    write_crate(
+        &rocrate,
+        zip_paths
+            .absolute_path
+            .canonicalize()?
+            .to_string_lossy()
+            .to_string(),
+    )?;
     if unique {
         let base_id = rocrate.context.get_specific_context("@base").unwrap();
 
@@ -287,6 +296,8 @@ pub enum ZipError {
     ZipOperationError(String),
     #[error("IO error: {0}")]
     IoError(#[from] io::Error),
+    #[error("WriteError {0}")]
+    WriteError(#[from] WriteError),
 }
 
 /// Packages an RO-Crate and its external files into a zip archive, updating IDs as necessary.
@@ -913,22 +924,19 @@ mod write_crate_tests {
             0,
         )
         .unwrap();
-        let file_name = "test_rocrate_output.json";
+        let file_name = tempfile.path().join("test_rocrate_output.json");
 
         // Call the function to write the crate to a file
-        write_crate(&rocrate, file_name.to_string());
+        write_crate(&rocrate, file_name.to_string_lossy().to_string()).unwrap();
 
         // Check if the file is created
-        assert!(Path::new(file_name).exists());
+        assert!(Path::new(&file_name).exists());
 
         // Read the file content and verify if it matches the expected JSON
         let file_content = fs::read_to_string(file_name).expect("Failed to read file");
         let expected_json = serde_json::to_string_pretty(&rocrate).expect("Failed to serialize");
         println!("{}", file_content);
         assert_eq!(file_content.trim_end(), expected_json);
-
-        // Clean up: Remove the created file after the test
-        fs::remove_file(file_name).expect("Failed to remove test file");
     }
 
     #[test]

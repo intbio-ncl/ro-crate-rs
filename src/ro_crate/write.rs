@@ -586,19 +586,19 @@ fn add_directory_recursively(
 
 #[cfg(test)]
 mod write_crate_tests {
+    use super::*;
+    use crate::ro_crate::read::{parse_zip, read_crate};
     use dirs::home_dir;
     use std::collections::HashMap;
     use std::fs;
     use std::path::Path;
-    use super::*;
-    use crate::ro_crate::read::{parse_zip, read_crate};
     use std::path::PathBuf;
 
     use std::io::Write;
 
     use serde_json::{json, Value};
 
-    pub fn minimal_test_experiment_rocrate() -> Value {
+    fn minimal_test_experiment_rocrate(tempdir: PathBuf) -> Value {
         json!({
            "@context": "https://w3id.org/ro/crate/1.1/context",
            "@graph": [
@@ -631,7 +631,7 @@ mod write_crate_tests {
                  "name": "External data"
               },
                     {
-                 "@id": "/home/matt/dev/ial/ro-crate-rs/tests/fixtures/test_experiment/data.csv",
+                 "@id": tempdir.join("data.csv").canonicalize().unwrap(), // TODO: Fix this
                  "@type": "File",
                  "name": "CSV data"
               },      {
@@ -643,17 +643,18 @@ mod write_crate_tests {
         })
     }
 
-    pub fn create_tempcrate(value: Value) -> tempfile::TempDir {
+    pub fn create_tempcrate(value_fn: &dyn Fn(PathBuf) -> Value) -> tempfile::TempDir {
         let tempdir = tempfile::tempdir().unwrap();
+        let json = value_fn(tempdir.path().to_path_buf());
         let mut ro_crate =
             std::fs::File::create_new(tempdir.path().join("ro-crate-metadata.json")).unwrap();
         ro_crate
-            .write_all(&serde_json::to_vec(&value).unwrap())
+            .write_all(&serde_json::to_vec(&json).unwrap())
             .unwrap();
         tempdir
     }
 
-    fn ro_crate_minimal() -> serde_json::Value {
+    fn ro_crate_minimal(_: PathBuf) -> serde_json::Value {
         serde_json::json!(
         { "@context": "https://w3id.org/ro/crate/1.1/context",
           "@graph": [
@@ -723,7 +724,7 @@ mod write_crate_tests {
             .path()
             .join("test_experiment/_ro-crate-metadata-minimal.json");
         let mut file = std::fs::File::create_new(&file_path).unwrap();
-        file.write_all(&serde_json::to_vec(&ro_crate_minimal()).unwrap())
+        file.write_all(&serde_json::to_vec(&ro_crate_minimal(dir_path.clone())).unwrap())
             .unwrap();
         let data = workdir.path().join("test_experiment/data.csv");
         std::fs::File::create_new(&data).unwrap();
@@ -799,7 +800,7 @@ mod write_crate_tests {
             .path()
             .join("test_experiment/_ro-crate-metadata-minimal.json");
         let mut file = std::fs::File::create_new(&crate_path).unwrap();
-        file.write_all(&serde_json::to_vec(&ro_crate_minimal()).unwrap())
+        file.write_all(&serde_json::to_vec(&ro_crate_minimal(dir_path.clone())).unwrap())
             .unwrap();
         let data = workdir.path().join("test_experiment/data.csv");
         std::fs::File::create_new(&data).unwrap();
@@ -873,7 +874,7 @@ mod write_crate_tests {
             .path()
             .join("test_experiment/_ro-crate-metadata-minimal.json");
         let mut file = std::fs::File::create_new(&crate_path).unwrap();
-        file.write_all(&serde_json::to_vec(&ro_crate_minimal()).unwrap())
+        file.write_all(&serde_json::to_vec(&ro_crate_minimal(dir_path.clone())).unwrap())
             .unwrap();
         let data = workdir.path().join("test_experiment/data.csv");
         std::fs::File::create_new(&data).unwrap();
@@ -900,7 +901,7 @@ mod write_crate_tests {
 
     #[test]
     fn test_write_crate_success() {
-        let tempfile = create_tempcrate(ro_crate_minimal());
+        let tempfile = create_tempcrate(&ro_crate_minimal);
         let rocrate = read_crate(
             &tempfile.path().join("ro-crate-metadata.json").to_path_buf(),
             0,
@@ -926,7 +927,7 @@ mod write_crate_tests {
 
     #[test]
     fn test_zip_crate_basic() {
-        let path = create_tempcrate(minimal_test_experiment_rocrate());
+        let path = create_tempcrate(&minimal_test_experiment_rocrate);
         let ro_path = path.path().join("ro-crate-metadata.json");
         let base = path.path().file_name().unwrap().to_string_lossy();
         let zip_path = format!("{}/{}.zip", path.path().to_string_lossy(), base);
@@ -938,7 +939,7 @@ mod write_crate_tests {
 
     #[test]
     fn test_zip_crate_external_full() {
-        let path = create_tempcrate(minimal_test_experiment_rocrate());
+        let path = create_tempcrate(&minimal_test_experiment_rocrate);
         let ro_path = path.path().join("ro-crate-metadata.json");
         let base = path.path().file_name().unwrap().to_string_lossy();
         let zip_path = format!("{}/{}.zip", path.path().to_string_lossy(), base);
@@ -950,7 +951,7 @@ mod write_crate_tests {
 
     #[test]
     fn test_zip_crate_external_full_unique() {
-        let path = create_tempcrate(minimal_test_experiment_rocrate());
+        let path = create_tempcrate(&minimal_test_experiment_rocrate);
         let ro_path = path.path().join("ro-crate-metadata.json");
 
         let zipped = zip_crate(&ro_path, true, 0, false, true);

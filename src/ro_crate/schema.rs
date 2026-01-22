@@ -2,8 +2,8 @@
 
 use crate::ro_crate::constraints::{Id, License};
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use std::collections::HashMap;
-use std::fmt;
 pub(crate) const ROCRATE_SCHEMA_1_1: &str = include_str!("../resources/ro_crate_1_1.jsonld");
 pub(crate) const ROCRATE_SCHEMA_1_2: &str = include_str!("../resources/ro_crate_1_2.jsonld");
 
@@ -56,22 +56,11 @@ pub fn load_rocrate_schema_from_str(
     Ok(context)
 }
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum SchemaLoadError {
+    #[error("Failed to parse JSON-LD schema: {0}")]
     ParseError(String),
 }
-
-impl fmt::Display for SchemaLoadError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            SchemaLoadError::ParseError(msg) => {
-                write!(f, "Failed to parse JSON-LD schema: {}", msg)
-            }
-        }
-    }
-}
-
-impl std::error::Error for SchemaLoadError {}
 
 #[cfg(test)]
 mod tests {

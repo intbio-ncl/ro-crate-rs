@@ -42,7 +42,7 @@ fn main() {
                 let rocrate = RoCrate::default();
                 debug!("{:?}", rocrate);
 
-                write_crate(&rocrate, "ro-crate-metadata.json".to_string())
+                write_crate(&rocrate, "ro-crate-metadata.json".to_string()).unwrap()
             } else {
                 if let Some(input) = init_command.context_type {
                     debug!("Recieved context_type {}", input);
@@ -50,7 +50,7 @@ fn main() {
                     if init_command.minimal {
                         rocrate = create_default_crate(rocrate)
                     }
-                    write_crate(&rocrate, "ro-crate-metadata.json".to_string())
+                    write_crate(&rocrate, "ro-crate-metadata.json".to_string()).unwrap()
                 } else {
                     println!("What context type is required? Input number. \n1.) Reference \n2.) Extended \n3.) Embedded");
                 }
@@ -65,7 +65,7 @@ fn main() {
             let mut rocrate = open_and_load_crate(&add_command.target_crate);
             rocrate = add_entity(rocrate, &add_command);
 
-            write_crate(&rocrate, add_command.target_crate)
+            write_crate(&rocrate, add_command.target_crate).unwrap()
         }
         CrateAction::Delete(delete_command) => {
             if delete_command.target_crate.ends_with("zip") {
@@ -77,7 +77,7 @@ fn main() {
 
             rocrate = delete_entity(rocrate, &delete_command);
 
-            write_crate(&rocrate, delete_command.target_crate)
+            write_crate(&rocrate, delete_command.target_crate).unwrap()
         }
         CrateAction::Modify(modify_command) => match modify_command {
             ModifyCommand::AddIdValue(add_id_value_command) => {
@@ -94,7 +94,7 @@ fn main() {
 
                 rocrate.add_dynamic_entity_property(&add_id_value_command.id, values);
 
-                write_crate(&rocrate, add_id_value_command.target_crate)
+                write_crate(&rocrate, add_id_value_command.target_crate).unwrap()
             }
             ModifyCommand::AddIdVecValues(add_id_vec_values_command) => {
                 if add_id_vec_values_command.target_crate.ends_with("zip") {
@@ -115,7 +115,7 @@ fn main() {
 
                 rocrate.add_dynamic_entity_property(&add_id_vec_values_command.id, values);
 
-                write_crate(&rocrate, add_id_vec_values_command.target_crate)
+                write_crate(&rocrate, add_id_vec_values_command.target_crate).unwrap()
             }
             ModifyCommand::AddMultiple(add_multiple_command) => {
                 if add_multiple_command.target_crate.ends_with("zip") {
@@ -137,7 +137,7 @@ fn main() {
                     }
                 }
 
-                write_crate(&rocrate, add_multiple_command.target_crate)
+                write_crate(&rocrate, add_multiple_command.target_crate).unwrap()
             }
             ModifyCommand::RemoveField(remove_field_command) => {
                 if remove_field_command.target_crate.ends_with("zip") {
@@ -151,7 +151,7 @@ fn main() {
                     &remove_field_command.field,
                 );
 
-                write_crate(&rocrate, remove_field_command.target_crate)
+                write_crate(&rocrate, remove_field_command.target_crate).unwrap()
             }
         },
         CrateAction::Read(read_command) => match read_command {

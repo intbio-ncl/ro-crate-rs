@@ -200,26 +200,10 @@ pub enum CrateReadError {
     VocabNotValid(String),
     #[error("{0}")]
     SchemaError(String),
-    ReqwestError(reqwest::Error),
+    #[error("{0}")]
+    ReqwestError(#[from] reqwest::Error),
 }
 
-impl std::fmt::Display for CrateReadError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match *self {
-            CrateReadError::IoError(ref err) => write!(f, "IO error: {}", err),
-            CrateReadError::JsonError(ref err) => write!(f, "Json error: {}", err),
-            CrateReadError::VocabNotValid(ref err) => write!(f, "Vocab not valid: {}", err),
-            CrateReadError::SchemaError(ref err) => write!(f, "Schema not valid: {}", err),
-            CrateReadError::ReqwestError(ref err) => write!(f, "Reqwest error: {}", err),
-        }
-    }
-}
-
-/// Implements the standard Error trait for ZipError.
-///
-/// This allows `ZipError` to integrate with Rust's error handling ecosystem, enabling it to be
-/// returned and handled in contexts where a standard error type is expected.
-impl std::error::Error for CrateReadError {}
 
 impl PartialEq for CrateReadError {
     fn eq(&self, other: &Self) -> bool {

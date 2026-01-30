@@ -14,8 +14,17 @@ use crate::ro_crate::graph_vector::GraphVector;
 use crate::ro_crate::rocrate::RoCrate;
 use log::warn;
 use polars::prelude::*;
+use thiserror::Error;
 use std::collections::HashMap;
 use std::path::PathBuf;
+
+#[derive(Debug, Error)]
+pub enum ConvertError {
+    #[error(transparent)]
+    IoError(#[from] std::io::Error),
+    #[error(transparent)]
+    PolarsError(#[from] polars::error::PolarsError)
+}
 
 pub fn to_df(rocrate: &RoCrate) -> DataFrame {
     // Get uuid
@@ -45,13 +54,15 @@ pub fn to_df(rocrate: &RoCrate) -> DataFrame {
     .unwrap()
 }
 
-pub fn write_csv(df: &mut DataFrame, path: PathBuf) {
-    let mut file = std::fs::File::create(path).unwrap();
-    CsvWriter::new(&mut file).finish(df).unwrap();
+pub fn write_csv(df: &mut DataFrame, path: PathBuf) -> Result<(), ConvertError> {
+    let mut file = std::fs::File::create(path)?;
+    CsvWriter::new(&mut file).finish(df)?;
+    Ok(())
 }
-pub fn write_parquet(df: &mut DataFrame, path: PathBuf) {
-    let mut file = std::fs::File::create(path).unwrap();
-    ParquetWriter::new(&mut file).finish(df).unwrap();
+pub fn write_parquet(df: &mut DataFrame, path: PathBuf) -> Result<(), ConvertError> {
+    let mut file = std::fs::File::create(path)?;
+    ParquetWriter::new(&mut file).finish(df)?;
+    Ok(())
 }
 
 pub fn to_parquet(df: &mut DataFrame) -> Result<u64, PolarsError> {
@@ -270,8 +281,8 @@ mod write_crate_tests {
         let mut df = to_df(&rocrate);
         let path_csv = fixture_path("test-ro-crate.csv");
         let path_parquet = fixture_path("test-ro-crate.parquet");
-        write_csv(&mut df, path_csv);
-        write_parquet(&mut df, path_parquet);
+        write_csv(&mut df, path_csv).unwrap();
+        write_parquet(&mut df, path_parquet).unwrap();
     }
 
     #[test]
@@ -287,9 +298,9 @@ mod write_crate_tests {
         println!("Created dataframe");
         let path_csv = fixture_path("test-ro-crate.csv");
         let path_parquet = fixture_path("test-ro-crate.parquet");
-        write_csv(&mut df, path_csv);
+        write_csv(&mut df, path_csv).unwrap();
         println!("CSV created");
-        write_parquet(&mut df, path_parquet);
+        write_parquet(&mut df, path_parquet).unwrap();
         println!("Parquet created");
     }
 }

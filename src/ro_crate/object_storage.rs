@@ -11,25 +11,25 @@ use super::graph_vector::GraphVector;
 pub fn relative_to_object_store(rocrate: &mut RoCrate, object_root: &str) {
     for entity in &mut rocrate.graph {
         match entity {
-            GraphVector::DataEntity(ref mut entity) => {
+            GraphVector::DataEntity(entity) => {
                 if is_not_url(&entity.id) {
                     let root = object_root.to_string();
                     entity.id = root + &entity.id
                 };
             }
-            GraphVector::ContextualEntity(ref mut entity) => {
+            GraphVector::ContextualEntity(entity) => {
                 if is_not_url(&entity.id) {
                     let root = object_root.to_string();
                     entity.id = root + &entity.id
                 };
             }
-            GraphVector::RootDataEntity(ref mut entity) => {
+            GraphVector::RootDataEntity(entity) => {
                 if is_not_url(&entity.id) {
                     let root = object_root.to_string();
                     entity.id = root + &entity.id
                 };
             }
-            GraphVector::MetadataDescriptor(ref mut entity) => {
+            GraphVector::MetadataDescriptor(entity) => {
                 if is_not_url(&entity.id) {
                     let root = object_root.to_string();
                     entity.id = root + &entity.id

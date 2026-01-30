@@ -4,7 +4,7 @@ use rocraters::ro_crate::constraints::*;
 use rocraters::ro_crate::contextual_entity::ContextualEntity;
 use rocraters::ro_crate::data_entity::DataEntity;
 use rocraters::ro_crate::metadata_descriptor::MetadataDescriptor;
-use rocraters::ro_crate::read::{crate_path, read_crate, CrateReadError};
+use rocraters::ro_crate::read::{CrateReadError, crate_path, read_crate};
 use rocraters::ro_crate::rocrate::GraphVector;
 use rocraters::ro_crate::rocrate::{RoCrate, RoCrateContext};
 use rocraters::ro_crate::root::RootDataEntity;

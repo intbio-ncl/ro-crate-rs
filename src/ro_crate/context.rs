@@ -179,7 +179,7 @@ impl RoCrateContext {
             RoCrateContext::ExtendedContext(context) => {
                 for x in context {
                     match x {
-                        ContextItem::EmbeddedContext(ref mut embedded) => {
+                        ContextItem::EmbeddedContext(embedded) => {
                             let urn_found = embedded
                                 .get("@base")
                                 .is_some_and(|value| value.starts_with("urn:uuid:"));

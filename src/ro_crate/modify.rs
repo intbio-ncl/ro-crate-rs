@@ -301,11 +301,7 @@ pub trait DynamicEntityManipulation: Serialize {
             }
         }
 
-        if updated {
-            Some(true)
-        } else {
-            None
-        }
+        if updated { Some(true) } else { None }
     }
 }
 

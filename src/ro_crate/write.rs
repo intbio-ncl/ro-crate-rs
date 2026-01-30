@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 use url::Url;
 use walkdir::WalkDir;
-use zip::{write::SimpleFileOptions, ZipWriter};
+use zip::{ZipWriter, write::SimpleFileOptions};
 
 #[derive(Error, Debug)]
 pub enum WriteError {
@@ -422,8 +422,10 @@ fn get_noncontained_paths(
             continue;
         }
 
+        let temp_id = rocrate_path.join(id);
+
         // Resolve the absolute path of the current ID
-        if let Some(path) = Path::new(id).canonicalize().ok() {
+        if let Some(path) = Path::new(&temp_id).canonicalize().ok() {
             // Path exists and was canonicalized
             debug!("Absolute path: {:?}", path);
             // Check if the path is outside the base crate directory
@@ -531,8 +533,8 @@ pub fn is_not_url(path: &str) -> bool {
         || path.starts_with("file:");
 
     // If it looks like a file path, return true early
-    if path.contains("ro-crate-metadata.json") || path == "./" {
-        return false;
+    if path == "./" {
+        return true;
     }
 
     if is_extended_windows_path || is_normal_file_path {

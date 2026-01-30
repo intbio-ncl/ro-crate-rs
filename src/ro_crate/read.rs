@@ -127,6 +127,23 @@ pub fn read_crate_obj(crate_obj: &str, validation_level: i8) -> Result<RoCrate, 
     }
 }
 
+/// Reads and deserialises an RO-Crate from a remote location.
+///
+/// This function attempts to load an RO-Crate from remote location.
+/// If 'valid' is '2', it also validates the crate's keys against the RO-Crate schema.
+///
+/// # Arguments
+/// * 'url' - An url containing a valid ro-crate json object
+/// * 'valid' - A boolean flag indiciating whether to validate the crate's keys against the schema.
+pub fn load_remote(url: url::Url, validation_level: i8) -> Result<RoCrate, CrateReadError> {
+    let content = reqwest::blocking::get(url)
+        .map_err(|e| CrateReadError::ReqwestError(e))?
+        .text()
+        .map_err(|e| CrateReadError::ReqwestError(e))?;
+
+    read_crate_obj(&content, validation_level)
+}
+
 /// Validation logic
 fn validity_wrapper(rocrate: &RoCrate, validation_level: i8) -> Result<&RoCrate, CrateReadError> {
     match validate_crate_keys(rocrate) {
@@ -183,7 +200,10 @@ pub enum CrateReadError {
     VocabNotValid(String),
     #[error("{0}")]
     SchemaError(String),
+    #[error("{0}")]
+    ReqwestError(#[from] reqwest::Error),
 }
+
 
 impl PartialEq for CrateReadError {
     fn eq(&self, other: &Self) -> bool {
@@ -208,7 +228,7 @@ pub fn validate_crate_keys(rocrate: &RoCrate) -> ValidationResult {
         None => {
             return ValidationResult::Error(
                 "Could not determine RO-Crate schema version from context".to_string(),
-            )
+            );
         }
     };
     match load_rocrate_schema(version) {

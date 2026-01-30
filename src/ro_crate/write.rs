@@ -422,8 +422,10 @@ fn get_noncontained_paths(
             continue;
         }
 
+        let temp_id = rocrate_path.join(id);
+
         // Resolve the absolute path of the current ID
-        if let Some(path) = Path::new(id).canonicalize().ok() {
+        if let Some(path) = Path::new(&temp_id).canonicalize().ok() {
             // Path exists and was canonicalized
             debug!("Absolute path: {:?}", path);
             // Check if the path is outside the base crate directory

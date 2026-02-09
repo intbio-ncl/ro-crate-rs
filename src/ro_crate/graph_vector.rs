@@ -10,8 +10,6 @@ use serde::ser::Serializer;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Error as SerdeJsonError, Value};
 use std::collections::HashMap;
-use std::path::Path;
-use url::Url;
 
 /// Represents the various types of entities contained within the graph of an RO-Crate.
 ///
@@ -41,25 +39,25 @@ impl GraphVector {
     /// entity is correctly referenced in the root data entity's `hasPart` property if it is not already listed.
     pub fn overwrite(&mut self, new_data: GraphVector) -> bool {
         match self {
-            GraphVector::DataEntity(ref mut existing_entity) => {
+            GraphVector::DataEntity(existing_entity) => {
                 if let GraphVector::DataEntity(new_entity) = new_data {
                     *existing_entity = new_entity;
                     return true;
                 }
             }
-            GraphVector::ContextualEntity(ref mut existing_entity) => {
+            GraphVector::ContextualEntity(existing_entity) => {
                 if let GraphVector::ContextualEntity(new_entity) = new_data {
                     *existing_entity = new_entity;
                     return true;
                 }
             }
-            GraphVector::RootDataEntity(ref mut existing_entity) => {
+            GraphVector::RootDataEntity(existing_entity) => {
                 if let GraphVector::RootDataEntity(new_entity) = new_data {
                     *existing_entity = new_entity;
                     return true;
                 }
             }
-            GraphVector::MetadataDescriptor(ref mut existing_entity) => {
+            GraphVector::MetadataDescriptor(existing_entity) => {
                 if let GraphVector::MetadataDescriptor(new_entity) = new_data {
                     *existing_entity = new_entity;
                     return true;
@@ -351,10 +349,14 @@ fn try_deserialize_into_graph_vector(value: &Value) -> Result<GraphVector, Serde
             }
             "./" => RootDataEntity::deserialize(value).map(GraphVector::RootDataEntity),
             _ => {
-                if is_valid_url_or_path(id) {
-                    DataEntity::deserialize(value).map(GraphVector::DataEntity)
+                if let Some(entity_type) = value.get("@type") {
+                    if is_data_entity(entity_type, id) {
+                        DataEntity::deserialize(value).map(GraphVector::DataEntity)
+                    } else {
+                        ContextualEntity::deserialize(value).map(GraphVector::ContextualEntity)
+                    }
                 } else {
-                    ContextualEntity::deserialize(value).map(GraphVector::ContextualEntity)
+                    Err(serde::de::Error::custom("Missing or invalid '@type' field"))
                 }
             }
         }
@@ -368,6 +370,32 @@ fn try_deserialize_into_graph_vector(value: &Value) -> Result<GraphVector, Serde
 /// This function is used as part of the custom deserialization process in `GraphVector`
 /// to distinguish between `DataEntity` and `ContextualEntity`. It validates whether the
 /// provided string (`s`) is a well-formed URL or a path that corresponds to an existing file.
-fn is_valid_url_or_path(s: &str) -> bool {
-    Url::parse(s).is_ok() || Path::new(s).exists()
+///
+/// NOTE: The documentation states that:
+/// ```
+/// An entity which has File or Dataset as one of its @type values:
+///
+///     Is considered to be a Data Entity if its @id is an absolute URI or a relative URI.
+///     MAY have an @id which is a local identifier beginning with a #, in which case it is not considered to be a Data Entity.
+/// ```
+/// So the file path does not need to exist, and even if it exists, this library does not
+/// necessarily know the root of the crate. Also ContextualEntities can contain valid URIs as
+/// the documentation says [here](https://www.researchobject.org/ro-crate/specification/1.2/contextual-entities.html#identifiers-for-contextual-entities)
+// fn _is_valid_url_or_path(s: &str) -> bool {
+//     Url::parse(s).is_ok() || Path::new(s).exists()
+// }
+fn is_data_entity(entity_type: &Value, id: &str) -> bool {
+    if id.starts_with('#') {
+        return false;
+    }
+
+    entity_type.as_str().map_or_else(
+        || {
+            entity_type.as_array().map_or(false, |arr| {
+                arr.iter()
+                    .any(|v| matches!(v.as_str(), Some("File" | "Dataset")))
+            })
+        },
+        |s| matches!(s, "File" | "Dataset"),
+    )
 }

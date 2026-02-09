@@ -6,8 +6,8 @@
 use crate::ro_crate::constraints::*;
 use crate::ro_crate::modify::*;
 use serde::{
-    de::{self, MapAccess, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
+    de::{self, MapAccess, Visitor},
 };
 use std::collections::HashMap;
 use std::fmt;

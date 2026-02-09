@@ -8,8 +8,8 @@ use crate::ro_crate::constraints::{DataType, Id};
 use crate::ro_crate::modify::*;
 use serde::ser::SerializeMap;
 use serde::{
-    de::{self, MapAccess, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
+    de::{self, MapAccess, Visitor},
 };
 use std::collections::HashMap;
 use std::fmt;
@@ -327,12 +327,14 @@ mod tests {
 
         // Removing a dynamic entity
         metadata.remove_field("key1");
-        assert!(metadata
-            .dynamic_entity
-            .as_ref()
-            .unwrap()
-            .get("key1")
-            .is_none());
+        assert!(
+            metadata
+                .dynamic_entity
+                .as_ref()
+                .unwrap()
+                .get("key1")
+                .is_none()
+        );
     }
 
     // Test serialization of MetadataDescriptor

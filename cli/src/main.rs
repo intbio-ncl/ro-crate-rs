@@ -166,7 +166,7 @@ fn main() {
                     println!("{}", to_string_pretty(&rocrate).unwrap());
                 } else {
                     match to_string_pretty(&rocrate) {
-                        Ok(json_ld) => {
+                        Ok(_json_ld) => {
                             let mut table = json_to_table(&json!(&rocrate.graph)).into_table();
                             table.with(Style::modern_rounded());
                             if read_crate_command.fit {
@@ -275,7 +275,7 @@ fn main() {
             ValidateCommand::Basic(basic) => {
                 let crate_name = crate_path(&basic.target_crate);
                 match read_crate(&crate_name, 2) {
-                    Ok(rocrate) => println!("Crate Valid"),
+                    Ok(_rocrate) => println!("Crate Valid"),
                     Err(e) => println!("Crate not valid: {:?}", e),
                 }
             }

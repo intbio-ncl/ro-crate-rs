@@ -4,7 +4,8 @@ mod utils;
 extern crate chrono;
 use ::rocraters::ro_crate::constraints::*;
 use ::rocraters::ro_crate::context::{ContextItem, RoCrateContext};
-use ::rocraters::ro_crate::convert::{to_df, write_csv, write_parquet as wr_par};
+#[cfg(feature = "parquet")]
+use ::rocraters::ro_crate::convert::{to_df, write_parquet as wr_par};
 use ::rocraters::ro_crate::graph_vector::GraphVector;
 use ::rocraters::ro_crate::metadata_descriptor::MetadataDescriptor;
 use ::rocraters::ro_crate::object_storage::relative_to_object_store;
@@ -20,6 +21,8 @@ use pyo3::exceptions::PyIOError;
 use pyo3::{
     prelude::*,
     types::{PyDict, PyList, PyString},
+    Py,
+    PyAny,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -124,13 +127,50 @@ impl PyRoCrate {
         PyRoCrate::default()
     }
 
-    /// Returns all contexts in the crate
+    /// Returns all contexts in the crate.
     ///
     /// # Returns
-    /// A Python list of context strings.
+    /// A Python list of dictionaries using the `@context` key.
     fn get_all_context(&mut self, py: Python) -> PyResult<Py<PyList>> {
-        let test2 = self.inner.context.get_all_context();
-        let py_list = PyList::new(py, test2.iter().map(|s| s.as_str()))?;
+        let py_list = PyList::empty(py);
+
+        match &self.inner.context {
+            RoCrateContext::ReferenceContext(reference) => {
+                let context_dict = PyDict::new(py);
+                context_dict.set_item("@context", reference)?;
+                py_list.append(context_dict)?;
+            }
+            RoCrateContext::ExtendedContext(context_items) => {
+                for item in context_items {
+                    let context_dict = PyDict::new(py);
+                    match item {
+                        ContextItem::ReferenceItem(reference) => {
+                            context_dict.set_item("@context", reference)?;
+                        }
+                        ContextItem::EmbeddedContext(embedded) => {
+                            let embedded_dict = PyDict::new(py);
+                            for (key, value) in embedded {
+                                embedded_dict.set_item(key, value)?;
+                            }
+                            context_dict.set_item("@context", embedded_dict)?;
+                        }
+                    }
+                    py_list.append(context_dict)?;
+                }
+            }
+            RoCrateContext::EmbeddedContext(context_maps) => {
+                for embedded in context_maps {
+                    let context_dict = PyDict::new(py);
+                    let embedded_dict = PyDict::new(py);
+                    for (key, value) in embedded {
+                        embedded_dict.set_item(key, value)?;
+                    }
+                    context_dict.set_item("@context", embedded_dict)?;
+                    py_list.append(context_dict)?;
+                }
+            }
+        }
+
         Ok(py_list.into())
     }
 
@@ -141,7 +181,7 @@ impl PyRoCrate {
     ///
     /// # Returns
     /// A Python string representing the requested context entry.
-    fn get_specific_context(&mut self, py: Python, context: PyObject) -> PyResult<Py<PyString>> {
+    fn get_specific_context(&mut self, py: Python, context: Py<PyAny>) -> PyResult<Py<PyString>> {
         let context_str: &str = context.extract(py)?;
         let specific_context = self
             .inner
@@ -177,7 +217,7 @@ impl PyRoCrate {
     ///
     /// # Returns
     /// A Python dictionary representing the entity, if found. Otherwise raises `ValueError`.
-    fn get_entity(&mut self, py: Python, id: &str) -> PyResult<PyObject> {
+    fn get_entity(&mut self, py: Python, id: &str) -> PyResult<Py<PyAny>> {
         match self.inner.get_entity(id) {
             Some(GraphVector::DataEntity(data_entity)) => {
                 utils::base_entity_to_pydict(py, data_entity)
@@ -197,6 +237,23 @@ impl PyRoCrate {
             )),
         }
     }
+    /// Returns all entities in the graph as a Python list of dicts.
+    fn to_list(&self, py: Python) -> PyResult<Py<PyList>> {
+        let mut out: Vec<Py<PyAny>> = Vec::with_capacity(self.inner.graph.len());
+
+        for gv in &self.inner.graph {
+            let obj = match gv {
+                GraphVector::DataEntity(e) => utils::base_entity_to_pydict(py, e)?,
+                GraphVector::ContextualEntity(e) => utils::base_entity_to_pydict(py, e)?,
+                GraphVector::RootDataEntity(e) => utils::root_entity_to_pydict(py, e)?,
+                GraphVector::MetadataDescriptor(e) => utils::metadata_descriptor_to_pydict(py, e)?,
+                _ => continue,
+            };
+            out.push(obj);
+        }
+
+        Ok(PyList::new(py, out)?.into())
+    }
 
     /// Update a data entity with new data
     ///
@@ -208,7 +265,7 @@ impl PyRoCrate {
     ///
     /// # Returns
     /// `Ok(())` on success; an error otherwise.
-    fn update_data(&mut self, py: Python, py_obj: PyObject) -> PyResult<()> {
+    fn update_data(&mut self, py: Python, py_obj: Py<PyAny>) -> PyResult<()> {
         // Needs to check if data entity first - then parse as contextual if fail
         // if data then append to partOf vec in root.
         let data_entity_wrapper: utils::DataEntityWrapper = py_obj.extract(py)?;
@@ -234,7 +291,7 @@ impl PyRoCrate {
     ///
     /// # Returns
     /// `Ok(())` on success; an error otherwise.
-    fn update_contextual(&mut self, py: Python, py_obj: PyObject) -> PyResult<()> {
+    fn update_contextual(&mut self, py: Python, py_obj: Py<PyAny>) -> PyResult<()> {
         // Needs to check if data entity first - then parse as contextual if fail
         // if data then append to partOf vec in root.
         let contextual_entity_wrapper: utils::ContextualEntityWrapper = py_obj.extract(py)?;
@@ -260,7 +317,7 @@ impl PyRoCrate {
     ///
     /// # Returns
     /// `Ok(())` on success; an error otherwise.
-    fn update_root(&mut self, py: Python, py_obj: PyObject) -> PyResult<()> {
+    fn update_root(&mut self, py: Python, py_obj: Py<PyAny>) -> PyResult<()> {
         // Needs to check if data entity first - then parse as contextual if fail
         // if data then append to partOf vec in root.
         let root_entity_wrapper: utils::RootDataEntityWrapper = py_obj.extract(py)?;
@@ -286,7 +343,7 @@ impl PyRoCrate {
     ///
     /// # Returns
     /// `Ok(())` on success; an error otherwise.
-    fn update_descriptor(&mut self, py: Python, py_obj: PyObject) -> PyResult<()> {
+    fn update_descriptor(&mut self, py: Python, py_obj: Py<PyAny>) -> PyResult<()> {
         // Needs to check if data entity first - then parse as contextual if fail
         // if data then append to partOf vec in root.
         let descriptor_wrapper: utils::MetadataDescriptorWrapper = py_obj.extract(py)?;
@@ -422,6 +479,7 @@ fn read_zip(path: &str, validation_level: i8) -> PyResult<PyRoCrate> {
 /// # Returns
 /// No explicit return; writes the file or raises an error.
 #[pyfunction]
+#[cfg(feature = "parquet")]
 fn write_parquet(rocrate: &PyRoCrate, path: &str) {
     let mut df = to_df(&rocrate.inner);
 
@@ -521,6 +579,7 @@ fn rocraters(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(read_object, m)?)?;
     m.add_function(wrap_pyfunction!(read_zip, m)?)?;
     m.add_function(wrap_pyfunction!(zip, m)?)?;
+    #[cfg(feature = "parquet")]
     m.add_function(wrap_pyfunction!(write_parquet, m)?)?;
     m.add_function(wrap_pyfunction!(prefix_object_id, m)?)?;
     Ok(())

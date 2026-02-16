@@ -137,12 +137,74 @@ class TestApi(unittest.TestCase):
         crate = read(str(crate_path), 0)
 
         context = crate.get_all_context()
-        print(context)
-        context = crate.get_specific_context("@base")
-        print(context)
+
+        self.assertIsInstance(context, list)
+        self.assertEqual(len(context), 1)
+        self.assertTrue(all(isinstance(item, dict) for item in context))
+        self.assertTrue(all("@context" in item for item in context))
+
+        self.assertEqual(
+            context[0],
+            {"@context": "https://w3id.org/ro/crate/1.1/context"},
+        )
+
+    def test_get_context_extended(self):
+        crate_path = self.path / Path("python/tests/fixtures/_ro-crate-metadata-minimal.json")
+        crate = read(str(crate_path), 0)
+
+        context = crate.get_all_context()
+
+        self.assertIsInstance(context, list)
+        self.assertEqual(len(context), 2)
+        self.assertTrue(all(isinstance(item, dict) for item in context))
+        self.assertTrue(all("@context" in item for item in context))
+
+        context_values = [item["@context"] for item in context]
+        self.assertIn("https://w3id.org/ro/crate/1.1/context", context_values)
+        self.assertIn(
+            {"@base": "urn:uuid:01234567-89ab-cdef-0123-456789abcdef"},
+            context_values,
+        )
+
+    def test_to_list(self):
+        crate_path = self.path / Path("tests/fixtures/_ro-crate-metadata-minimal.json")
+        crate = read(str(crate_path), 0)
+
+        entities = crate.to_list()
+
+        self.assertIsInstance(entities, list)
+        self.assertEqual(len(entities), 3)
+
+        ids = {entity["id"] for entity in entities}
+        expected_ids = {
+            "ro-crate-metadata.json",
+            "./",
+            "https://creativecommons.org/licenses/by-nc-sa/3.0/au/",
+        }
+
+        self.assertEqual(ids, expected_ids)
+
+        entities_by_id = {entity["id"]: entity for entity in entities}
+
+        metadata = entities_by_id["ro-crate-metadata.json"]
+        self.assertEqual(metadata["type"], self.metadata_fixture["type"])
+        self.assertEqual(metadata["conformsTo"], self.metadata_fixture["conformsTo"])
+        self.assertEqual(metadata["about"], self.metadata_fixture["about"])
+
+        root = entities_by_id["./"]
+        self.assertEqual(root["type"], self.root_fixture["type"])
+        self.assertEqual(root["name"], self.root_fixture["name"])
+        self.assertEqual(root["description"], self.root_fixture["description"])
+        self.assertEqual(root["datePublished"], self.root_fixture["datePublished"])
+        self.assertEqual(root["license"], self.root_fixture["license"])
+        self.assertEqual(root["identifier"], self.root_fixture["identifier"])
+
+        contextual = entities_by_id["https://creativecommons.org/licenses/by-nc-sa/3.0/au/"]
+        self.assertEqual(contextual["type"], self.contextual_fixture["type"])
+        self.assertEqual(contextual["description"], self.contextual_fixture["description"])
+        self.assertEqual(contextual["identifier"], self.contextual_fixture["identifier"])
+        self.assertEqual(contextual["name"], self.contextual_fixture["name"])
 
 
 if __name__ == '__main__':
     unittest.main()
-
-

@@ -1,4 +1,14 @@
-from rocraters import PyRoCrate, PyRoCrateContext, read, read_object, read_zip, zip
+from rocraters import (
+    PyRoCrate,
+    PyRoCrateContext,
+    read,
+    read_object,
+    read_zip,
+    validate,
+    validate_object,
+    validate_zip,
+    zip,
+)
 import unittest
 from pathlib import Path
 
@@ -165,6 +175,56 @@ class TestApi(unittest.TestCase):
             {"@base": "urn:uuid:01234567-89ab-cdef-0123-456789abcdef"},
             context_values,
         )
+
+    def test_validate_valid_crate(self):
+        crate_path = self.path / Path("tests/fixtures/_ro-crate-metadata-minimal.json")
+        report = validate(str(crate_path))
+
+        self.assertTrue(report["is_valid"])
+        self.assertEqual(report["invalid_keys"], [])
+        self.assertEqual(report["invalid_ids"], [])
+        self.assertEqual(report["invalid_types"], [])
+        self.assertIsNone(report["error_type"])
+        self.assertIsNone(report["error_message"])
+
+    def test_validate_invalid_crate(self):
+        crate_path = self.path / Path("tests/fixtures/_ro-crate-metadata-broken-schema.json")
+        report = validate(str(crate_path))
+
+        self.assertFalse(report["is_valid"])
+        self.assertIn("nonschemakey", report["invalid_keys"])
+        self.assertEqual(report["invalid_ids"], [])
+        self.assertEqual(report["invalid_types"], [])
+        self.assertIsNone(report["error_type"])
+        self.assertIsNone(report["error_message"])
+
+    def test_validate_object(self):
+        crate_object = '''{
+            "@context": "https://w3id.org/ro/crate/1.1/context",
+            "@graph": [
+                {
+                    "@type": "CreativeWork",
+                    "@id": "ro-crate-metadata.json",
+                    "conformsTo": {"@id": "https://w3id.org/ro/crate/1.1"},
+                    "about": {"@id": "./"}
+                },
+                {
+                    "@id": "./",
+                    "@type": "Dataset",
+                    "name": "Example",
+                    "description": "Example",
+                    "datePublished": "2017",
+                    "license": {"@id": "https://creativecommons.org/licenses/by/4.0/"}
+                }
+            ]
+        }'''
+        report = validate_object(crate_object)
+        self.assertTrue(report["is_valid"])
+
+    def test_validate_zip(self):
+        crate_path = self.path / Path("tests/fixtures/zip_test/fixtures.zip")
+        report = validate_zip(str(crate_path))
+        self.assertTrue(report["is_valid"])
 
     def test_to_list(self):
         crate_path = self.path / Path("tests/fixtures/_ro-crate-metadata-minimal.json")

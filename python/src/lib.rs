@@ -9,7 +9,9 @@ use ::rocraters::ro_crate::convert::{to_df, write_parquet as wr_par};
 use ::rocraters::ro_crate::graph_vector::GraphVector;
 use ::rocraters::ro_crate::metadata_descriptor::MetadataDescriptor;
 use ::rocraters::ro_crate::object_storage::relative_to_object_store;
-use ::rocraters::ro_crate::read::parse_zip;
+use ::rocraters::ro_crate::read::{
+    parse_zip, validate_crate_keys, CrateReadError, ValidationResult,
+};
 use ::rocraters::ro_crate::root::RootDataEntity;
 use ::rocraters::ro_crate::{
     read::{read_crate, read_crate_obj},
@@ -25,7 +27,104 @@ use pyo3::{
     PyAny,
 };
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(feature = "parquet")]
+use std::path::PathBuf;
+
+fn build_validation_report(
+    py: Python<'_>,
+    is_valid: bool,
+    invalid_keys: Vec<String>,
+    invalid_ids: Vec<String>,
+    invalid_types: Vec<String>,
+    error_type: Option<&str>,
+    error_message: Option<String>,
+) -> PyResult<Py<PyDict>> {
+    let report = PyDict::new(py);
+    report.set_item("is_valid", is_valid)?;
+    report.set_item("invalid_keys", invalid_keys)?;
+    report.set_item("invalid_ids", invalid_ids)?;
+    report.set_item("invalid_types", invalid_types)?;
+    report.set_item("error_type", error_type)?;
+    report.set_item("error_message", error_message)?;
+    Ok(report.unbind())
+}
+
+fn validation_result_to_report(py: Python<'_>, result: ValidationResult) -> PyResult<Py<PyDict>> {
+    match result {
+        ValidationResult::Valid => {
+            build_validation_report(py, true, Vec::new(), Vec::new(), Vec::new(), None, None)
+        }
+        ValidationResult::Invalid(validation) => build_validation_report(
+            py,
+            false,
+            validation.invalid_keys,
+            validation.invalid_ids,
+            validation.invalid_types,
+            None,
+            None,
+        ),
+        ValidationResult::Error(error_message) => build_validation_report(
+            py,
+            false,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Some("SchemaError"),
+            Some(error_message),
+        ),
+    }
+}
+
+fn crate_read_error_to_report(py: Python<'_>, error: CrateReadError) -> PyResult<Py<PyDict>> {
+    match error {
+        CrateReadError::IoError(err) => build_validation_report(
+            py,
+            false,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Some("IoError"),
+            Some(err.to_string()),
+        ),
+        CrateReadError::JsonError(err) => build_validation_report(
+            py,
+            false,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Some("JsonError"),
+            Some(err.to_string()),
+        ),
+        CrateReadError::VocabNotValid(err) => build_validation_report(
+            py,
+            false,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Some("VocabNotValid"),
+            Some(err),
+        ),
+        CrateReadError::SchemaError(err) => build_validation_report(
+            py,
+            false,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Some("SchemaError"),
+            Some(err),
+        ),
+        CrateReadError::ReqwestError(err) => build_validation_report(
+            py,
+            false,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Some("ReqwestError"),
+            Some(err.to_string()),
+        ),
+    }
+}
 
 /// PyO3 compatible wrapper around RoCrate struct
 #[pyclass]
@@ -471,6 +570,44 @@ fn read_zip(path: &str, validation_level: i8) -> PyResult<PyRoCrate> {
     Ok(PyRoCrate::from(rocrate))
 }
 
+/// Validates an RO-Crate and returns a structured report dictionary.
+///
+/// The report shape is:
+/// {
+///   "is_valid": bool,
+///   "invalid_keys": list[str],
+///   "invalid_ids": list[str],
+///   "invalid_types": list[str],
+///   "error_type": str | None,
+///   "error_message": str | None,
+/// }
+#[pyfunction]
+fn validate(py: Python<'_>, relative_path: &str) -> PyResult<Py<PyDict>> {
+    let path = Path::new(relative_path).to_path_buf();
+    match read_crate(&path, 0) {
+        Ok(rocrate) => validation_result_to_report(py, validate_crate_keys(&rocrate)),
+        Err(err) => crate_read_error_to_report(py, err),
+    }
+}
+
+/// Validates a JSON object string containing an RO-Crate and returns a report dictionary.
+#[pyfunction]
+fn validate_object(py: Python<'_>, obj: &str) -> PyResult<Py<PyDict>> {
+    match read_crate_obj(obj, 0) {
+        Ok(rocrate) => validation_result_to_report(py, validate_crate_keys(&rocrate)),
+        Err(err) => crate_read_error_to_report(py, err),
+    }
+}
+
+/// Validates a ZIP-contained RO-Crate and returns a structured report dictionary.
+#[pyfunction]
+fn validate_zip(py: Python<'_>, path: &str) -> PyResult<Py<PyDict>> {
+    match parse_zip(path, 0) {
+        Ok(rocrate) => validation_result_to_report(py, validate_crate_keys(&rocrate)),
+        Err(err) => crate_read_error_to_report(py, err),
+    }
+}
+
 /// Writes to parquet
 /// # Arguments
 /// * `rocrate` - The `PyRoCrate` to be written.
@@ -578,6 +715,9 @@ fn rocraters(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(read, m)?)?;
     m.add_function(wrap_pyfunction!(read_object, m)?)?;
     m.add_function(wrap_pyfunction!(read_zip, m)?)?;
+    m.add_function(wrap_pyfunction!(validate, m)?)?;
+    m.add_function(wrap_pyfunction!(validate_object, m)?)?;
+    m.add_function(wrap_pyfunction!(validate_zip, m)?)?;
     m.add_function(wrap_pyfunction!(zip, m)?)?;
     #[cfg(feature = "parquet")]
     m.add_function(wrap_pyfunction!(write_parquet, m)?)?;

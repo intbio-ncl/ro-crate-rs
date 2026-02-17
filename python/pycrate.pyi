@@ -129,3 +129,30 @@ def zip(crate_path: str, external: bool) -> None:
     :param crate_path: Path to target crate
     :param external: Boolean, if True pulls in external data to zip
     """
+
+def validate(relative_path: str) -> dict:
+    """
+    Validates a crate and returns a structured report dictionary.
+
+    Report keys:
+    - is_valid: bool
+    - invalid_keys: list[str]
+    - invalid_ids: list[str]
+    - invalid_types: list[str]
+    - error_type: str | None
+    - error_message: str | None
+    """
+
+def validate_object(obj: str) -> dict:
+    """
+    Validates a crate represented as a JSON object string.
+
+    Returns the same report dictionary shape as `validate`.
+    """
+
+def validate_zip(path: str) -> dict:
+    """
+    Validates a crate stored in a zip archive.
+
+    Returns the same report dictionary shape as `validate`.
+    """

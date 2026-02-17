@@ -118,6 +118,23 @@ If required, you can also use `read_object` to read in a string of a ro-crate if
 
 Additionally, you can read the ro-crate directly from a zip file using `read_zip`
 
+To get structured validation errors (instead of parsing exception strings), use:
+
+```python
+from rocraters import validate
+
+report = validate("ro-crate-metadata.json")
+print(report)
+# {
+#   "is_valid": False,
+#   "invalid_keys": ["journal"],
+#   "invalid_ids": [],
+#   "invalid_types": [],
+#   "error_type": None,
+#   "error_message": None,
+# }
+```
+
 To zip the folder and all contained directories within the `ro-crate-metadata.json` directory:
 ```python
 # new example 
@@ -164,4 +181,3 @@ crate.write()
 # Custom compilation 
 
 PyO3 is used to handle python bindings. Maturin is used as the build tool.
-

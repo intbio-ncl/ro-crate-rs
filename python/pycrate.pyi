@@ -17,7 +17,7 @@ class PyRoCrateContext:
 
         :param context: List of contexts to be crated
         """
-
+    
 class PyRoCrate:
     """
     A class representing the RoCrate Graph. It is initialised as empty with

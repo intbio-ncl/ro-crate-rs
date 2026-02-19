@@ -155,6 +155,34 @@ fn main() {
             }
         },
         CrateAction::Read(read_command) => match read_command {
+            ReadCommand::Zip(read_zip_command) => {
+                let rocrate = open_and_load_zip_crate(
+                    &read_zip_command.target_zip,
+                    read_zip_command.validation_level,
+                );
+
+                if read_zip_command.raw_struct {
+                    println!("{:#?}", rocrate);
+                    return;
+                }
+                if read_zip_command.json {
+                    println!("{}", to_string_pretty(&rocrate).unwrap());
+                } else {
+                    match to_string_pretty(&rocrate) {
+                        Ok(_json_ld) => {
+                            let mut table = json_to_table(&json!(&rocrate.graph)).into_table();
+                            table.with(Style::modern_rounded());
+                            if read_zip_command.fit {
+                                table.modify(Rows::new(1..), Width::truncate(200).suffix("..."));
+                            } else {
+                                table.modify(Rows::new(1..), Width::truncate(79).suffix("..."));
+                            }
+                            println!("{}", table)
+                        }
+                        Err(e) => eprintln!("Failed to display crate: {}", e),
+                    }
+                }
+            }
             ReadCommand::Crate(read_crate_command) => {
                 let rocrate = open_and_load_crate(&read_crate_command.target_crate);
 
@@ -286,13 +314,7 @@ fn main() {
 /// Input requires target_crate file string
 fn open_and_load_crate(input: &str) -> RoCrate {
     if input.ends_with(".zip") {
-        match parse_zip(input, 0) {
-            Ok(ro_crate) => ro_crate,
-            Err(e) => {
-                eprintln!("Error processing crate: {:?}", e);
-                std::process::exit(1)
-            }
-        }
+        open_and_load_zip_crate(input, 0)
     } else {
         let target_crate = crate_path(input);
         match read_crate(&target_crate, 1) {
@@ -301,6 +323,26 @@ fn open_and_load_crate(input: &str) -> RoCrate {
                 eprintln!("Error processing crate: {:?}", e);
                 std::process::exit(1)
             }
+        }
+    }
+}
+
+fn open_and_load_zip_crate(input: &str, validation_level: i8) -> RoCrate {
+    if !input.ends_with(".zip") {
+        eprintln!("Target archive must end with .zip");
+        std::process::exit(1)
+    }
+
+    if !(0..=2).contains(&validation_level) {
+        eprintln!("Validation level must be between 0 and 2");
+        std::process::exit(1)
+    }
+
+    match parse_zip(input, validation_level) {
+        Ok(ro_crate) => ro_crate,
+        Err(e) => {
+            eprintln!("Error processing zip crate: {:?}", e);
+            std::process::exit(1)
         }
     }
 }

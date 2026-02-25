@@ -226,6 +226,8 @@ pub struct ZipCrateCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum ReadCommand {
+    /// Read full crate from zip archive
+    Zip(ReadZipCommand),
     /// Read full crate
     Crate(ReadCrateCommand),
     /// Read entity of crate
@@ -246,6 +248,25 @@ pub struct ReadCrateCommand {
         default_value = "ro-crate-metadata.json"
     )]
     pub target_crate: String,
+    /// Raw struct data
+    #[clap(short, long)]
+    pub raw_struct: bool,
+    /// Prints full view without trimming
+    #[clap(short, long)]
+    pub fit: bool,
+    /// Prints as json
+    #[clap(short, long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct ReadZipCommand {
+    /// Target zip archive
+    #[clap(short, long, required = true)]
+    pub target_zip: String,
+    /// Validation level for schema checks (0-2)
+    #[clap(short = 'l', long, default_value_t = 0)]
+    pub validation_level: i8,
     /// Raw struct data
     #[clap(short, long)]
     pub raw_struct: bool,

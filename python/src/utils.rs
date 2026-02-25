@@ -10,7 +10,10 @@ use ::rocraters::ro_crate::{
 use pyo3::exceptions::PyTypeError;
 use pyo3::{
     prelude::*,
-    types::{PyBool, PyDict, PyFloat, PyList, PyString},
+    types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString},
+    Borrowed,
+    Py,
+    PyAny,
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -50,7 +53,7 @@ impl EntityTrait for ContextualEntity {
 }
 
 /// Converts base entities (data and contextual) to python dicts
-pub fn base_entity_to_pydict<T: EntityTrait>(py: Python, entity: &T) -> PyResult<PyObject> {
+pub fn base_entity_to_pydict<T: EntityTrait>(py: Python, entity: &T) -> PyResult<Py<PyAny>> {
     let py_dict = PyDict::new(py);
 
     // Now use the shared trait methods to access fields.
@@ -77,11 +80,11 @@ pub fn base_entity_to_pydict<T: EntityTrait>(py: Python, entity: &T) -> PyResult
         }
     }
 
-    Ok(py_dict.into())
+    Ok(py_dict.into_any().unbind())
 }
 
 /// Converts root metadata entity to py dict
-pub fn root_entity_to_pydict(py: Python, entity: &RootDataEntity) -> PyResult<PyObject> {
+pub fn root_entity_to_pydict(py: Python, entity: &RootDataEntity) -> PyResult<Py<PyAny>> {
     let py_dict = PyDict::new(py);
 
     py_dict.set_item("id", &entity.id)?;
@@ -113,14 +116,14 @@ pub fn root_entity_to_pydict(py: Python, entity: &RootDataEntity) -> PyResult<Py
         }
     }
 
-    Ok(py_dict.into())
+    Ok(py_dict.into_any().unbind())
 }
 
 /// Converts metadata descriptor to pydict
 pub fn metadata_descriptor_to_pydict(
     py: Python,
     descriptor: &MetadataDescriptor,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let py_dict = PyDict::new(py);
 
     py_dict.set_item("id", &descriptor.id)?;
@@ -154,51 +157,47 @@ pub fn metadata_descriptor_to_pydict(
         }
     }
 
-    Ok(py_dict.into())
+    Ok(py_dict.into_any().unbind())
 }
 
 /// Converts a license type to a pyobject
-pub fn convert_license_to_pyobject(py: Python, license_opt: &License) -> PyObject {
+pub fn convert_license_to_pyobject(py: Python, license_opt: &License) -> Py<PyAny> {
     match license_opt {
         License::Id(id_enum) => convert_id_to_pyobject(py, id_enum).unwrap(),
-        License::Description(description) => PyString::new(py, description)
-            .into_pyobject(py)
-            .unwrap()
-            .into(),
+        License::Description(description) => PyString::new(py, description).into_any().unbind(),
     }
 }
 
 /// Converts dynamic entities into pyobjects for dict representation
-pub fn convert_dynamic_entity_to_pyobject(py: Python, value: &EntityValue) -> PyObject {
+pub fn convert_dynamic_entity_to_pyobject(py: Python, value: &EntityValue) -> Py<PyAny> {
     match value {
-        EntityValue::EntityString(s) => PyString::new(py, s).into(),
+        EntityValue::EntityString(s) => PyString::new(py, s).into_any().unbind(),
         EntityValue::EntityVecString(vec) => {
             let py_list = PyList::new(py, vec.iter().map(|s| PyString::new(py, s))).unwrap();
-            py_list.into()
+            py_list.into_any().unbind()
         }
         EntityValue::EntityId(id) => convert_id_to_pyobject(py, id).unwrap(),
         EntityValue::EntityLicense(license) => match license {
             License::Id(id) => convert_id_to_pyobject(py, id).unwrap(),
-            License::Description(s) => PyString::new(py, s).into(),
+            License::Description(s) => PyString::new(py, s).into_any().unbind(),
         },
         EntityValue::EntityDataType(data_type) => match data_type {
-            DataType::Term(s) => PyString::new(py, s).into(),
+            DataType::Term(s) => PyString::new(py, s).into_any().unbind(),
             DataType::TermArray(vec) => {
                 let py_list = PyList::new(py, vec.iter().map(|s| PyString::new(py, s))).unwrap();
-                py_list.into()
+                py_list.into_any().unbind()
             }
         },
-        EntityValue::EntityBool(b) => b.into_py(py),
-        EntityValue::Entityi64(num) => (num).into_pyobject(py).unwrap().into(),
-        EntityValue::Entityf64(num) => PyFloat::new(py, *num).into(),
+        EntityValue::EntityBool(b) => PyBool::new(py, *b).to_owned().into_any().unbind(),
+        EntityValue::Entityi64(num) => PyInt::new(py, *num).into_any().unbind(),
+        EntityValue::Entityf64(num) => PyFloat::new(py, *num).into_any().unbind(),
         EntityValue::EntityVeci64(vec) => {
-            let py_list =
-                PyList::new(py, vec.iter().map(|&num| (num).into_pyobject(py).unwrap())).unwrap();
-            py_list.into()
+            let py_list = PyList::new(py, vec.iter().map(|&num| PyInt::new(py, num))).unwrap();
+            py_list.into_any().unbind()
         }
         EntityValue::EntityVecf64(vec) => {
             let py_list = PyList::new(py, vec.iter().map(|&num| PyFloat::new(py, num))).unwrap();
-            py_list.into()
+            py_list.into_any().unbind()
         }
         EntityValue::EntityVec(vec) => {
             let py_list = PyList::new(
@@ -207,7 +206,7 @@ pub fn convert_dynamic_entity_to_pyobject(py: Python, value: &EntityValue) -> Py
                     .map(|entity| convert_dynamic_entity_to_pyobject(py, entity)),
             )
             .unwrap();
-            py_list.into()
+            py_list.into_any().unbind()
         }
         EntityValue::EntityObject(map) => {
             let py_dict = PyDict::new(py);
@@ -216,7 +215,7 @@ pub fn convert_dynamic_entity_to_pyobject(py: Python, value: &EntityValue) -> Py
                     .set_item(key, convert_dynamic_entity_to_pyobject(py, val))
                     .unwrap();
             }
-            py_dict.into()
+            py_dict.into_any().unbind()
         }
         EntityValue::EntityVecObject(vec) => {
             let py_list = PyList::new(
@@ -228,25 +227,25 @@ pub fn convert_dynamic_entity_to_pyobject(py: Python, value: &EntityValue) -> Py
                             .set_item(key, convert_dynamic_entity_to_pyobject(py, val))
                             .unwrap();
                     }
-                    py_dict.into_pyobject(py).unwrap() // Explicitly convert to PyObject
+                    py_dict.into_any().unbind()
                 }),
             )
             .unwrap();
-            py_list.into() // Convert the PyList to PyObject
+            py_list.into_any().unbind()
         }
         EntityValue::NestedDynamicEntity(boxed_entity) => {
             convert_dynamic_entity_to_pyobject(py, boxed_entity)
         }
         EntityValue::EntityNull(n) => {
             match n {
-                Some(value) => PyString::new(py, "Null").into(), // If it's a bool, convert it
-                None => py.None().into_py(py), // If it's None, keep it as None in Python
+                Some(_value) => PyString::new(py, "Null").into_any().unbind(),
+                None => py.None(),
             }
         }
         EntityValue::EntityNone(n) => {
             match n {
-                Some(value) => PyString::new(py, "Null").into(), // If it's a bool, convert it
-                None => py.None().into_py(py), // If it's None, keep it as None in Python
+                Some(_value) => PyString::new(py, "Null").into_any().unbind(),
+                None => py.None(),
             }
         }
         EntityValue::Fallback(value_option) => {
@@ -263,45 +262,45 @@ pub fn convert_dynamic_entity_to_pyobject(py: Python, value: &EntityValue) -> Py
 }
 
 // Function to handle conversion of serde_json::Value
-pub fn convert_serde_json_value_to_pyobject(py: Python, value: &Value) -> PyObject {
+pub fn convert_serde_json_value_to_pyobject(py: Python, value: &Value) -> Py<PyAny> {
     match value {
-        Value::String(s) => PyString::new(py, s).into(),
+        Value::String(s) => PyString::new(py, s).into_any().unbind(),
         Value::Number(num) => {
             if let Some(i) = num.as_i64() {
-                i.into_pyobject(py).unwrap().into()
+                PyInt::new(py, i).into_any().unbind()
             } else if let Some(f) = num.as_f64() {
-                PyFloat::new(py, f).into()
+                PyFloat::new(py, f).into_any().unbind()
             } else {
-                PyString::new(py, &num.to_string()).into()
+                PyString::new(py, &num.to_string()).into_any().unbind()
             }
         }
         // Handle other serde_json::Value types as needed
         // ...
-        _ => PyString::new(py, "Unsupported serde_json::Value type").into(),
+        _ => PyString::new(py, "Unsupported serde_json::Value type").into_any().unbind(),
     }
 }
 
 /// Converts an id value to pyobject
-fn convert_id_to_pyobject(py: Python, id: &Id) -> PyResult<PyObject> {
+fn convert_id_to_pyobject(py: Python, id: &Id) -> PyResult<Py<PyAny>> {
     match id {
         Id::Id(id_value) => {
             let py_dict = PyDict::new(py);
             py_dict.set_item("id", PyString::new(py, id_value))?;
-            Ok(py_dict.into_pyobject(py).unwrap().into())
+            Ok(py_dict.into_any().unbind())
         }
         Id::IdArray(id_values) => {
-            let dicts: Vec<PyObject> = id_values
+            let dicts: Vec<Py<PyAny>> = id_values
                 .iter()
                 .map(|id_val| {
                     let py_dict = PyDict::new(py);
                     py_dict
                         .set_item("id", PyString::new(py, id_val))
                         .expect("Failed to set 'id' key");
-                    py_dict.into_pyobject(py).unwrap().into()
+                    py_dict.into_any().unbind()
                 })
                 .collect();
 
-            let py_list = PyList::new(py, &dicts).unwrap().into();
+            let py_list = PyList::new(py, &dicts).unwrap().into_any().unbind();
             Ok(py_list)
         }
     }
@@ -309,9 +308,14 @@ fn convert_id_to_pyobject(py: Python, id: &Id) -> PyResult<PyObject> {
 
 //New type pattern for DataEntity
 pub struct DataEntityWrapper(pub DataEntity);
-impl<'py> FromPyObject<'py> for DataEntityWrapper {
-    fn extract_bound(obj: &Bound<'py, PyAny>) -> PyResult<Self> {
-        let py_dict: Bound<'_, PyDict> = obj.clone().downcast_into::<PyDict>().unwrap();
+impl<'a, 'py> FromPyObject<'a, 'py> for DataEntityWrapper {
+    type Error = PyErr;
+
+    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> Result<Self, Self::Error> {
+        let py_dict: Bound<'py, PyDict> = obj
+            .to_owned()
+            .cast_into()
+            .map_err(PyErr::from)?;
 
         // Extract the "id" and "type_" fields explicitly
         let id: String = match py_dict.get_item("id") {
@@ -351,9 +355,14 @@ impl<'py> FromPyObject<'py> for DataEntityWrapper {
 
 //New type pattern for ContextualEntity
 pub struct ContextualEntityWrapper(pub ContextualEntity);
-impl<'py> FromPyObject<'py> for ContextualEntityWrapper {
-    fn extract_bound(obj: &Bound<'py, PyAny>) -> PyResult<Self> {
-        let py_dict: Bound<'_, PyDict> = obj.clone().downcast_into::<PyDict>().unwrap();
+impl<'a, 'py> FromPyObject<'a, 'py> for ContextualEntityWrapper {
+    type Error = PyErr;
+
+    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> Result<Self, Self::Error> {
+        let py_dict: Bound<'py, PyDict> = obj
+            .to_owned()
+            .cast_into()
+            .map_err(PyErr::from)?;
 
         // Extract the "id" and "type_" fields explicitly
         let id: String = match py_dict.get_item("id") {
@@ -391,9 +400,14 @@ impl<'py> FromPyObject<'py> for ContextualEntityWrapper {
 }
 
 pub struct RootDataEntityWrapper(pub RootDataEntity);
-impl<'py> FromPyObject<'py> for RootDataEntityWrapper {
-    fn extract_bound(obj: &Bound<'py, PyAny>) -> PyResult<Self> {
-        let py_dict: Bound<'_, PyDict> = obj.clone().downcast_into::<PyDict>().unwrap();
+impl<'a, 'py> FromPyObject<'a, 'py> for RootDataEntityWrapper {
+    type Error = PyErr;
+
+    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> Result<Self, Self::Error> {
+        let py_dict: Bound<'py, PyDict> = obj
+            .to_owned()
+            .cast_into()
+            .map_err(PyErr::from)?;
 
         // Extract the "id" and "type_" fields explicitly
         let id: String = match py_dict.get_item("id") {
@@ -461,9 +475,14 @@ impl<'py> FromPyObject<'py> for RootDataEntityWrapper {
 }
 
 pub struct MetadataDescriptorWrapper(pub MetadataDescriptor);
-impl<'py> FromPyObject<'py> for MetadataDescriptorWrapper {
-    fn extract_bound(obj: &Bound<'py, PyAny>) -> PyResult<Self> {
-        let py_dict: Bound<'_, PyDict> = obj.clone().downcast_into::<PyDict>().unwrap(); // Safely cast the PyAny to PyDict
+impl<'a, 'py> FromPyObject<'a, 'py> for MetadataDescriptorWrapper {
+    type Error = PyErr;
+
+    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> Result<Self, Self::Error> {
+        let py_dict: Bound<'py, PyDict> = obj
+            .to_owned()
+            .cast_into()
+            .map_err(PyErr::from)?;
 
         // Extract the "id" and "type_" fields explicitly
         let id: String = match py_dict.get_item("id") {

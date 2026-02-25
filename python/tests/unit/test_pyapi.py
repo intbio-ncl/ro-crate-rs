@@ -1,4 +1,14 @@
-from rocraters import PyRoCrate, PyRoCrateContext, read, read_object, read_zip, zip
+from rocraters import (
+    PyRoCrate,
+    PyRoCrateContext,
+    read,
+    read_object,
+    read_zip,
+    validate,
+    validate_object,
+    validate_zip,
+    zip,
+)
 import unittest
 from pathlib import Path
 
@@ -137,12 +147,124 @@ class TestApi(unittest.TestCase):
         crate = read(str(crate_path), 0)
 
         context = crate.get_all_context()
-        print(context)
-        context = crate.get_specific_context("@base")
-        print(context)
+
+        self.assertIsInstance(context, list)
+        self.assertEqual(len(context), 1)
+        self.assertTrue(all(isinstance(item, dict) for item in context))
+        self.assertTrue(all("@context" in item for item in context))
+
+        self.assertEqual(
+            context[0],
+            {"@context": "https://w3id.org/ro/crate/1.1/context"},
+        )
+
+    def test_get_context_extended(self):
+        crate_path = self.path / Path("python/tests/fixtures/_ro-crate-metadata-minimal.json")
+        crate = read(str(crate_path), 0)
+
+        context = crate.get_all_context()
+
+        self.assertIsInstance(context, list)
+        self.assertEqual(len(context), 2)
+        self.assertTrue(all(isinstance(item, dict) for item in context))
+        self.assertTrue(all("@context" in item for item in context))
+
+        context_values = [item["@context"] for item in context]
+        self.assertIn("https://w3id.org/ro/crate/1.1/context", context_values)
+        self.assertIn(
+            {"@base": "urn:uuid:01234567-89ab-cdef-0123-456789abcdef"},
+            context_values,
+        )
+
+    def test_validate_valid_crate(self):
+        crate_path = self.path / Path("tests/fixtures/_ro-crate-metadata-minimal.json")
+        report = validate(str(crate_path))
+
+        self.assertTrue(report["is_valid"])
+        self.assertEqual(report["invalid_keys"], [])
+        self.assertEqual(report["invalid_ids"], [])
+        self.assertEqual(report["invalid_types"], [])
+        self.assertIsNone(report["error_type"])
+        self.assertIsNone(report["error_message"])
+
+    def test_validate_invalid_crate(self):
+        crate_path = self.path / Path("tests/fixtures/_ro-crate-metadata-broken-schema.json")
+        report = validate(str(crate_path))
+
+        self.assertFalse(report["is_valid"])
+        self.assertIn("nonschemakey", report["invalid_keys"])
+        self.assertEqual(report["invalid_ids"], [])
+        self.assertEqual(report["invalid_types"], [])
+        self.assertIsNone(report["error_type"])
+        self.assertIsNone(report["error_message"])
+
+    def test_validate_object(self):
+        crate_object = '''{
+            "@context": "https://w3id.org/ro/crate/1.1/context",
+            "@graph": [
+                {
+                    "@type": "CreativeWork",
+                    "@id": "ro-crate-metadata.json",
+                    "conformsTo": {"@id": "https://w3id.org/ro/crate/1.1"},
+                    "about": {"@id": "./"}
+                },
+                {
+                    "@id": "./",
+                    "@type": "Dataset",
+                    "name": "Example",
+                    "description": "Example",
+                    "datePublished": "2017",
+                    "license": {"@id": "https://creativecommons.org/licenses/by/4.0/"}
+                }
+            ]
+        }'''
+        report = validate_object(crate_object)
+        self.assertTrue(report["is_valid"])
+
+    def test_validate_zip(self):
+        crate_path = self.path / Path("tests/fixtures/zip_test/fixtures.zip")
+        report = validate_zip(str(crate_path))
+        self.assertTrue(report["is_valid"])
+
+    def test_to_list(self):
+        crate_path = self.path / Path("tests/fixtures/_ro-crate-metadata-minimal.json")
+        crate = read(str(crate_path), 0)
+
+        entities = crate.to_list()
+
+        self.assertIsInstance(entities, list)
+        self.assertEqual(len(entities), 3)
+
+        ids = {entity["id"] for entity in entities}
+        expected_ids = {
+            "ro-crate-metadata.json",
+            "./",
+            "https://creativecommons.org/licenses/by-nc-sa/3.0/au/",
+        }
+
+        self.assertEqual(ids, expected_ids)
+
+        entities_by_id = {entity["id"]: entity for entity in entities}
+
+        metadata = entities_by_id["ro-crate-metadata.json"]
+        self.assertEqual(metadata["type"], self.metadata_fixture["type"])
+        self.assertEqual(metadata["conformsTo"], self.metadata_fixture["conformsTo"])
+        self.assertEqual(metadata["about"], self.metadata_fixture["about"])
+
+        root = entities_by_id["./"]
+        self.assertEqual(root["type"], self.root_fixture["type"])
+        self.assertEqual(root["name"], self.root_fixture["name"])
+        self.assertEqual(root["description"], self.root_fixture["description"])
+        self.assertEqual(root["datePublished"], self.root_fixture["datePublished"])
+        self.assertEqual(root["license"], self.root_fixture["license"])
+        self.assertEqual(root["identifier"], self.root_fixture["identifier"])
+
+        contextual = entities_by_id["https://creativecommons.org/licenses/by-nc-sa/3.0/au/"]
+        self.assertEqual(contextual["type"], self.contextual_fixture["type"])
+        self.assertEqual(contextual["description"], self.contextual_fixture["description"])
+        self.assertEqual(contextual["identifier"], self.contextual_fixture["identifier"])
+        self.assertEqual(contextual["name"], self.contextual_fixture["name"])
 
 
 if __name__ == '__main__':
     unittest.main()
-
-

@@ -17,25 +17,27 @@ members = ["cli"]
 [workspace.dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0.149"
-chrono = { version = "0.4.43", features = ["serde"] }
-uuid = { version = "1.19", features = ["v4", "v7"] }
-rand = "0.9"
+chrono = { version = "0.4.41", features = ["serde"] }
+uuid = { version = "1.21.0", features = ["v4", "v7"] }
+rand = "0.10.0"
 url = "2.5"
-zip = "7.1.0"
+zip = "8.1.0"
 walkdir = "2"
-reqwest = { version = "0.13", features = [
+reqwest = { version = "0.13.2", features = [
     "blocking",
     "json",
 ], default-features = false }
 dirs = "6.0.0"
-polars = { version = "0.52.0", features = ["parquet"] }
+polars = { version = "0.53.0", features = ["parquet"] }
 log = "0.4.29"
 thiserror = "2.0.17"
 sha1 = "0.10.6"
 sha2 = "0.10.9"
 hex = "0.4.3"
-bytes = "1.11.0"
-regex = "1.12.2"
+bytes = "1.11.1"
+regex = "1.12.3"
+oxrdf = "0.3"
+oxrdfio = "0.2"
 
 [lib]
 name = "rocraters"
@@ -44,7 +46,14 @@ doctest = false
 
 [features]
 parquet = ["dep:polars"]
-subcrate-resolution = ["dep:sha1","dep:sha2","dep:hex","dep:bytes","dep:regex"]
+rdf = ["dep:oxrdf", "dep:oxrdfio"]
+subcrate-resolution = [
+    "dep:sha1",
+    "dep:sha2",
+    "dep:hex",
+    "dep:bytes",
+    "dep:regex",
+]
 
 [dependencies]
 serde = { workspace = true }
@@ -65,6 +74,8 @@ sha2 = { workspace = true, optional = true }
 hex = { workspace = true, optional = true }
 bytes = { workspace = true, optional = true }
 regex = { workspace = true, optional = true }
+oxrdf = { workspace = true, optional = true }
+oxrdfio = { workspace = true, optional = true }
 
 
 [dev-dependencies]

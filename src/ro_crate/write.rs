@@ -3,7 +3,7 @@
 //! Allows basic ro-crate-metadata.json file creation, as well as archiving
 //! via zip.
 
-use crate::ro_crate::read::{read_crate, CrateReadError};
+use crate::ro_crate::read::{CrateReadError, read_crate};
 use crate::ro_crate::rocrate::RoCrate;
 use dirs;
 use log::{debug, error};
@@ -620,7 +620,7 @@ mod write_crate_tests {
 
     use std::io::Write;
 
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
 
     fn minimal_test_experiment_rocrate(tempdir: PathBuf) -> Value {
         let mut data = std::fs::File::create_new(tempdir.join("data.csv")).unwrap();

@@ -1,6 +1,6 @@
 [package]
 name = "ro-crate-rs-cli"
-version = "0.4.12"
+version = "0.5.0"
 edition = "2021"
 repository = "https://github.com/intbio-ncl/ro-crate-rs"
 authors = ["Matt Burridge <m.burridge1@newcastle.ac.uk>"]
@@ -13,7 +13,7 @@ categories = ["command-line-utilities"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-ro-crate-rs = {path = "../", version = "0.4.12"}
+ro-crate-rs = {path = "../", version = "0.5.0"}
 clap = { version = "4.5.53", features = ["derive"] }
 chrono = { workspace = true }
 serde_json = { workspace = true }

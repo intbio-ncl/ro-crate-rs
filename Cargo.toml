@@ -1,6 +1,6 @@
 [package]
 name = "ro-crate-rs"
-version = "0.4.12"
+version = "0.5.0"
 edition = "2024"
 repository = "https://github.com/intbio-ncl/ro-crate-rs"
 authors = ["Matt Burridge <m.burridge1@newcastle.ac.uk>"]

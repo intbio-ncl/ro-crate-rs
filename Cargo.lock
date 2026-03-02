@@ -2875,7 +2875,7 @@ dependencies = [
 
 [[package]]
 name = "ro-crate-rs"
-version = "0.4.12"
+version = "0.5.0"
 dependencies = [
  "bytes",
  "chrono",
@@ -2903,7 +2903,7 @@ dependencies = [
 
 [[package]]
 name = "ro-crate-rs-cli"
-version = "0.4.12"
+version = "0.5.0"
 dependencies = [
  "chrono",
  "clap",

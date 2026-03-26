@@ -1,4 +1,4 @@
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 
 use rocraters::ro_crate::constraints::*;
 use rocraters::ro_crate::contextual_entity::ContextualEntity;

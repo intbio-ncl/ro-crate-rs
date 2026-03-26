@@ -59,6 +59,7 @@ struct RdfConverter<'a> {
     xsd_integer: NamedNode,
     xsd_double: NamedNode,
     xsd_boolean: NamedNode,
+    named_node_cache: HashMap<String, NamedNode>,
 }
 
 impl<'a> RdfConverter<'a> {
@@ -70,25 +71,34 @@ impl<'a> RdfConverter<'a> {
             xsd_integer: NamedNode::new_unchecked("http://www.w3.org/2001/XMLSchema#integer"),
             xsd_double: NamedNode::new_unchecked("http://www.w3.org/2001/XMLSchema#double"),
             xsd_boolean: NamedNode::new_unchecked("http://www.w3.org/2001/XMLSchema#boolean"),
+            named_node_cache: HashMap::new(),
         }
     }
 
     /// Expands and validates a term to a NamedNode.
-    fn named_node(&self, term: &str) -> Result<NamedNode, RdfError> {
+    fn named_node(&mut self, term: &str) -> Result<NamedNode, RdfError> {
+        if let Some(node) = self.named_node_cache.get(term) {
+            return Ok(node.clone());
+        }
+
         let expanded = self
             .ctx
             .expand_term_checked(term, self.allow_relative)
             .map_err(|e| RdfError::InvalidIri(e.to_string()))?;
-        if self.allow_relative {
+
+        let node = if self.allow_relative {
             // Skip validation for relative IRIs
-            Ok(NamedNode::new_unchecked(&expanded))
+            NamedNode::new_unchecked(expanded)
         } else {
-            NamedNode::new(&expanded).map_err(|e| RdfError::InvalidIri(e.to_string()))
-        }
+            NamedNode::new(&expanded).map_err(|e| RdfError::InvalidIri(e.to_string()))?
+        };
+
+        self.named_node_cache.insert(term.to_string(), node.clone());
+        Ok(node)
     }
 
     /// Converts an Id to one or more NamedNodes.
-    fn id_to_nodes(&self, id: &Id) -> Result<Vec<NamedNode>, RdfError> {
+    fn id_to_nodes(&mut self, id: &Id) -> Result<Vec<NamedNode>, RdfError> {
         match id {
             Id::Id(s) => Ok(vec![self.named_node(s)?]),
             Id::IdArray(ids) => ids.iter().map(|s| self.named_node(s)).collect(),
@@ -96,7 +106,7 @@ impl<'a> RdfConverter<'a> {
     }
 
     /// Converts an ID string to an RDF Term, handling blank nodes.
-    fn id_string_to_term(&self, id: &str) -> Result<Term, RdfError> {
+    fn id_string_to_term(&mut self, id: &str) -> Result<Term, RdfError> {
         if let Some(local_name) = id.strip_prefix("_:") {
             Ok(Term::BlankNode(BlankNode::new_unchecked(local_name)))
         } else {
@@ -105,7 +115,7 @@ impl<'a> RdfConverter<'a> {
     }
 
     /// Converts an Id to one or more Terms, handling blank nodes.
-    fn id_to_terms(&self, id: &Id) -> Result<Vec<Term>, RdfError> {
+    fn id_to_terms(&mut self, id: &Id) -> Result<Vec<Term>, RdfError> {
         match id {
             Id::Id(single) => Ok(vec![self.id_string_to_term(single)?]),
             Id::IdArray(arr) => arr.iter().map(|s| self.id_string_to_term(s)).collect(),
@@ -118,7 +128,7 @@ impl<'a> RdfConverter<'a> {
     }
 
     /// Converts an entity @id to an RDF subject.
-    fn id_to_subject(&self, id: &str) -> Result<NamedOrBlankNode, RdfError> {
+    fn id_to_subject(&mut self, id: &str) -> Result<NamedOrBlankNode, RdfError> {
         if let Some(local_name) = id.strip_prefix("_:") {
             return Ok(NamedOrBlankNode::BlankNode(BlankNode::new_unchecked(
                 local_name,
@@ -129,8 +139,8 @@ impl<'a> RdfConverter<'a> {
 
     /// Adds type triples for the given DataType.
     fn add_type_triples(
-        &self,
-        triples: &mut Vec<Triple>,
+        &mut self,
+        graph: &mut RdfGraph,
         subject: &NamedOrBlankNode,
         type_: &DataType,
     ) -> Result<(), RdfError> {
@@ -139,7 +149,7 @@ impl<'a> RdfConverter<'a> {
             DataType::TermArray(ts) => ts.iter().map(|s| s.as_str()).collect(),
         };
         for t in types {
-            triples.push(Triple::new(
+            graph.insert(Triple::new(
                 subject.clone(),
                 self.rdf_type.clone(),
                 self.named_node(t)?,
@@ -151,8 +161,8 @@ impl<'a> RdfConverter<'a> {
     /// Adds a string literal triple.
     /// Skips creating the triple if the value is empty, preserving "missing" semantics.
     fn add_string_triple(
-        &self,
-        triples: &mut Vec<Triple>,
+        &mut self,
+        graph: &mut RdfGraph,
         subject: &NamedOrBlankNode,
         predicate: &str,
         value: &str,
@@ -160,7 +170,7 @@ impl<'a> RdfConverter<'a> {
         if value.is_empty() {
             return Ok(());
         }
-        triples.push(Triple::new(
+        graph.insert(Triple::new(
             subject.clone(),
             self.named_node(predicate)?,
             Literal::new_simple_literal(value),
@@ -170,23 +180,23 @@ impl<'a> RdfConverter<'a> {
 
     /// Adds triples for an Id value (single or array).
     fn add_id_triples(
-        &self,
-        triples: &mut Vec<Triple>,
+        &mut self,
+        graph: &mut RdfGraph,
         subject: &NamedOrBlankNode,
         predicate: &str,
         id: &Id,
     ) -> Result<(), RdfError> {
         let pred = self.named_node(predicate)?;
         for node in self.id_to_nodes(id)? {
-            triples.push(Triple::new(subject.clone(), pred.clone(), node));
+            graph.insert(Triple::new(subject.clone(), pred.clone(), node));
         }
         Ok(())
     }
 
     /// Adds a triple for a License value.
     fn add_license_triple(
-        &self,
-        triples: &mut Vec<Triple>,
+        &mut self,
+        graph: &mut RdfGraph,
         subject: &NamedOrBlankNode,
         license: &License,
     ) -> Result<(), RdfError> {
@@ -194,11 +204,11 @@ impl<'a> RdfConverter<'a> {
         match license {
             License::Id(id) => {
                 for node in self.id_to_nodes(id)? {
-                    triples.push(Triple::new(subject.clone(), pred.clone(), node));
+                    graph.insert(Triple::new(subject.clone(), pred.clone(), node));
                 }
             }
             License::Description(desc) => {
-                triples.push(Triple::new(
+                graph.insert(Triple::new(
                     subject.clone(),
                     pred,
                     Literal::new_simple_literal(desc),
@@ -210,94 +220,83 @@ impl<'a> RdfConverter<'a> {
 
     /// Adds triples from dynamic_entity HashMap.
     fn add_dynamic_triples(
-        &self,
-        triples: &mut Vec<Triple>,
+        &mut self,
+        graph: &mut RdfGraph,
         subject: &NamedOrBlankNode,
         dynamic: &HashMap<String, EntityValue>,
     ) -> Result<(), RdfError> {
         for (key, value) in dynamic {
             let pred = self.named_node(key)?;
-            for term in self.entity_value_to_terms(value, key)? {
-                triples.push(Triple::new(subject.clone(), pred.clone(), term));
-            }
+            self.add_entity_value_triples(graph, subject, &pred, value, key)?;
         }
         Ok(())
     }
 
-    /// Converts an EntityValue to RDF Term(s).
-    fn entity_value_to_terms(
-        &self,
+    fn collect_entity_value_terms(
+        &mut self,
         value: &EntityValue,
         predicate_name: &str,
-    ) -> Result<Vec<Term>, RdfError> {
+        terms: &mut Vec<Term>,
+    ) -> Result<(), RdfError> {
         match value {
-            // String literals
-            EntityValue::EntityString(s) => Ok(vec![Term::Literal(Literal::new_simple_literal(s))]),
-            EntityValue::EntityVecString(ss) => Ok(ss
-                .iter()
-                .map(|s| Term::Literal(Literal::new_simple_literal(s)))
-                .collect()),
-
-            // Numeric literals
-            EntityValue::Entityi64(n) => Ok(vec![Term::Literal(
-                self.typed_literal(n, &self.xsd_integer),
-            )]),
-            EntityValue::Entityf64(n) => {
-                Ok(vec![Term::Literal(self.typed_literal(n, &self.xsd_double))])
+            EntityValue::EntityString(s) => {
+                terms.push(Term::Literal(Literal::new_simple_literal(s)));
             }
-            EntityValue::EntityVeci64(ns) => Ok(ns
-                .iter()
-                .map(|n| Term::Literal(self.typed_literal(n, &self.xsd_integer)))
-                .collect()),
-            EntityValue::EntityVecf64(ns) => Ok(ns
-                .iter()
-                .map(|n| Term::Literal(self.typed_literal(n, &self.xsd_double)))
-                .collect()),
-
-            // Boolean
-            EntityValue::EntityBool(b) => Ok(vec![Term::Literal(
-                self.typed_literal(b, &self.xsd_boolean),
-            )]),
-
-            // References (Id, License, DataType)
-            EntityValue::EntityId(id) => self.id_to_terms(id),
+            EntityValue::EntityVecString(ss) => {
+                terms.extend(
+                    ss.iter()
+                        .map(|value| Term::Literal(Literal::new_simple_literal(value))),
+                );
+            }
+            EntityValue::Entityi64(n) => {
+                terms.push(Term::Literal(self.typed_literal(n, &self.xsd_integer)));
+            }
+            EntityValue::Entityf64(n) => {
+                terms.push(Term::Literal(self.typed_literal(n, &self.xsd_double)));
+            }
+            EntityValue::EntityVeci64(ns) => {
+                terms.extend(
+                    ns.iter()
+                        .map(|value| Term::Literal(self.typed_literal(value, &self.xsd_integer))),
+                );
+            }
+            EntityValue::EntityVecf64(ns) => {
+                terms.extend(
+                    ns.iter()
+                        .map(|value| Term::Literal(self.typed_literal(value, &self.xsd_double))),
+                );
+            }
+            EntityValue::EntityBool(b) => {
+                terms.push(Term::Literal(self.typed_literal(b, &self.xsd_boolean)));
+            }
+            EntityValue::EntityId(id) => terms.extend(self.id_to_terms(id)?),
             EntityValue::EntityLicense(license) => match license {
-                License::Id(id) => Ok(self
-                    .id_to_nodes(id)?
-                    .into_iter()
-                    .map(Term::NamedNode)
-                    .collect()),
+                License::Id(id) => {
+                    terms.extend(self.id_to_nodes(id)?.into_iter().map(Term::NamedNode));
+                }
                 License::Description(desc) => {
-                    Ok(vec![Term::Literal(Literal::new_simple_literal(desc))])
+                    terms.push(Term::Literal(Literal::new_simple_literal(desc)));
                 }
             },
             EntityValue::EntityDataType(dt) => {
-                let terms: Vec<&str> = match dt {
+                let types: Vec<&str> = match dt {
                     DataType::Term(t) => vec![t.as_str()],
-                    DataType::TermArray(ts) => ts.iter().map(|s| s.as_str()).collect(),
+                    DataType::TermArray(ts) => ts.iter().map(|value| value.as_str()).collect(),
                 };
-                terms
-                    .into_iter()
-                    .map(|t| Ok(Term::NamedNode(self.named_node(t)?)))
-                    .collect()
-            }
-
-            // Nested values
-            EntityValue::EntityVec(values) => {
-                let mut terms = Vec::new();
-                for v in values {
-                    terms.extend(self.entity_value_to_terms(v, predicate_name)?);
+                for type_name in types {
+                    terms.push(Term::NamedNode(self.named_node(type_name)?));
                 }
-                Ok(terms)
             }
-
-            // Skipped values (log and return empty)
+            EntityValue::EntityVec(values) => {
+                for nested in values {
+                    self.collect_entity_value_terms(nested, predicate_name, terms)?;
+                }
+            }
             EntityValue::EntityObject(obj) => {
                 warn!(
                     "Skipping nested object for predicate '{}': {:?} (would require blank node)",
                     predicate_name, obj
                 );
-                Ok(vec![])
             }
             EntityValue::EntityVecObject(objs) => {
                 warn!(
@@ -305,68 +304,195 @@ impl<'a> RdfConverter<'a> {
                     objs.len(),
                     predicate_name
                 );
-                Ok(vec![])
             }
             EntityValue::NestedDynamicEntity(nested) => {
                 warn!(
                     "Skipping nested dynamic entity for predicate '{}': {:?}",
                     predicate_name, nested
                 );
-                Ok(vec![])
             }
             EntityValue::EntityNull(_) => {
                 warn!("Skipping null value for predicate '{}'", predicate_name);
-                Ok(vec![])
             }
-            EntityValue::EntityNone(_) => Ok(vec![]),
+            EntityValue::EntityNone(_) => {}
             EntityValue::Fallback(val) => {
                 warn!(
                     "Skipping fallback value for predicate '{}': {:?}",
                     predicate_name, val
                 );
-                Ok(vec![])
             }
         }
+
+        Ok(())
+    }
+
+    /// Converts an EntityValue to RDF Term(s).
+    fn entity_value_to_terms(
+        &mut self,
+        value: &EntityValue,
+        predicate_name: &str,
+    ) -> Result<Vec<Term>, RdfError> {
+        let mut terms = Vec::new();
+        self.collect_entity_value_terms(value, predicate_name, &mut terms)?;
+        Ok(terms)
+    }
+
+    fn add_entity_value_triples(
+        &mut self,
+        graph: &mut RdfGraph,
+        subject: &NamedOrBlankNode,
+        predicate: &NamedNode,
+        value: &EntityValue,
+        predicate_name: &str,
+    ) -> Result<(), RdfError> {
+        match value {
+            EntityValue::EntityVec(values) => {
+                for nested in values {
+                    self.add_entity_value_triples(
+                        graph,
+                        subject,
+                        predicate,
+                        nested,
+                        predicate_name,
+                    )?;
+                }
+            }
+            _ => {
+                for term in self.entity_value_to_terms(value, predicate_name)? {
+                    graph.insert(Triple::new(subject.clone(), predicate.clone(), term));
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// Converts a single entity to RDF triples.
-    fn entity_to_triples(&self, entity: &GraphVector) -> Result<Vec<Triple>, RdfError> {
-        let mut triples = Vec::new();
+    fn add_entity_to_graph(
+        &mut self,
+        entity: &GraphVector,
+        graph: &mut RdfGraph,
+    ) -> Result<(), RdfError> {
         let subject = self.id_to_subject(entity.get_id())?;
 
-        self.add_type_triples(&mut triples, &subject, entity.get_type())?;
+        self.add_type_triples(graph, &subject, entity.get_type())?;
 
         match entity {
             GraphVector::MetadataDescriptor(d) => {
-                self.add_id_triples(&mut triples, &subject, "conformsTo", &d.conforms_to)?;
-                self.add_id_triples(&mut triples, &subject, "about", &d.about)?;
+                self.add_id_triples(graph, &subject, "conformsTo", &d.conforms_to)?;
+                self.add_id_triples(graph, &subject, "about", &d.about)?;
                 if let Some(dyn_ent) = &d.dynamic_entity {
-                    self.add_dynamic_triples(&mut triples, &subject, dyn_ent)?;
+                    self.add_dynamic_triples(graph, &subject, dyn_ent)?;
                 }
             }
             GraphVector::RootDataEntity(r) => {
-                self.add_string_triple(&mut triples, &subject, "name", &r.name)?;
-                self.add_string_triple(&mut triples, &subject, "description", &r.description)?;
-                self.add_string_triple(&mut triples, &subject, "datePublished", &r.date_published)?;
-                self.add_license_triple(&mut triples, &subject, &r.license)?;
+                self.add_string_triple(graph, &subject, "name", &r.name)?;
+                self.add_string_triple(graph, &subject, "description", &r.description)?;
+                self.add_string_triple(graph, &subject, "datePublished", &r.date_published)?;
+                self.add_license_triple(graph, &subject, &r.license)?;
                 if let Some(dyn_ent) = &r.dynamic_entity {
-                    self.add_dynamic_triples(&mut triples, &subject, dyn_ent)?;
+                    self.add_dynamic_triples(graph, &subject, dyn_ent)?;
                 }
             }
             GraphVector::DataEntity(d) => {
                 if let Some(dyn_ent) = &d.dynamic_entity {
-                    self.add_dynamic_triples(&mut triples, &subject, dyn_ent)?;
+                    self.add_dynamic_triples(graph, &subject, dyn_ent)?;
                 }
             }
             GraphVector::ContextualEntity(c) => {
                 if let Some(dyn_ent) = &c.dynamic_entity {
-                    self.add_dynamic_triples(&mut triples, &subject, dyn_ent)?;
+                    self.add_dynamic_triples(graph, &subject, dyn_ent)?;
                 }
             }
         }
 
-        Ok(triples)
+        Ok(())
     }
+}
+
+fn estimate_id_triples(id: &Id) -> usize {
+    match id {
+        Id::Id(_) => 1,
+        Id::IdArray(values) => values.len(),
+    }
+}
+
+fn estimate_license_triples(license: &License) -> usize {
+    match license {
+        License::Id(id) => estimate_id_triples(id),
+        License::Description(_) => 1,
+    }
+}
+
+fn estimate_entity_value_terms(value: &EntityValue) -> usize {
+    match value {
+        EntityValue::EntityString(_)
+        | EntityValue::Entityi64(_)
+        | EntityValue::Entityf64(_)
+        | EntityValue::EntityBool(_)
+        | EntityValue::EntityLicense(License::Description(_)) => 1,
+        EntityValue::EntityVecString(values) => values.len(),
+        EntityValue::EntityId(id) => estimate_id_triples(id),
+        EntityValue::EntityVeci64(values) => values.len(),
+        EntityValue::EntityVecf64(values) => values.len(),
+        EntityValue::EntityLicense(License::Id(id)) => estimate_id_triples(id),
+        EntityValue::EntityDataType(data_type) => match data_type {
+            DataType::Term(_) => 1,
+            DataType::TermArray(values) => values.len(),
+        },
+        EntityValue::EntityVec(values) => values.iter().map(estimate_entity_value_terms).sum(),
+        EntityValue::EntityObject(_)
+        | EntityValue::EntityVecObject(_)
+        | EntityValue::NestedDynamicEntity(_)
+        | EntityValue::EntityNull(_)
+        | EntityValue::EntityNone(_)
+        | EntityValue::Fallback(_) => 0,
+    }
+}
+
+fn estimate_dynamic_triples(dynamic: &HashMap<String, EntityValue>) -> usize {
+    dynamic.values().map(estimate_entity_value_terms).sum()
+}
+
+fn estimate_entity_triples(entity: &GraphVector) -> usize {
+    let type_count = match entity.get_type() {
+        DataType::Term(_) => 1,
+        DataType::TermArray(types) => types.len(),
+    };
+
+    let fixed_count = match entity {
+        GraphVector::MetadataDescriptor(d) => {
+            estimate_id_triples(&d.conforms_to) + estimate_id_triples(&d.about)
+        }
+        GraphVector::RootDataEntity(r) => {
+            usize::from(!r.name.is_empty())
+                + usize::from(!r.description.is_empty())
+                + usize::from(!r.date_published.is_empty())
+                + estimate_license_triples(&r.license)
+        }
+        GraphVector::DataEntity(_) | GraphVector::ContextualEntity(_) => 0,
+    };
+
+    let dynamic_count = match entity {
+        GraphVector::MetadataDescriptor(d) => d
+            .dynamic_entity
+            .as_ref()
+            .map_or(0, estimate_dynamic_triples),
+        GraphVector::RootDataEntity(r) => r
+            .dynamic_entity
+            .as_ref()
+            .map_or(0, estimate_dynamic_triples),
+        GraphVector::DataEntity(d) => d
+            .dynamic_entity
+            .as_ref()
+            .map_or(0, estimate_dynamic_triples),
+        GraphVector::ContextualEntity(c) => c
+            .dynamic_entity
+            .as_ref()
+            .map_or(0, estimate_dynamic_triples),
+    };
+
+    type_count + fixed_count + dynamic_count
 }
 
 /// Converts an RoCrate to RDF triples.
@@ -393,19 +519,12 @@ pub fn rocrate_to_rdf_with_options(
         }
     }
 
-    let converter = RdfConverter::new(&context, &options);
-    let triples: Vec<Triple> = crate_
-        .graph
-        .iter()
-        .map(|entity| converter.entity_to_triples(entity))
-        .collect::<Result<Vec<_>, _>>()?
-        .into_iter()
-        .flatten()
-        .collect();
+    let estimated_triples = crate_.graph.iter().map(estimate_entity_triples).sum();
+    let mut converter = RdfConverter::new(&context, &options);
+    let mut graph = RdfGraph::with_capacity(context.clone(), estimated_triples);
 
-    let mut graph = RdfGraph::new(context);
-    for triple in triples {
-        graph.insert(triple);
+    for entity in &crate_.graph {
+        converter.add_entity_to_graph(entity, &mut graph)?;
     }
 
     Ok(graph)
@@ -499,7 +618,7 @@ mod tests {
     fn test_id_to_subject_accepts_blank_nodes() {
         let ctx = test_context_with_base();
         let options = ConversionOptions::default();
-        let converter = RdfConverter::new(&ctx, &options);
+        let mut converter = RdfConverter::new(&ctx, &options);
 
         let result = converter.id_to_subject("_:Geometry-1");
         assert!(result.is_ok());
@@ -549,7 +668,7 @@ mod tests {
     fn test_entity_value_blank_node_object() {
         let ctx = test_context_with_base();
         let options = ConversionOptions::default();
-        let converter = RdfConverter::new(&ctx, &options);
+        let mut converter = RdfConverter::new(&ctx, &options);
 
         let value = EntityValue::EntityId(Id::Id("_:Geometry-1".to_string()));
         let terms = converter.entity_value_to_terms(&value, "geo").unwrap();

@@ -44,6 +44,15 @@ name = "rocraters"
 path = "src/lib.rs"
 doctest = false
 
+[[bench]]
+name = "create_and_write"
+harness = false
+
+[[bench]]
+name = "rdf_perf"
+harness = false
+required-features = ["rdf"]
+
 [features]
 parquet = ["dep:polars"]
 rdf = ["dep:oxrdf", "dep:oxrdfio"]
@@ -81,3 +90,4 @@ oxrdfio = { workspace = true, optional = true }
 [dev-dependencies]
 tempfile = "3.24"
 mockito = "1.7.1"
+criterion = "0.5"

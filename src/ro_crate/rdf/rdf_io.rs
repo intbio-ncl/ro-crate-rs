@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 
-use oxrdf::{NamedNode, NamedOrBlankNode, Quad, Term, Triple};
+use oxrdf::{NamedNode, NamedOrBlankNode, Term, Triple};
 use oxrdfio::{RdfFormat as OxRdfFormat, RdfParser, RdfSerializer};
 
 use super::context::ResolvedContext;
@@ -88,22 +88,13 @@ fn parse_rdf(input: &str, format: RdfFormat, base: Option<&str>) -> Result<Vec<T
             .map_err(|e| RdfError::ParseError(format!("Invalid base IRI: {}", e)))?;
     }
 
-    let reader = input.as_bytes();
-    let quads: Result<Vec<Quad>, _> = parser.for_reader(reader).collect();
-
-    let quads = quads.map_err(|e| RdfError::ParseError(format!("Failed to parse RDF: {}", e)))?;
-
-    // Convert Quads to Triples (ignoring graph information)
-    let triples = quads
-        .into_iter()
-        .map(|q| Triple {
-            subject: q.subject,
-            predicate: q.predicate,
-            object: q.object,
+    parser
+        .for_slice(input.as_bytes())
+        .map(|quad| {
+            quad.map(Triple::from)
+                .map_err(|e| RdfError::ParseError(format!("Failed to parse RDF: {}", e)))
         })
-        .collect();
-
-    Ok(triples)
+        .collect()
 }
 
 /// Find the metadata descriptor and root data entity IRIs from RDF triples.
@@ -187,8 +178,24 @@ enum EntityType {
     Contextual,
 }
 
-/// XSD namespace for datatype IRIs.
-const XSD_NS: &str = "http://www.w3.org/2001/XMLSchema#";
+const XSD_STRING: &str = "http://www.w3.org/2001/XMLSchema#string";
+const XSD_BOOLEAN: &str = "http://www.w3.org/2001/XMLSchema#boolean";
+const XSD_INTEGER: &str = "http://www.w3.org/2001/XMLSchema#integer";
+const XSD_INT: &str = "http://www.w3.org/2001/XMLSchema#int";
+const XSD_LONG: &str = "http://www.w3.org/2001/XMLSchema#long";
+const XSD_SHORT: &str = "http://www.w3.org/2001/XMLSchema#short";
+const XSD_BYTE: &str = "http://www.w3.org/2001/XMLSchema#byte";
+const XSD_NON_NEGATIVE_INTEGER: &str = "http://www.w3.org/2001/XMLSchema#nonNegativeInteger";
+const XSD_NON_POSITIVE_INTEGER: &str = "http://www.w3.org/2001/XMLSchema#nonPositiveInteger";
+const XSD_POSITIVE_INTEGER: &str = "http://www.w3.org/2001/XMLSchema#positiveInteger";
+const XSD_NEGATIVE_INTEGER: &str = "http://www.w3.org/2001/XMLSchema#negativeInteger";
+const XSD_UNSIGNED_LONG: &str = "http://www.w3.org/2001/XMLSchema#unsignedLong";
+const XSD_UNSIGNED_INT: &str = "http://www.w3.org/2001/XMLSchema#unsignedInt";
+const XSD_UNSIGNED_SHORT: &str = "http://www.w3.org/2001/XMLSchema#unsignedShort";
+const XSD_UNSIGNED_BYTE: &str = "http://www.w3.org/2001/XMLSchema#unsignedByte";
+const XSD_DOUBLE: &str = "http://www.w3.org/2001/XMLSchema#double";
+const XSD_FLOAT: &str = "http://www.w3.org/2001/XMLSchema#float";
+const XSD_DECIMAL: &str = "http://www.w3.org/2001/XMLSchema#decimal";
 
 /// Convert an RDF Term to an EntityValue.
 ///
@@ -205,12 +212,10 @@ fn term_to_entity_value(term: &Term) -> EntityValue {
             // Check datatype FIRST before falling back to lexical heuristics
             match datatype {
                 // xsd:string - always return as string, never parse
-                dt if dt == format!("{}string", XSD_NS) => {
-                    EntityValue::EntityString(value_str.to_string())
-                }
+                XSD_STRING => EntityValue::EntityString(value_str.to_string()),
 
                 // xsd:boolean - handle "true", "false", "1", "0"
-                dt if dt == format!("{}boolean", XSD_NS) => match value_str {
+                XSD_BOOLEAN => match value_str {
                     "true" | "1" => EntityValue::EntityBool(true),
                     "false" | "0" => EntityValue::EntityBool(false),
                     _ => {
@@ -223,48 +228,40 @@ fn term_to_entity_value(term: &Term) -> EntityValue {
                 },
 
                 // xsd:integer and variants (int, long, short, byte, etc.)
-                dt if dt == format!("{}integer", XSD_NS)
-                    || dt == format!("{}int", XSD_NS)
-                    || dt == format!("{}long", XSD_NS)
-                    || dt == format!("{}short", XSD_NS)
-                    || dt == format!("{}byte", XSD_NS)
-                    || dt == format!("{}nonNegativeInteger", XSD_NS)
-                    || dt == format!("{}nonPositiveInteger", XSD_NS)
-                    || dt == format!("{}positiveInteger", XSD_NS)
-                    || dt == format!("{}negativeInteger", XSD_NS)
-                    || dt == format!("{}unsignedLong", XSD_NS)
-                    || dt == format!("{}unsignedInt", XSD_NS)
-                    || dt == format!("{}unsignedShort", XSD_NS)
-                    || dt == format!("{}unsignedByte", XSD_NS) =>
-                {
-                    value_str.parse::<i64>().map_or_else(
-                        |_| {
-                            log::warn!(
-                                "Failed to parse '{}' as integer, returning as string",
-                                value_str
-                            );
-                            EntityValue::EntityString(value_str.to_string())
-                        },
-                        EntityValue::Entityi64,
-                    )
-                }
+                XSD_INTEGER
+                | XSD_INT
+                | XSD_LONG
+                | XSD_SHORT
+                | XSD_BYTE
+                | XSD_NON_NEGATIVE_INTEGER
+                | XSD_NON_POSITIVE_INTEGER
+                | XSD_POSITIVE_INTEGER
+                | XSD_NEGATIVE_INTEGER
+                | XSD_UNSIGNED_LONG
+                | XSD_UNSIGNED_INT
+                | XSD_UNSIGNED_SHORT
+                | XSD_UNSIGNED_BYTE => value_str.parse::<i64>().map_or_else(
+                    |_| {
+                        log::warn!(
+                            "Failed to parse '{}' as integer, returning as string",
+                            value_str
+                        );
+                        EntityValue::EntityString(value_str.to_string())
+                    },
+                    EntityValue::Entityi64,
+                ),
 
                 // xsd:double, xsd:float, xsd:decimal - parse as f64
-                dt if dt == format!("{}double", XSD_NS)
-                    || dt == format!("{}float", XSD_NS)
-                    || dt == format!("{}decimal", XSD_NS) =>
-                {
-                    value_str.parse::<f64>().map_or_else(
-                        |_| {
-                            log::warn!(
-                                "Failed to parse '{}' as float, returning as string",
-                                value_str
-                            );
-                            EntityValue::EntityString(value_str.to_string())
-                        },
-                        EntityValue::Entityf64,
-                    )
-                }
+                XSD_DOUBLE | XSD_FLOAT | XSD_DECIMAL => value_str.parse::<f64>().map_or_else(
+                    |_| {
+                        log::warn!(
+                            "Failed to parse '{}' as float, returning as string",
+                            value_str
+                        );
+                        EntityValue::EntityString(value_str.to_string())
+                    },
+                    EntityValue::Entityf64,
+                ),
 
                 // Unknown datatype or plain literal - fall back to lexical heuristics
                 // Note: Plain literals in RDF 1.1 have implicit xsd:string type,

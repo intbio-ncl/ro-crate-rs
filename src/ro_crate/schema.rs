@@ -2,8 +2,8 @@
 
 use crate::ro_crate::constraints::{Id, License};
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
 use std::collections::HashMap;
+use thiserror::Error;
 pub(crate) const ROCRATE_SCHEMA_1_1: &str = include_str!("../resources/ro_crate_1_1.jsonld");
 pub(crate) const ROCRATE_SCHEMA_1_2: &str = include_str!("../resources/ro_crate_1_2.jsonld");
 

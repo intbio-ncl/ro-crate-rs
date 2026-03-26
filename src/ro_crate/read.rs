@@ -7,12 +7,12 @@ use log::error;
 use log::info;
 use log::warn;
 use serde_json;
-use thiserror::Error;
 use std::collections::HashSet;
 use std::fs;
 use std::io;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use thiserror::Error;
 use zip::ZipArchive;
 
 /// Reads and deserialises an RO-Crate from a specified file path.
@@ -203,7 +203,6 @@ pub enum CrateReadError {
     #[error("{0}")]
     ReqwestError(#[from] reqwest::Error),
 }
-
 
 impl PartialEq for CrateReadError {
     fn eq(&self, other: &Self) -> bool {

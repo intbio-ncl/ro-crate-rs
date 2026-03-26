@@ -14,16 +14,16 @@ use crate::ro_crate::graph_vector::GraphVector;
 use crate::ro_crate::rocrate::RoCrate;
 use log::warn;
 use polars::prelude::*;
-use thiserror::Error;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum ConvertError {
     #[error(transparent)]
     IoError(#[from] std::io::Error),
     #[error(transparent)]
-    PolarsError(#[from] polars::error::PolarsError)
+    PolarsError(#[from] polars::error::PolarsError),
 }
 
 pub fn to_df(rocrate: &RoCrate) -> DataFrame {

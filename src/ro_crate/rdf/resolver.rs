@@ -1,9 +1,10 @@
 //! Context resolution for JSON-LD to RDF conversion.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::OnceLock;
 
 use crate::ro_crate::context::{ContextItem, RoCrateContext};
-use crate::ro_crate::schema::{RoCrateSchemaVersion, ROCRATE_SCHEMA_1_1, ROCRATE_SCHEMA_1_2};
+use crate::ro_crate::schema::{ROCRATE_SCHEMA_1_1, ROCRATE_SCHEMA_1_2, RoCrateSchemaVersion};
 
 use super::context::ResolvedContext;
 use super::error::ContextError;
@@ -29,6 +30,24 @@ struct CachedContext {
     terms: HashMap<String, String>,
     prefixes: HashMap<String, String>,
     nested_urls: Vec<String>,
+}
+
+static ROCRATE_1_1_CACHE: OnceLock<CachedContext> = OnceLock::new();
+static ROCRATE_1_2_CACHE: OnceLock<CachedContext> = OnceLock::new();
+
+fn builtin_rocrate_context(version: RoCrateSchemaVersion) -> CachedContext {
+    match version {
+        RoCrateSchemaVersion::V1_1 => ROCRATE_1_1_CACHE
+            .get_or_init(|| {
+                parse_context_json(ROCRATE_SCHEMA_1_1).expect("valid RO-Crate 1.1 context")
+            })
+            .clone(),
+        RoCrateSchemaVersion::V1_2 => ROCRATE_1_2_CACHE
+            .get_or_init(|| {
+                parse_context_json(ROCRATE_SCHEMA_1_2).expect("valid RO-Crate 1.2 context")
+            })
+            .clone(),
+    }
 }
 
 impl Default for ContextResolverBuilder {
@@ -96,12 +115,12 @@ impl ContextResolverBuilder {
             RoCrateSchemaVersion::V1_1 => {
                 self.cache
                     .entry(ROCRATE_1_1_CONTEXT_URL.to_string())
-                    .or_insert_with(|| parse_context_json(ROCRATE_SCHEMA_1_1).unwrap());
+                    .or_insert_with(|| builtin_rocrate_context(RoCrateSchemaVersion::V1_1));
             }
             RoCrateSchemaVersion::V1_2 => {
                 self.cache
                     .entry(ROCRATE_1_2_CONTEXT_URL.to_string())
-                    .or_insert_with(|| parse_context_json(ROCRATE_SCHEMA_1_2).unwrap());
+                    .or_insert_with(|| builtin_rocrate_context(RoCrateSchemaVersion::V1_2));
             }
         }
     }

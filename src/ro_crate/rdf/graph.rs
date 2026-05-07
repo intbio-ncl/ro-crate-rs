@@ -9,7 +9,7 @@ use super::context::ResolvedContext;
 /// Result of converting an RoCrate to RDF.
 ///
 /// Contains deduplicated triples and the resolved context used for conversion.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RdfGraph {
     /// The RDF triples. Uses HashSet for automatic deduplication.
     pub triples: HashSet<Triple>,
@@ -20,8 +20,13 @@ pub struct RdfGraph {
 impl RdfGraph {
     /// Creates a new RdfGraph with the given context.
     pub fn new(context: ResolvedContext) -> Self {
+        Self::with_capacity(context, 0)
+    }
+
+    /// Creates a new RdfGraph with capacity for the expected triple count.
+    pub fn with_capacity(context: ResolvedContext, capacity: usize) -> Self {
         Self {
-            triples: HashSet::new(),
+            triples: HashSet::with_capacity(capacity),
             context,
         }
     }

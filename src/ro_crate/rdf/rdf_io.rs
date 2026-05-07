@@ -3,7 +3,9 @@
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 
-use oxrdf::{NamedNode, NamedOrBlankNode, Quad, Term, Triple};
+#[cfg(test)]
+use oxrdf::NamedNode;
+use oxrdf::{NamedOrBlankNode, Term, Triple};
 use oxrdfio::{RdfFormat as OxRdfFormat, RdfParser, RdfSerializer};
 
 use super::context::ResolvedContext;
@@ -18,6 +20,30 @@ use crate::ro_crate::graph_vector::GraphVector;
 use crate::ro_crate::metadata_descriptor::MetadataDescriptor;
 use crate::ro_crate::rocrate::RoCrate;
 use crate::ro_crate::root::RootDataEntity;
+
+const RDF_TYPE_IRI: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
+const SCHEMA_ABOUT_IRI: &str = "http://schema.org/about";
+const SCHEMA_DATASET_IRI: &str = "http://schema.org/Dataset";
+const ROCRATE_CONTEXT_IRI: &str = "https://w3id.org/ro/crate/1.2/context";
+
+const XSD_STRING: &str = "http://www.w3.org/2001/XMLSchema#string";
+const XSD_BOOLEAN: &str = "http://www.w3.org/2001/XMLSchema#boolean";
+const XSD_INTEGER: &str = "http://www.w3.org/2001/XMLSchema#integer";
+const XSD_INT: &str = "http://www.w3.org/2001/XMLSchema#int";
+const XSD_LONG: &str = "http://www.w3.org/2001/XMLSchema#long";
+const XSD_SHORT: &str = "http://www.w3.org/2001/XMLSchema#short";
+const XSD_BYTE: &str = "http://www.w3.org/2001/XMLSchema#byte";
+const XSD_NON_NEGATIVE_INTEGER: &str = "http://www.w3.org/2001/XMLSchema#nonNegativeInteger";
+const XSD_NON_POSITIVE_INTEGER: &str = "http://www.w3.org/2001/XMLSchema#nonPositiveInteger";
+const XSD_POSITIVE_INTEGER: &str = "http://www.w3.org/2001/XMLSchema#positiveInteger";
+const XSD_NEGATIVE_INTEGER: &str = "http://www.w3.org/2001/XMLSchema#negativeInteger";
+const XSD_UNSIGNED_LONG: &str = "http://www.w3.org/2001/XMLSchema#unsignedLong";
+const XSD_UNSIGNED_INT: &str = "http://www.w3.org/2001/XMLSchema#unsignedInt";
+const XSD_UNSIGNED_SHORT: &str = "http://www.w3.org/2001/XMLSchema#unsignedShort";
+const XSD_UNSIGNED_BYTE: &str = "http://www.w3.org/2001/XMLSchema#unsignedByte";
+const XSD_DOUBLE: &str = "http://www.w3.org/2001/XMLSchema#double";
+const XSD_FLOAT: &str = "http://www.w3.org/2001/XMLSchema#float";
+const XSD_DECIMAL: &str = "http://www.w3.org/2001/XMLSchema#decimal";
 
 /// Supported RDF serialization formats for RO-Crate I/O.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,22 +114,13 @@ fn parse_rdf(input: &str, format: RdfFormat, base: Option<&str>) -> Result<Vec<T
             .map_err(|e| RdfError::ParseError(format!("Invalid base IRI: {}", e)))?;
     }
 
-    let reader = input.as_bytes();
-    let quads: Result<Vec<Quad>, _> = parser.for_reader(reader).collect();
-
-    let quads = quads.map_err(|e| RdfError::ParseError(format!("Failed to parse RDF: {}", e)))?;
-
-    // Convert Quads to Triples (ignoring graph information)
-    let triples = quads
-        .into_iter()
-        .map(|q| Triple {
-            subject: q.subject,
-            predicate: q.predicate,
-            object: q.object,
+    parser
+        .for_slice(input.as_bytes())
+        .map(|quad| {
+            quad.map(Triple::from)
+                .map_err(|e| RdfError::ParseError(format!("Failed to parse RDF: {}", e)))
         })
-        .collect();
-
-    Ok(triples)
+        .collect()
 }
 
 /// Find the metadata descriptor and root data entity IRIs from RDF triples.
@@ -126,6 +143,7 @@ fn parse_rdf(input: &str, format: RdfFormat, base: Option<&str>) -> Result<Vec<T
 /// # Errors
 ///
 /// Returns `RdfError::MissingRootEntities` if required entities are not found.
+#[cfg(test)]
 fn find_root_entities(triples: &[Triple]) -> Result<(String, String), RdfError> {
     let schema_about = NamedNode::new_unchecked("http://schema.org/about");
     let rdf_type = NamedNode::new_unchecked("http://www.w3.org/1999/02/22-rdf-syntax-ns#type");
@@ -187,8 +205,497 @@ enum EntityType {
     Contextual,
 }
 
-/// XSD namespace for datatype IRIs.
-const XSD_NS: &str = "http://www.w3.org/2001/XMLSchema#";
+#[derive(Debug, Default)]
+struct IndexedEntity {
+    properties: HashMap<String, Vec<EntityValue>>,
+    outgoing_refs: Vec<String>,
+    type_iris: Vec<String>,
+}
+
+#[derive(Debug, Default)]
+struct IndexedGraph {
+    entities: HashMap<String, IndexedEntity>,
+    metadata_about_candidates: Vec<(String, String)>,
+}
+
+impl IndexedGraph {
+    fn from_triples<I>(triples: I) -> Self
+    where
+        I: IntoIterator<Item = Triple>,
+    {
+        let mut graph = Self::default();
+
+        for triple in triples {
+            let subject = subject_to_string(&triple.subject);
+            let predicate = triple.predicate.as_str();
+            let entity = graph.entities.entry(subject.clone()).or_default();
+
+            if predicate == RDF_TYPE_IRI {
+                if let Term::NamedNode(type_node) = &triple.object {
+                    entity.type_iris.push(type_node.as_str().to_string());
+                }
+            } else {
+                entity
+                    .properties
+                    .entry(predicate.to_string())
+                    .or_default()
+                    .push(term_to_entity_value(&triple.object));
+                push_outgoing_ref(&triple.object, &mut entity.outgoing_refs);
+
+                if predicate == SCHEMA_ABOUT_IRI
+                    && subject.contains("ro-crate-metadata.json")
+                    && let Term::NamedNode(object) = &triple.object
+                {
+                    graph
+                        .metadata_about_candidates
+                        .push((subject.clone(), object.as_str().to_string()));
+                }
+            }
+        }
+
+        graph
+    }
+
+    fn find_root_entities(&self) -> Result<(String, String), RdfError> {
+        if self.metadata_about_candidates.is_empty() {
+            return Err(RdfError::MissingRootEntities(
+                "Could not find metadata file with schema:about referencing a crate".to_string(),
+            ));
+        }
+
+        for (metadata_iri, crate_iri) in &self.metadata_about_candidates {
+            if self.entities.get(crate_iri).is_some_and(|entity| {
+                entity
+                    .type_iris
+                    .iter()
+                    .any(|type_iri| type_iri == SCHEMA_DATASET_IRI)
+            }) {
+                return Ok((metadata_iri.clone(), crate_iri.clone()));
+            }
+        }
+
+        Err(RdfError::MissingRootEntities(
+            "Could not find root crate (schema:Dataset) referenced by metadata file".to_string(),
+        ))
+    }
+}
+
+fn subject_to_string(subject: &NamedOrBlankNode) -> String {
+    match subject {
+        NamedOrBlankNode::NamedNode(node) => node.as_str().to_string(),
+        NamedOrBlankNode::BlankNode(node) => format!("_:{}", node.as_str()),
+    }
+}
+
+fn push_outgoing_ref(term: &Term, outgoing_refs: &mut Vec<String>) {
+    match term {
+        Term::NamedNode(node) => outgoing_refs.push(node.as_str().to_string()),
+        Term::BlankNode(node) => outgoing_refs.push(format!("_:{}", node.as_str())),
+        Term::Literal(_) => {}
+    }
+}
+
+fn collapse_values(values: Vec<EntityValue>) -> Option<EntityValue> {
+    match <[EntityValue; 1]>::try_from(values) {
+        Ok([single]) => Some(single),
+        Err(values) if values.is_empty() => None,
+        Err(values) => Some(EntityValue::EntityVec(values)),
+    }
+}
+
+struct ContextCompactor<'a> {
+    context: &'a ResolvedContext,
+    exact_terms: HashMap<&'a str, &'a str>,
+    prefixes: Vec<(&'a str, &'a str)>,
+    cache: HashMap<String, String>,
+}
+
+impl<'a> ContextCompactor<'a> {
+    fn new(context: &'a ResolvedContext) -> Self {
+        let exact_terms = context
+            .terms
+            .iter()
+            .map(|(term, iri)| (iri.as_str(), term.as_str()))
+            .collect();
+
+        let mut prefixes: Vec<_> = context
+            .prefixes
+            .iter()
+            .map(|(prefix, namespace)| (prefix.as_str(), namespace.as_str()))
+            .collect();
+        prefixes.sort_unstable_by(|(_, left), (_, right)| right.len().cmp(&left.len()));
+
+        Self {
+            context,
+            exact_terms,
+            prefixes,
+            cache: HashMap::new(),
+        }
+    }
+
+    fn compact(&mut self, iri: &str) -> String {
+        if let Some(compacted) = self.cache.get(iri) {
+            return compacted.clone();
+        }
+
+        let compacted = if let Some(term) = self.exact_terms.get(iri) {
+            (*term).to_string()
+        } else if let Some((prefix, namespace)) = self
+            .prefixes
+            .iter()
+            .find(|(_, namespace)| iri.starts_with(*namespace))
+        {
+            format!("{}:{}", prefix, &iri[namespace.len()..])
+        } else if let Some(vocab) = &self.context.vocab {
+            if iri.starts_with(vocab) {
+                iri[vocab.len()..].to_string()
+            } else if let Some(base) = &self.context.base {
+                compact_against_base(base, iri)
+            } else {
+                iri.to_string()
+            }
+        } else if let Some(base) = &self.context.base {
+            compact_against_base(base, iri)
+        } else {
+            iri.to_string()
+        };
+
+        self.cache.insert(iri.to_string(), compacted.clone());
+        compacted
+    }
+}
+
+fn compact_against_base(base: &str, iri: &str) -> String {
+    let base_no_slash = base.trim_end_matches('/');
+    if let Some(fragment_part) = iri.strip_prefix(base_no_slash)
+        && fragment_part.starts_with('#')
+    {
+        return fragment_part.to_string();
+    }
+
+    if let Some(relative) = iri.strip_prefix(base) {
+        if relative.is_empty() {
+            return "./".to_string();
+        }
+        return relative.to_string();
+    }
+
+    iri.to_string()
+}
+
+fn compact_types_with_compactor(
+    type_iris: &[String],
+    compactor: &mut ContextCompactor<'_>,
+) -> (DataType, Vec<String>) {
+    let types: Vec<String> = type_iris
+        .iter()
+        .map(|type_iri| compactor.compact(type_iri))
+        .collect();
+
+    let data_type = if types.is_empty() {
+        DataType::Term("Thing".to_string())
+    } else if types.len() == 1 {
+        DataType::Term(types[0].clone())
+    } else {
+        DataType::TermArray(types.clone())
+    };
+
+    (data_type, types)
+}
+
+fn compact_entity_value_with_compactor(
+    value: &mut EntityValue,
+    compactor: &mut ContextCompactor<'_>,
+) {
+    match value {
+        EntityValue::EntityId(id) => match id {
+            Id::Id(iri) => {
+                if !iri.starts_with("_:") {
+                    let compacted = compactor.compact(iri);
+                    if compacted == *iri && iri.starts_with("http") {
+                        log::warn!("No context mapping for IRI '{}', using raw URI", iri);
+                    }
+                    *iri = ensure_relative_prefix(&compacted);
+                }
+            }
+            Id::IdArray(iris_vec) => {
+                for iri in iris_vec.iter_mut() {
+                    if !iri.starts_with("_:") {
+                        let compacted = compactor.compact(iri);
+                        if compacted == *iri && iri.starts_with("http") {
+                            log::warn!("No context mapping for IRI '{}', using raw URI", iri);
+                        }
+                        *iri = ensure_relative_prefix(&compacted);
+                    }
+                }
+            }
+        },
+        EntityValue::EntityVec(vec) => {
+            for nested in vec.iter_mut() {
+                compact_entity_value_with_compactor(nested, compactor);
+            }
+        }
+        EntityValue::EntityObject(map) => {
+            for nested in map.values_mut() {
+                compact_entity_value_with_compactor(nested, compactor);
+            }
+        }
+        EntityValue::EntityVecObject(vec_map) => {
+            for map in vec_map.iter_mut() {
+                for nested in map.values_mut() {
+                    compact_entity_value_with_compactor(nested, compactor);
+                }
+            }
+        }
+        EntityValue::NestedDynamicEntity(nested) => {
+            compact_entity_value_with_compactor(nested, compactor);
+        }
+        _ => {}
+    }
+}
+
+fn build_properties_from_indexed_entity(
+    raw_properties: HashMap<String, Vec<EntityValue>>,
+    compactor: &mut ContextCompactor<'_>,
+) -> HashMap<String, EntityValue> {
+    raw_properties
+        .into_iter()
+        .filter_map(|(key, values)| {
+            let mut value = collapse_values(values)?;
+            compact_entity_value_with_compactor(&mut value, compactor);
+            Some((compactor.compact(&key), value))
+        })
+        .collect()
+}
+
+fn build_metadata_descriptor_from_index(
+    metadata_iri: &str,
+    root_iri: &str,
+    entity: IndexedEntity,
+    compactor: &mut ContextCompactor<'_>,
+) -> MetadataDescriptor {
+    let mut metadata_properties =
+        build_properties_from_indexed_entity(entity.properties, compactor);
+    let (metadata_type, _) = compact_types_with_compactor(&entity.type_iris, compactor);
+
+    let about = metadata_properties
+        .remove("about")
+        .and_then(|value| match value {
+            EntityValue::EntityId(id) => Some(id),
+            _ => None,
+        })
+        .unwrap_or_else(|| Id::Id(root_iri.to_string()));
+
+    let compacted_id = if metadata_iri.contains("ro-crate-metadata.json") {
+        "ro-crate-metadata.json".to_string()
+    } else {
+        compactor.compact(metadata_iri)
+    };
+
+    MetadataDescriptor {
+        id: compacted_id,
+        type_: metadata_type,
+        conforms_to: Id::Id(ROCRATE_CONTEXT_IRI.to_string()),
+        about,
+        dynamic_entity: Some(metadata_properties),
+    }
+}
+
+fn build_root_entity_from_index(
+    root_iri: &str,
+    entity: IndexedEntity,
+    compactor: &mut ContextCompactor<'_>,
+) -> RootDataEntity {
+    let mut root_properties = build_properties_from_indexed_entity(entity.properties, compactor);
+    let (root_type, _) = compact_types_with_compactor(&entity.type_iris, compactor);
+
+    let name = root_properties
+        .remove("name")
+        .and_then(|value| match value {
+            EntityValue::EntityString(name) => Some(name),
+            _ => None,
+        })
+        .unwrap_or_else(|| {
+            log::warn!(
+                "Root entity '{}' missing 'name' property (SHOULD per RO-Crate spec)",
+                root_iri
+            );
+            String::new()
+        });
+
+    let description = root_properties
+        .remove("description")
+        .and_then(|value| match value {
+            EntityValue::EntityString(description) => Some(description),
+            _ => None,
+        })
+        .unwrap_or_else(|| {
+            log::warn!(
+                "Root entity '{}' missing 'description' property (SHOULD per RO-Crate spec)",
+                root_iri
+            );
+            String::new()
+        });
+
+    let date_published = root_properties
+        .remove("datePublished")
+        .and_then(|value| match value {
+            EntityValue::EntityString(date_published) => Some(date_published),
+            _ => None,
+        })
+        .unwrap_or_else(|| {
+            log::warn!(
+                "Root entity '{}' missing 'datePublished' property (SHOULD per RO-Crate spec)",
+                root_iri
+            );
+            String::new()
+        });
+
+    let license = root_properties
+        .remove("license")
+        .map(|value| match value {
+            EntityValue::EntityId(id) => License::Id(id),
+            EntityValue::EntityString(description) => License::Description(description),
+            _ => License::Description(String::new()),
+        })
+        .unwrap_or_else(|| {
+            log::warn!(
+                "Root entity '{}' missing 'license' property (SHOULD per RO-Crate spec)",
+                root_iri
+            );
+            License::Description(String::new())
+        });
+
+    RootDataEntity {
+        id: ensure_relative_prefix(&compactor.compact(root_iri)),
+        type_: root_type,
+        name,
+        description,
+        date_published,
+        license,
+        dynamic_entity: Some(root_properties),
+    }
+}
+
+fn build_graph_entity_from_index(
+    iri: &str,
+    entity: IndexedEntity,
+    compactor: &mut ContextCompactor<'_>,
+) -> GraphVector {
+    let properties = build_properties_from_indexed_entity(entity.properties, compactor);
+    let (entity_type, type_strings) = compact_types_with_compactor(&entity.type_iris, compactor);
+    let compacted_id = ensure_relative_prefix(&compactor.compact(iri));
+
+    match classify_entity(&compacted_id, &type_strings) {
+        EntityType::Data => GraphVector::DataEntity(DataEntity {
+            id: compacted_id,
+            type_: entity_type,
+            dynamic_entity: Some(properties),
+        }),
+        EntityType::Contextual => GraphVector::ContextualEntity(ContextualEntity {
+            id: compacted_id,
+            type_: entity_type,
+            dynamic_entity: Some(properties),
+        }),
+    }
+}
+
+fn collect_reachable_entities_indexed(
+    root_iri: &str,
+    graph: &IndexedGraph,
+    context: &ResolvedContext,
+) -> HashSet<String> {
+    let mut reachable = HashSet::new();
+    let mut to_process = vec![root_iri.to_string()];
+
+    while let Some(current_iri) = to_process.pop() {
+        if !reachable.insert(current_iri.clone()) {
+            continue;
+        }
+
+        let Some(entity) = graph.entities.get(&current_iri) else {
+            continue;
+        };
+
+        for iri in &entity.outgoing_refs {
+            if reachable.contains(iri) || is_vocabulary_iri(iri, context) {
+                continue;
+            }
+
+            if graph.entities.contains_key(iri) {
+                to_process.push(iri.clone());
+            } else {
+                log::warn!(
+                    "Dangling reference '{}': referenced but not defined in the graph. \
+                     Consider adding a contextual entity for this reference.",
+                    iri
+                );
+            }
+        }
+    }
+
+    reachable
+}
+
+fn rdf_index_to_rocrate_with_context(
+    mut graph_index: IndexedGraph,
+    context: ResolvedContext,
+) -> Result<RoCrate, RdfError> {
+    let (metadata_iri, root_iri) = graph_index.find_root_entities()?;
+    let reachable_iris = collect_reachable_entities_indexed(&root_iri, &graph_index, &context);
+
+    for iri in graph_index.entities.keys() {
+        if iri != &metadata_iri && iri != &root_iri && !reachable_iris.contains(iri) {
+            log::warn!(
+                "Entity '{}' is not reachable from root and will be excluded",
+                iri
+            );
+        }
+    }
+
+    let mut compactor = ContextCompactor::new(&context);
+    let metadata_descriptor = build_metadata_descriptor_from_index(
+        &metadata_iri,
+        &root_iri,
+        graph_index.entities.remove(&metadata_iri).ok_or_else(|| {
+            RdfError::MissingRootEntities(format!(
+                "Metadata entity '{}' disappeared during indexing",
+                metadata_iri
+            ))
+        })?,
+        &mut compactor,
+    );
+    let root_entity = build_root_entity_from_index(
+        &root_iri,
+        graph_index.entities.remove(&root_iri).ok_or_else(|| {
+            RdfError::MissingRootEntities(format!(
+                "Root entity '{}' disappeared during indexing",
+                root_iri
+            ))
+        })?,
+        &mut compactor,
+    );
+
+    let mut graph = vec![
+        GraphVector::MetadataDescriptor(metadata_descriptor),
+        GraphVector::RootDataEntity(root_entity),
+    ];
+
+    for iri in reachable_iris {
+        if iri == metadata_iri || iri == root_iri {
+            continue;
+        }
+
+        if let Some(entity) = graph_index.entities.remove(&iri) {
+            graph.push(build_graph_entity_from_index(&iri, entity, &mut compactor));
+        }
+    }
+
+    Ok(RoCrate {
+        context: RoCrateContext::ReferenceContext(ROCRATE_CONTEXT_IRI.to_string()),
+        graph,
+    })
+}
 
 /// Convert an RDF Term to an EntityValue.
 ///
@@ -205,12 +712,10 @@ fn term_to_entity_value(term: &Term) -> EntityValue {
             // Check datatype FIRST before falling back to lexical heuristics
             match datatype {
                 // xsd:string - always return as string, never parse
-                dt if dt == format!("{}string", XSD_NS) => {
-                    EntityValue::EntityString(value_str.to_string())
-                }
+                XSD_STRING => EntityValue::EntityString(value_str.to_string()),
 
                 // xsd:boolean - handle "true", "false", "1", "0"
-                dt if dt == format!("{}boolean", XSD_NS) => match value_str {
+                XSD_BOOLEAN => match value_str {
                     "true" | "1" => EntityValue::EntityBool(true),
                     "false" | "0" => EntityValue::EntityBool(false),
                     _ => {
@@ -223,48 +728,40 @@ fn term_to_entity_value(term: &Term) -> EntityValue {
                 },
 
                 // xsd:integer and variants (int, long, short, byte, etc.)
-                dt if dt == format!("{}integer", XSD_NS)
-                    || dt == format!("{}int", XSD_NS)
-                    || dt == format!("{}long", XSD_NS)
-                    || dt == format!("{}short", XSD_NS)
-                    || dt == format!("{}byte", XSD_NS)
-                    || dt == format!("{}nonNegativeInteger", XSD_NS)
-                    || dt == format!("{}nonPositiveInteger", XSD_NS)
-                    || dt == format!("{}positiveInteger", XSD_NS)
-                    || dt == format!("{}negativeInteger", XSD_NS)
-                    || dt == format!("{}unsignedLong", XSD_NS)
-                    || dt == format!("{}unsignedInt", XSD_NS)
-                    || dt == format!("{}unsignedShort", XSD_NS)
-                    || dt == format!("{}unsignedByte", XSD_NS) =>
-                {
-                    value_str.parse::<i64>().map_or_else(
-                        |_| {
-                            log::warn!(
-                                "Failed to parse '{}' as integer, returning as string",
-                                value_str
-                            );
-                            EntityValue::EntityString(value_str.to_string())
-                        },
-                        EntityValue::Entityi64,
-                    )
-                }
+                XSD_INTEGER
+                | XSD_INT
+                | XSD_LONG
+                | XSD_SHORT
+                | XSD_BYTE
+                | XSD_NON_NEGATIVE_INTEGER
+                | XSD_NON_POSITIVE_INTEGER
+                | XSD_POSITIVE_INTEGER
+                | XSD_NEGATIVE_INTEGER
+                | XSD_UNSIGNED_LONG
+                | XSD_UNSIGNED_INT
+                | XSD_UNSIGNED_SHORT
+                | XSD_UNSIGNED_BYTE => value_str.parse::<i64>().map_or_else(
+                    |_| {
+                        log::warn!(
+                            "Failed to parse '{}' as integer, returning as string",
+                            value_str
+                        );
+                        EntityValue::EntityString(value_str.to_string())
+                    },
+                    EntityValue::Entityi64,
+                ),
 
                 // xsd:double, xsd:float, xsd:decimal - parse as f64
-                dt if dt == format!("{}double", XSD_NS)
-                    || dt == format!("{}float", XSD_NS)
-                    || dt == format!("{}decimal", XSD_NS) =>
-                {
-                    value_str.parse::<f64>().map_or_else(
-                        |_| {
-                            log::warn!(
-                                "Failed to parse '{}' as float, returning as string",
-                                value_str
-                            );
-                            EntityValue::EntityString(value_str.to_string())
-                        },
-                        EntityValue::Entityf64,
-                    )
-                }
+                XSD_DOUBLE | XSD_FLOAT | XSD_DECIMAL => value_str.parse::<f64>().map_or_else(
+                    |_| {
+                        log::warn!(
+                            "Failed to parse '{}' as float, returning as string",
+                            value_str
+                        );
+                        EntityValue::EntityString(value_str.to_string())
+                    },
+                    EntityValue::Entityf64,
+                ),
 
                 // Unknown datatype or plain literal - fall back to lexical heuristics
                 // Note: Plain literals in RDF 1.1 have implicit xsd:string type,
@@ -304,6 +801,7 @@ fn parse_literal_heuristically(value_str: &str) -> EntityValue {
 ///
 /// This is used internally for graph traversal where property names don't matter.
 /// For final entity building, use `extract_entity_properties_with_context` instead.
+#[cfg(test)]
 fn extract_entity_properties_simple(
     subject_iri: &str,
     triples: &[Triple],
@@ -345,6 +843,7 @@ fn extract_entity_properties_simple(
 ///
 /// Uses an explicit stack to avoid recursion. Includes vocabulary IRIs and
 /// blank nodes; callers can filter to entity subjects as needed.
+#[cfg(test)]
 fn extract_iris_from_entity_value(value: &EntityValue, iris: &mut HashSet<String>) {
     let mut stack: Vec<&EntityValue> = vec![value];
 
@@ -409,6 +908,7 @@ fn is_vocabulary_iri(iri: &str, context: &ResolvedContext) -> bool {
 /// pointing to an external resource not defined in this RO-Crate.
 ///
 /// Handles both named nodes and blank nodes (with `_:` prefix).
+#[cfg(test)]
 fn is_entity_subject(iri: &str, triples: &[Triple]) -> bool {
     triples.iter().any(|t| {
         let subject_str = match &t.subject {
@@ -439,6 +939,7 @@ fn is_entity_subject(iri: &str, triples: &[Triple]) -> bool {
 /// # Returns
 ///
 /// A HashSet of all reachable entity IRIs that exist in the graph
+#[cfg(test)]
 fn collect_reachable_entities(
     root_iri: &str,
     triples: &[Triple],
@@ -578,52 +1079,6 @@ fn infer_base_from_metadata(metadata_iri: &str) -> Option<String> {
     None
 }
 
-/// Helper function to extract types from triples for a given IRI.
-///
-/// Returns a tuple of (DataType, Vec<String>) where the Vec contains raw type strings
-/// needed for entity classification.
-fn extract_types(
-    iri: &str,
-    triples: &[Triple],
-    context: &ResolvedContext,
-) -> (DataType, Vec<String>) {
-    let rdf_type = NamedNode::new_unchecked("http://www.w3.org/1999/02/22-rdf-syntax-ns#type");
-    let mut types = Vec::new();
-
-    for triple in triples {
-        let subject_str = match &triple.subject {
-            NamedOrBlankNode::NamedNode(n) => n.as_str().to_string(),
-            NamedOrBlankNode::BlankNode(n) => format!("_:{}", n.as_str()),
-        };
-        if subject_str == iri && triple.predicate == rdf_type {
-            if let Term::NamedNode(type_node) = &triple.object {
-                let compacted_type = context.compact_iri(type_node.as_str());
-                types.push(compacted_type);
-            }
-        }
-    }
-
-    let data_type = if types.is_empty() {
-        DataType::Term("Thing".to_string())
-    } else if types.len() == 1 {
-        DataType::Term(types[0].clone())
-    } else {
-        DataType::TermArray(types.clone())
-    };
-
-    (data_type, types)
-}
-
-/// Helper function to compact entity properties using ResolvedContext.
-fn compact_entity_properties(
-    properties: &mut HashMap<String, EntityValue>,
-    context: &ResolvedContext,
-) {
-    for value in properties.values_mut() {
-        compact_entity_value_with_context(value, context);
-    }
-}
-
 /// Helper function to add "./" prefix to relative paths (for RO-Crate compliance).
 fn ensure_relative_prefix(iri: &str) -> String {
     // If it's already a relative path or an absolute URI, return as-is
@@ -644,313 +1099,12 @@ fn ensure_relative_prefix(iri: &str) -> String {
     }
 }
 
-/// Helper function to compact an EntityValue recursively using ResolvedContext.
-fn compact_entity_value_with_context(value: &mut EntityValue, context: &ResolvedContext) {
-    match value {
-        EntityValue::EntityId(id) => {
-            match id {
-                Id::Id(iri) => {
-                    // Skip blank nodes
-                    if !iri.starts_with("_:") {
-                        let compacted = context.compact_iri(iri);
-                        // Log if compaction didn't work for an HTTP IRI
-                        if compacted == *iri && iri.starts_with("http") {
-                            log::warn!("No context mapping for IRI '{}', using raw URI", iri);
-                        }
-                        // Add "./" prefix for RO-Crate relative paths
-                        *iri = ensure_relative_prefix(&compacted);
-                    }
-                }
-                Id::IdArray(iris_vec) => {
-                    for iri in iris_vec.iter_mut() {
-                        if !iri.starts_with("_:") {
-                            let compacted = context.compact_iri(iri);
-                            // Log if compaction didn't work for an HTTP IRI
-                            if compacted == *iri && iri.starts_with("http") {
-                                log::warn!("No context mapping for IRI '{}', using raw URI", iri);
-                            }
-                            // Add "./" prefix for RO-Crate relative paths
-                            *iri = ensure_relative_prefix(&compacted);
-                        }
-                    }
-                }
-            }
-        }
-        EntityValue::EntityVec(vec) => {
-            for v in vec.iter_mut() {
-                compact_entity_value_with_context(v, context);
-            }
-        }
-        EntityValue::EntityObject(map) => {
-            for v in map.values_mut() {
-                compact_entity_value_with_context(v, context);
-            }
-        }
-        EntityValue::EntityVecObject(vec_map) => {
-            for map in vec_map.iter_mut() {
-                for v in map.values_mut() {
-                    compact_entity_value_with_context(v, context);
-                }
-            }
-        }
-        EntityValue::NestedDynamicEntity(nested) => {
-            compact_entity_value_with_context(nested, context);
-        }
-        _ => {}
-    }
-}
-
-/// Helper function to extract entity properties with compacted predicate names.
-fn extract_entity_properties_with_context(
-    subject_iri: &str,
-    triples: &[Triple],
-    context: &ResolvedContext,
-) -> HashMap<String, EntityValue> {
-    let rdf_type = NamedNode::new_unchecked("http://www.w3.org/1999/02/22-rdf-syntax-ns#type");
-    let mut properties: HashMap<String, Vec<EntityValue>> = HashMap::new();
-
-    for triple in triples {
-        let subject_str = match &triple.subject {
-            NamedOrBlankNode::NamedNode(n) => n.as_str().to_string(),
-            NamedOrBlankNode::BlankNode(n) => format!("_:{}", n.as_str()),
-        };
-        if subject_str == subject_iri {
-            // Skip rdf:type as it's handled separately
-            if triple.predicate == rdf_type {
-                continue;
-            }
-
-            // Use context to compact the predicate IRI
-            let property_name = context.compact_iri(triple.predicate.as_str());
-            let value = term_to_entity_value(&triple.object);
-
-            properties.entry(property_name).or_default().push(value);
-        }
-    }
-
-    // Convert Vec<EntityValue> to EntityValue (single or array)
-    properties
-        .into_iter()
-        .filter_map(|(key, values)| match <[EntityValue; 1]>::try_from(values) {
-            Ok([single]) => Some((key, single)),
-            Err(values) if values.is_empty() => None,
-            Err(values) => Some((key, EntityValue::EntityVec(values))),
-        })
-        .collect()
-}
-
-/// Build MetadataDescriptor from triples.
-fn build_metadata_descriptor(
-    metadata_iri: &str,
-    root_iri: &str,
-    triples: &[Triple],
-    context: &ResolvedContext,
-) -> MetadataDescriptor {
-    let mut metadata_properties =
-        extract_entity_properties_with_context(metadata_iri, triples, context);
-    let (metadata_type, _) = extract_types(metadata_iri, triples, context);
-
-    // Remove 'about' from dynamic_entity as it's a required field
-    let about = metadata_properties
-        .remove("about")
-        .and_then(|v| match v {
-            EntityValue::EntityId(id) => Some(id),
-            _ => None,
-        })
-        .unwrap_or_else(|| Id::Id(root_iri.to_string()));
-
-    // Compact the metadata ID
-    let compacted_id = if metadata_iri.contains("ro-crate-metadata.json") {
-        "ro-crate-metadata.json".to_string()
-    } else {
-        context.compact_iri(metadata_iri)
-    };
-
-    // Compact properties
-    compact_entity_properties(&mut metadata_properties, context);
-
-    MetadataDescriptor {
-        id: compacted_id,
-        type_: metadata_type,
-        conforms_to: Id::Id("https://w3id.org/ro/crate/1.2/context".to_string()),
-        about,
-        dynamic_entity: Some(metadata_properties),
-    }
-}
-
-/// Build RootDataEntity from triples.
-fn build_root_entity(
-    root_iri: &str,
-    triples: &[Triple],
-    context: &ResolvedContext,
-) -> RootDataEntity {
-    let mut root_properties = extract_entity_properties_with_context(root_iri, triples, context);
-    let (root_type, _) = extract_types(root_iri, triples, context);
-
-    // Extract SHOULD fields with warnings for missing values
-    let name = root_properties
-        .remove("name")
-        .and_then(|v| match v {
-            EntityValue::EntityString(s) => Some(s),
-            _ => None,
-        })
-        .unwrap_or_else(|| {
-            log::warn!(
-                "Root entity '{}' missing 'name' property (SHOULD per RO-Crate spec)",
-                root_iri
-            );
-            String::new()
-        });
-
-    let description = root_properties
-        .remove("description")
-        .and_then(|v| match v {
-            EntityValue::EntityString(s) => Some(s),
-            _ => None,
-        })
-        .unwrap_or_else(|| {
-            log::warn!(
-                "Root entity '{}' missing 'description' property (SHOULD per RO-Crate spec)",
-                root_iri
-            );
-            String::new()
-        });
-
-    let date_published = root_properties
-        .remove("datePublished")
-        .and_then(|v| match v {
-            EntityValue::EntityString(s) => Some(s),
-            _ => None,
-        })
-        .unwrap_or_else(|| {
-            log::warn!(
-                "Root entity '{}' missing 'datePublished' property (SHOULD per RO-Crate spec)",
-                root_iri
-            );
-            String::new()
-        });
-
-    let license = root_properties
-        .remove("license")
-        .map(|v| match v {
-            EntityValue::EntityId(id) => License::Id(id),
-            EntityValue::EntityString(s) => License::Description(s),
-            _ => License::Description(String::new()),
-        })
-        .unwrap_or_else(|| {
-            log::warn!(
-                "Root entity '{}' missing 'license' property (SHOULD per RO-Crate spec)",
-                root_iri
-            );
-            License::Description(String::new())
-        });
-
-    // Compact root ID
-    let compacted_id = ensure_relative_prefix(&context.compact_iri(root_iri));
-
-    // Compact properties
-    compact_entity_properties(&mut root_properties, context);
-
-    RootDataEntity {
-        id: compacted_id,
-        type_: root_type,
-        name,
-        description,
-        date_published,
-        license,
-        dynamic_entity: Some(root_properties),
-    }
-}
-
-/// Build a DataEntity or ContextualEntity from triples.
-fn build_graph_entity(iri: &str, triples: &[Triple], context: &ResolvedContext) -> GraphVector {
-    let mut properties = extract_entity_properties_with_context(iri, triples, context);
-    let (entity_type, type_strings) = extract_types(iri, triples, context);
-
-    // Compact entity ID
-    let compacted_id = ensure_relative_prefix(&context.compact_iri(iri));
-
-    // Compact properties
-    compact_entity_properties(&mut properties, context);
-
-    // Classify entity based on types and IRI patterns
-    match classify_entity(&compacted_id, &type_strings) {
-        EntityType::Data => GraphVector::DataEntity(DataEntity {
-            id: compacted_id,
-            type_: entity_type,
-            dynamic_entity: Some(properties),
-        }),
-        EntityType::Contextual => GraphVector::ContextualEntity(ContextualEntity {
-            id: compacted_id,
-            type_: entity_type,
-            dynamic_entity: Some(properties),
-        }),
-    }
-}
-
 /// Internal implementation: Convert RDF triples to RoCrate using a ResolvedContext.
-fn rdf_to_rocrate_with_context(
-    triples: Vec<Triple>,
-    context: ResolvedContext,
-) -> Result<RoCrate, RdfError> {
-    // Find root entities
-    let (metadata_iri, root_iri) = find_root_entities(&triples)?;
-
-    // Build metadata descriptor and root entity
-    let metadata_descriptor =
-        build_metadata_descriptor(&metadata_iri, &root_iri, &triples, &context);
-    let root_entity = build_root_entity(&root_iri, &triples, &context);
-
-    // Walk the graph to collect reachable entities
-    let reachable_iris = collect_reachable_entities(&root_iri, &triples, &context);
-
-    // Find all entity IRIs in the graph (exclude metadata and root)
-    // This includes both named nodes and blank nodes
-    let mut all_iris = HashSet::new();
-    for triple in &triples {
-        let subject_iri = match &triple.subject {
-            NamedOrBlankNode::NamedNode(node) => node.as_str().to_string(),
-            NamedOrBlankNode::BlankNode(node) => format!("_:{}", node.as_str()),
-        };
-        if subject_iri != metadata_iri && subject_iri != root_iri {
-            all_iris.insert(subject_iri);
-        }
-    }
-
-    // Warn about unreferenced entities
-    for iri in &all_iris {
-        if !reachable_iris.contains(iri) {
-            log::warn!(
-                "Entity '{}' is not reachable from root and will be excluded",
-                iri
-            );
-        }
-    }
-
-    // Build graph starting with metadata and root
-    let mut graph = vec![
-        GraphVector::MetadataDescriptor(metadata_descriptor),
-        GraphVector::RootDataEntity(root_entity),
-    ];
-
-    // Build entities for each reachable IRI
-    for iri in reachable_iris {
-        // Skip metadata and root as they're already added
-        if iri == metadata_iri || iri == root_iri {
-            continue;
-        }
-
-        graph.push(build_graph_entity(&iri, &triples, &context));
-    }
-
-    // Create RoCrate with RO-Crate 1.2 default context
-    let ro_context =
-        RoCrateContext::ReferenceContext("https://w3id.org/ro/crate/1.2/context".to_string());
-
-    Ok(RoCrate {
-        context: ro_context,
-        graph,
-    })
+fn rdf_to_rocrate_with_context<I>(triples: I, context: ResolvedContext) -> Result<RoCrate, RdfError>
+where
+    I: IntoIterator<Item = Triple>,
+{
+    rdf_index_to_rocrate_with_context(IndexedGraph::from_triples(triples), context)
 }
 
 /// Convert an RdfGraph to a RoCrate structure.
@@ -979,11 +1133,8 @@ fn rdf_to_rocrate_with_context(
 /// let restored_crate = rdf_graph_to_rocrate(rdf_graph)?;
 /// ```
 pub fn rdf_graph_to_rocrate(graph: RdfGraph) -> Result<RoCrate, RdfError> {
-    // Convert HashSet<Triple> to Vec<Triple> for processing
-    let triples: Vec<Triple> = graph.triples.into_iter().collect();
-
     // Use the graph's stored context for compaction
-    rdf_to_rocrate_with_context(triples, graph.context)
+    rdf_to_rocrate_with_context(graph.triples, graph.context)
 }
 
 /// Convert RDF data to a RoCrate structure.
@@ -1014,11 +1165,10 @@ pub fn rdf_to_rocrate(
     format: RdfFormat,
     base: Option<&str>,
 ) -> Result<RoCrate, RdfError> {
-    // Parse RDF into triples
-    let triples = parse_rdf(input, format, base)?;
+    let graph_index = IndexedGraph::from_triples(parse_rdf(input, format, base)?);
 
     // Find root entities to infer base IRI
-    let (metadata_iri, _) = find_root_entities(&triples)?;
+    let (metadata_iri, _) = graph_index.find_root_entities()?;
 
     // Determine the base IRI for context resolution (None if not determinable)
     let base_iri = base
@@ -1026,8 +1176,7 @@ pub fn rdf_to_rocrate(
         .or_else(|| infer_base_from_metadata(&metadata_iri));
 
     // Create a ResolvedContext with RO-Crate 1.2 default context + base IRI
-    let ro_context =
-        RoCrateContext::ReferenceContext("https://w3id.org/ro/crate/1.2/context".to_string());
+    let ro_context = RoCrateContext::ReferenceContext(ROCRATE_CONTEXT_IRI.to_string());
 
     let resolver = ContextResolverBuilder::default();
     let mut context = resolver
@@ -1038,7 +1187,7 @@ pub fn rdf_to_rocrate(
     context.base = base_iri;
 
     // Use the internal implementation with the resolved context
-    rdf_to_rocrate_with_context(triples, context)
+    rdf_index_to_rocrate_with_context(graph_index, context)
 }
 
 #[cfg(test)]
@@ -1732,7 +1881,7 @@ mod tests {
 
     #[test]
     fn test_roundtrip_rocrate_to_rdf_to_rocrate() {
-        use crate::ro_crate::rdf::convert::{rocrate_to_rdf_with_options, ConversionOptions};
+        use crate::ro_crate::rdf::convert::{ConversionOptions, rocrate_to_rdf_with_options};
         use crate::ro_crate::rdf::resolver::ContextResolverBuilder;
 
         // Create a minimal RO-Crate
@@ -1816,7 +1965,7 @@ mod tests {
 
     #[test]
     fn test_rdf_graph_to_rocrate_uses_context() {
-        use crate::ro_crate::rdf::convert::{rocrate_to_rdf_with_options, ConversionOptions};
+        use crate::ro_crate::rdf::convert::{ConversionOptions, rocrate_to_rdf_with_options};
         use crate::ro_crate::rdf::rdf_graph_to_rocrate;
         use crate::ro_crate::rdf::resolver::ContextResolverBuilder;
 
@@ -2122,8 +2271,10 @@ mod tests {
             data_entities.contains(&"./subdir/file.txt"),
             "Entity ID 'http://example.org/subdir/file.txt' should compact to './subdir/file.txt'"
         );
-        assert!(data_entities.contains(&"./images/photo.jpg"),
-                "Entity ID 'http://example.org/images/photo.jpg' should compact to './images/photo.jpg'");
+        assert!(
+            data_entities.contains(&"./images/photo.jpg"),
+            "Entity ID 'http://example.org/images/photo.jpg' should compact to './images/photo.jpg'"
+        );
 
         // Also check that references in properties have "./" prefix
         let root = crate_obj.graph.iter().find_map(|g| {
@@ -2561,7 +2712,7 @@ mod tests {
 
     #[test]
     fn test_blank_node_roundtrip() {
-        use crate::ro_crate::rdf::convert::{rocrate_to_rdf_with_options, ConversionOptions};
+        use crate::ro_crate::rdf::convert::{ConversionOptions, rocrate_to_rdf_with_options};
         use crate::ro_crate::rdf::resolver::ContextResolverBuilder;
         use crate::ro_crate::read::read_crate_obj;
         use oxrdf::NamedOrBlankNode;

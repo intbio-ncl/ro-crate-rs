@@ -1,7 +1,7 @@
 use log::debug;
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
 use std::collections::HashMap;
+use thiserror::Error;
 use uuid::Uuid;
 
 use crate::ro_crate::schema::{self, RoCrateSchemaVersion};

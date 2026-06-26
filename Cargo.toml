@@ -21,7 +21,7 @@ chrono = { version = "0.4.41", features = ["serde"] }
 uuid = { version = "1.21.0", features = ["v4", "v7"] }
 rand = "0.10.0"
 url = "2.5"
-zip = "8.1.0"
+zip = { version = "8.1.0", default-features = false, features = ["deflate"] }
 walkdir = "2"
 reqwest = { version = "0.13.2", features = [
     "blocking",

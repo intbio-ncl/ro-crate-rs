@@ -1,8 +1,10 @@
 //! Allows RO-Crates (ro-crate-metadata.json) files to be read into the
 //! RoCrate data structure
 
+use crate::ro_crate::constraints::Id;
 use crate::ro_crate::rocrate::RoCrate;
 use crate::ro_crate::schema::load_rocrate_schema;
+use crate::ro_crate::write::is_not_url;
 use log::error;
 use log::info;
 use log::warn;
@@ -252,6 +254,8 @@ pub fn validate_crate_keys(rocrate: &RoCrate) -> ValidationResult {
                 }
             }
 
+            validation.invalid_ids = dangling_local_ids(rocrate);
+
             if validation.is_valid() {
                 ValidationResult::Valid
             } else {
@@ -260,6 +264,36 @@ pub fn validate_crate_keys(rocrate: &RoCrate) -> ValidationResult {
         }
         Err(e) => ValidationResult::Error(format!("Failed to load Ro-Crate schema: {}", e)),
     }
+}
+
+/// Returns every locally-referenced `@id` that is not defined by any entity in
+/// the graph. Absolute URLs (external vocabulary terms, schema.org, etc.) are
+/// not local references and are ignored.
+fn dangling_local_ids(rocrate: &RoCrate) -> Vec<String> {
+    let defined: HashSet<&str> = rocrate
+        .get_all_ids()
+        .into_iter()
+        .map(String::as_str)
+        .collect();
+
+    let mut dangling = Vec::new();
+    for entity in &rocrate.graph {
+        for linked in entity.get_linked_ids() {
+            let referenced = match linked {
+                Id::Id(s) => vec![s],
+                Id::IdArray(v) => v,
+            };
+            for r in referenced {
+                // Only check local references; skip external URLs.
+                if is_not_url(&r) && !defined.contains(r.as_str()) {
+                    dangling.push(r);
+                }
+            }
+        }
+    }
+    dangling.sort();
+    dangling.dedup();
+    dangling
 }
 
 pub struct CrateValidation {
@@ -437,5 +471,70 @@ mod tests {
         let crate_result = read_crate(&path, 0);
         println!("{:?}", crate_result);
         assert!(crate_result.is_ok());
+    }
+
+    #[test]
+    fn validate_crate_keys_flags_dangling_local_id() {
+        use std::collections::HashMap;
+
+        use crate::ro_crate::constraints::{DataType, EntityValue, Id, License};
+        use crate::ro_crate::contextual_entity::ContextualEntity;
+        use crate::ro_crate::metadata_descriptor::MetadataDescriptor;
+        use crate::ro_crate::rocrate::{GraphVector, RoCrate, RoCrateContext};
+        use crate::ro_crate::root::RootDataEntity;
+
+        let mut rocrate = RoCrate {
+            context: RoCrateContext::ReferenceContext(
+                "https://w3id.org/ro/crate/1.1/context".to_string(),
+            ),
+            graph: Vec::new(),
+        };
+        rocrate
+            .graph
+            .push(GraphVector::MetadataDescriptor(MetadataDescriptor {
+                id: "ro-crate-metadata.json".to_string(),
+                type_: DataType::Term("CreativeWork".to_string()),
+                conforms_to: Id::Id("https://w3id.org/ro/crate/1.1".to_string()),
+                about: Id::Id("./".to_string()),
+                dynamic_entity: None,
+            }));
+        rocrate
+            .graph
+            .push(GraphVector::RootDataEntity(RootDataEntity {
+                id: "./".to_string(),
+                type_: DataType::Term("Dataset".to_string()),
+                name: "t".to_string(),
+                description: "t".to_string(),
+                date_published: "2026-01-01".to_string(),
+                license: License::Id(Id::Id("https://spdx.org/licenses/MIT".to_string())),
+                dynamic_entity: None,
+            }));
+        // References "#ghost", which is never defined.
+        let mut props = HashMap::new();
+        props.insert(
+            "instrument".to_string(),
+            EntityValue::EntityId(Id::Id("#ghost".to_string())),
+        );
+        rocrate
+            .graph
+            .push(GraphVector::ContextualEntity(ContextualEntity {
+                id: "#run".to_string(),
+                type_: DataType::Term("CreateAction".to_string()),
+                dynamic_entity: Some(props),
+            }));
+
+        match validate_crate_keys(&rocrate) {
+            ValidationResult::Invalid(v) => assert!(
+                v.invalid_ids.contains(&"#ghost".to_string()),
+                "expected #ghost to be flagged as a dangling id, got {:?}",
+                v.invalid_ids
+            ),
+            ValidationResult::Valid => {
+                panic!("expected Invalid with dangling id, got Valid")
+            }
+            ValidationResult::Error(e) => {
+                panic!("expected Invalid with dangling id, got Error: {e}")
+            }
+        }
     }
 }

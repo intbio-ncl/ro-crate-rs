@@ -1,270 +1,318 @@
+import json
+import shutil
+import tempfile
+import unittest
+from pathlib import Path
+from uuid import UUID
+from zipfile import ZipFile
+
 from rocraters import (
     PyRoCrate,
     PyRoCrateContext,
+    prefix_object_id,
     read,
     read_object,
     read_zip,
     validate,
     validate_object,
     validate_zip,
-    zip,
+    zip as zip_crate,
 )
-import unittest
-from pathlib import Path
 
 
+FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
+MINIMAL_CRATE = FIXTURES / "_ro-crate-metadata-minimal.json"
+BROKEN_SCHEMA_CRATE = FIXTURES / "_ro-crate-metadata-broken-schema.json"
+INVALID_JSON = FIXTURES / "invalid.json"
+ZIPPED_CRATE = FIXTURES / "zip_test" / "fixtures.zip"
 
-# Test cases
-class TestApi(unittest.TestCase):
+RO_CRATE_CONTEXT = "https://w3id.org/ro/crate/1.1/context"
+REPORT_KEYS = {
+    "is_valid",
+    "invalid_keys",
+    "invalid_ids",
+    "invalid_types",
+    "error_type",
+    "error_message",
+}
 
-    @classmethod
-    def setUpClass(cls):
-        """Run once before all tests."""
-        cls.path = Path.cwd()
-        print("Setting up class resources...")
-
-        cls.metadata_fixture = {
-            "type": "CreativeWork",
-            "id": "ro-crate-metadata.json",
-            "conformsTo": {"id": "https://w3id.org/ro/crate/1.1"},
-            "about": {"id": "./"}
-        }  
-        
-        cls.root_fixture = {
-            "id": "./",
-            "identifier": "https://doi.org/10.4225/59/59672c09f4a4b",
-            "type": "Dataset",
-            "datePublished": "2017",
-            "name": "Data files associated with the manuscript:Effects of facilitated family case conferencing for ...",
-            "description": "Palliative care planning for nursing home residents with advanced dementia ...",
-            "license": {"id": "https://creativecommons.org/licenses/by-nc-sa/3.0/au/"}
-        }
-
-        cls.contextual_fixture = {
-            "id": "https://creativecommons.org/licenses/by-nc-sa/3.0/au/",
-            "type": "CreativeWork",
-            "description": "This work is licensed under the Creative Commons Attribution-NonCommercial-ShareAlike 3.0 Australia License. To view a copy of this license, visit http://creativecommons.org/licenses/by-nc-sa/3.0/au/ or send a letter to Creative Commons, PO Box 1866, Mountain View, CA 94042, USA.",
-            "identifier": "https://creativecommons.org/licenses/by-nc-sa/3.0/au/",
-            "name": "Attribution-NonCommercial-ShareAlike 3.0 Australia (CC BY-NC-SA 3.0 AU)",
-            "value": None
-        }
+EXPECTED_ROOT = {
+    "id": "./",
+    "identifier": "https://doi.org/10.4225/59/59672c09f4a4b",
+    "type": "Dataset",
+    "datePublished": "2017",
+    "name": "Data files associated with the manuscript:Effects of facilitated family case conferencing for ...",
+    "description": "Palliative care planning for nursing home residents with advanced dementia ...",
+    "license": {
+        "id": "https://creativecommons.org/licenses/by-nc-sa/3.0/au/"
+    },
+}
 
 
-
-    @classmethod
-    def tearDownClass(cls):
-        """Run once after all tests."""
-        pass
-
-    def setUp(self):
-        """Run before every test."""
-        pass
-
-    def tearDown(self):
-        """Run after every test."""
-        pass
-
-    def test_add(self):
-        """Test the add function."""
-        crate_path = self.path / Path("tests/fixtures/_ro-crate-metadata-minimal.json")
-        crate = read(str(crate_path),1)
-        self.assertTrue(bool(crate), "The result should not be empty.")
-
-    def test_context_string(self):
-        context = PyRoCrateContext.from_string("https://w3id.org/ro/crate/1.1/context")
-        # Define context
-
-    def test_empty_crate(self):
-
-        # Initialise empty crate
-        context = PyRoCrateContext.from_string("https://w3id.org/ro/crate/1.1/context")
+class TestContextAndConstruction(unittest.TestCase):
+    def test_string_context_creates_empty_crate(self):
+        context = PyRoCrateContext.from_string(RO_CRATE_CONTEXT)
         crate = PyRoCrate(context)
 
-    def test_default_crate(self):
+        self.assertEqual(crate.get_all_context(), [{"@context": RO_CRATE_CONTEXT}])
+        self.assertEqual(crate.to_list(), [])
+        self.assertIn("PyRoCrate", repr(crate))
 
-        # For an easy start, you can make a default crate!
-        default_crate = PyRoCrate.new_default()
+    def test_extended_context_lookup_and_uuid(self):
+        term_url = "https://example.test/terms/name"
+        context = PyRoCrateContext.from_list(
+            [RO_CRATE_CONTEXT, {"exampleName": term_url}]
+        )
+        crate = PyRoCrate(context)
 
+        self.assertEqual(crate.get_specific_context("exampleName"), term_url)
 
+        uuid = crate.add_urn_uuid()
 
-    def test_read_crate(self):
-        crate_path = self.path / Path("tests/fixtures/_ro-crate-metadata-minimal.json")
-        crate = read(str(crate_path), 0)
-        self.assertEqual(crate.get_entity("./"), self.root_fixture) 
-
-    def test_read_obj(self):
-        crate_path = self.path / Path("tests/fixtures/_ro-crate-metadata-minimal.json")
-        crate_object = '''{ 
-            "@context": "https://w3id.org/ro/crate/1.1/context", 
-            "@graph": [
+        self.assertEqual(UUID(uuid).version, 7)
+        self.assertEqual(crate.get_urn_uuid(), uuid)
+        self.assertEqual(
+            crate.get_all_context(),
+            [
+                {"@context": RO_CRATE_CONTEXT},
                 {
-                    "@type": "CreativeWork",
-                    "@id": "ro-crate-metadata.json",
-                    "conformsTo": {"@id": "https://w3id.org/ro/crate/1.1"},
-                    "about": {"@id": "./"}
-                },  
-                {
-                    "@id": "./",
-                    "identifier": "https://doi.org/10.4225/59/59672c09f4a4b",
-                    "@type": "Dataset",
-                    "datePublished": "2017",
-                    "name": "Data files associated with the manuscript:Effects of facilitated family case conferencing for ...",
-                    "description": "Palliative care planning for nursing home residents with advanced dementia ...",
-                    "license": {"@id": "https://creativecommons.org/licenses/by-nc-sa/3.0/au/"}
+                    "@context": {
+                        "exampleName": term_url,
+                        "@base": f"urn:uuid:{uuid}",
+                    }
                 },
-                {
-                    "@id": "https://creativecommons.org/licenses/by-nc-sa/3.0/au/",
-                    "@type": "CreativeWork",
-                    "description": "This work is licensed under the Creative Commons Attribution-NonCommercial-ShareAlike 3.0 Australia License. To view a copy of this license, visit http://creativecommons.org/licenses/by-nc-sa/3.0/au/ or send a letter to Creative Commons, PO Box 1866, Mountain View, CA 94042, USA.",
-                    "identifier": "https://creativecommons.org/licenses/by-nc-sa/3.0/au/",
-                    "name": "Attribution-NonCommercial-ShareAlike 3.0 Australia (CC BY-NC-SA 3.0 AU)",
-                    "value": None
-                }
-            ]
-        }'''
-        crate = read_object(crate_object, 0)
-        entity = crate.get_entity("https://creativecommons.org/licenses/by-nc-sa/3.0/au/")
+            ],
+        )
 
-        self.assertEqual(entity, self.contextual_fixture)
-        
-    def test_read_zip(self):
-        crate_path = self.path / Path("tests/fixtures/zip_test/fixtures.zip")
-        crate = read_zip(str(crate_path), 1)
-        root = crate.get_entity("./")
+    def test_extended_context_rejects_unsupported_items(self):
+        with self.assertRaises(ValueError):
+            PyRoCrateContext.from_list([RO_CRATE_CONTEXT, 42])
 
-        self.assertEqual(root, self.root_fixture)
-
-    def test_zip_crate(self):
-
-        # TODO: FIX
-        crate_path = self.path / Path("tests/fixtures/test_experiment/_ro-crate-metadata-minimal.json")
-        zip(str(crate_path), True, 1, False, False)
-
-        self.assertTrue(Path.exists(self.path / Path("tests/fixtures/test_experiment/test_experiment.zip")))
-
-    def test_get_context(self):
-        crate_path = self.path / Path("tests/fixtures/_ro-crate-metadata-minimal.json")
-        crate = read(str(crate_path), 0)
-
-        context = crate.get_all_context()
-
-        self.assertIsInstance(context, list)
-        self.assertEqual(len(context), 1)
-        self.assertTrue(all(isinstance(item, dict) for item in context))
-        self.assertTrue(all("@context" in item for item in context))
+    def test_default_crate_contains_required_entities(self):
+        crate = PyRoCrate.new_default()
+        entities = {entity["id"]: entity for entity in crate.to_list()}
 
         self.assertEqual(
-            context[0],
-            {"@context": "https://w3id.org/ro/crate/1.1/context"},
+            crate.get_all_context(),
+            [{"@context": "https://w3id.org/ro/crate/1.2/context"}],
         )
+        self.assertEqual(set(entities), {"ro-crate-metadata.json", "./"})
+        self.assertEqual(entities["ro-crate-metadata.json"]["type"], "CreativeWork")
+        self.assertEqual(entities["./"]["type"], "Dataset")
+        self.assertTrue(entities["./"]["name"].startswith("Default Crate:"))
 
-    def test_get_context_extended(self):
-        crate_path = self.path / Path("python/tests/fixtures/_ro-crate-metadata-minimal.json")
-        crate = read(str(crate_path), 0)
 
-        context = crate.get_all_context()
+class TestReadingAndInspection(unittest.TestCase):
+    def test_reads_equivalent_crates_from_file_object_and_zip(self):
+        crates = {
+            "file": read(str(MINIMAL_CRATE), 0),
+            "object": read_object(MINIMAL_CRATE.read_text(encoding="utf-8"), 0),
+            "zip": read_zip(str(ZIPPED_CRATE), 0),
+        }
 
-        self.assertIsInstance(context, list)
-        self.assertEqual(len(context), 2)
-        self.assertTrue(all(isinstance(item, dict) for item in context))
-        self.assertTrue(all("@context" in item for item in context))
+        for source, crate in crates.items():
+            with self.subTest(source=source):
+                self.assertEqual(crate.get_entity("./"), EXPECTED_ROOT)
+                self.assertEqual(
+                    {entity["id"] for entity in crate.to_list()},
+                    {
+                        "ro-crate-metadata.json",
+                        "./",
+                        "https://creativecommons.org/licenses/by-nc-sa/3.0/au/",
+                    },
+                )
 
-        context_values = [item["@context"] for item in context]
-        self.assertIn("https://w3id.org/ro/crate/1.1/context", context_values)
+    def test_read_reports_missing_and_malformed_inputs(self):
+        with self.assertRaises(OSError):
+            read(str(FIXTURES / "missing-ro-crate.json"), 0)
+
+        with self.assertRaises(OSError):
+            read_object("Invalid JSON", 0)
+
+    def test_get_entity_rejects_unknown_id(self):
+        crate = read(str(MINIMAL_CRATE), 0)
+
+        with self.assertRaises(ValueError):
+            crate.get_entity("#missing")
+
+
+class TestEntityLifecycle(unittest.TestCase):
+    @staticmethod
+    def new_populated_crate():
+        crate = PyRoCrate(PyRoCrateContext.from_string(RO_CRATE_CONTEXT))
+        crate.update_descriptor(
+            {
+                "id": "ro-crate-metadata.json",
+                "type": "CreativeWork",
+                "conformsTo": {"id": "https://w3id.org/ro/crate/1.1"},
+                "about": {"id": "./"},
+            }
+        )
+        crate.update_root(
+            {
+                "id": "./",
+                "type": "Dataset",
+                "name": "Test crate",
+                "description": "A crate used by the Python contract tests",
+                "datePublished": "2026-01-01",
+                "license": {"id": "https://creativecommons.org/licenses/by/4.0/"},
+                "hasPart": {"id": "data.txt"},
+            }
+        )
+        return crate
+
+    def test_add_overwrite_replace_and_delete_entities(self):
+        crate = self.new_populated_crate()
+        crate.update_data({"id": "data.txt", "type": "File", "name": "Old name"})
+        crate.update_contextual({"id": "#person", "type": "Person", "name": "Ada"})
+
+        crate.update_data({"id": "data.txt", "type": "File", "name": "New name"})
+        self.assertEqual(len(crate.to_list()), 4)
+        self.assertEqual(crate.get_entity("data.txt")["name"], "New name")
+
+        crate.replace_id("data.txt", "renamed.txt")
+        self.assertEqual(crate.get_entity("renamed.txt")["name"], "New name")
+        self.assertEqual(crate.get_entity("./")["hasPart"], {"id": "renamed.txt"})
+        with self.assertRaises(ValueError):
+            crate.get_entity("data.txt")
+
+        crate.delete_entity("#person", False)
+        with self.assertRaises(ValueError):
+            crate.get_entity("#person")
+
+    def test_prefix_object_id_changes_only_relative_entity_ids(self):
+        crate = read(str(MINIMAL_CRATE), 0)
+        object_root = "s3://example-bucket/crates/123/"
+
+        prefix_object_id(crate, object_root)
+        ids = {entity["id"] for entity in crate.to_list()}
+
+        self.assertIn(f"{object_root}ro-crate-metadata.json", ids)
+        self.assertIn(f"{object_root}./", ids)
         self.assertIn(
-            {"@base": "urn:uuid:01234567-89ab-cdef-0123-456789abcdef"},
-            context_values,
+            "https://creativecommons.org/licenses/by-nc-sa/3.0/au/", ids
         )
 
-    def test_validate_valid_crate(self):
-        crate_path = self.path / Path("tests/fixtures/_ro-crate-metadata-minimal.json")
-        report = validate(str(crate_path))
 
-        self.assertTrue(report["is_valid"])
-        self.assertEqual(report["invalid_keys"], [])
-        self.assertEqual(report["invalid_ids"], [])
-        self.assertEqual(report["invalid_types"], [])
-        self.assertIsNone(report["error_type"])
-        self.assertIsNone(report["error_message"])
+class TestPersistence(unittest.TestCase):
+    def test_write_round_trip_uses_temporary_output(self):
+        crate = PyRoCrate.new_default()
 
-    def test_validate_invalid_crate(self):
-        crate_path = self.path / Path("tests/fixtures/_ro-crate-metadata-broken-schema.json")
-        report = validate(str(crate_path))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output = Path(temp_dir) / "ro-crate-metadata.json"
+            crate.write(str(output))
 
+            self.assertTrue(output.is_file())
+            self.assertEqual(
+                {entity["id"] for entity in read(str(output), 0).to_list()},
+                {"ro-crate-metadata.json", "./"},
+            )
+
+    def test_zip_round_trip_uses_temporary_crate(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            crate_dir = Path(temp_dir) / "crate"
+            crate_dir.mkdir()
+            metadata = crate_dir / "ro-crate-metadata.json"
+            shutil.copyfile(MINIMAL_CRATE, metadata)
+
+            zip_crate(str(metadata), False, 0, False, False)
+            archive = crate_dir / "crate.zip"
+
+            self.assertTrue(archive.is_file())
+            with ZipFile(archive) as zip_file:
+                self.assertIn("ro-crate-metadata.json", zip_file.namelist())
+            self.assertEqual(read_zip(str(archive), 0).get_entity("./"), EXPECTED_ROOT)
+
+
+class TestValidation(unittest.TestCase):
+    def assert_report_shape(self, report):
+        self.assertEqual(set(report), REPORT_KEYS)
+        self.assertIsInstance(report["is_valid"], bool)
+        self.assertIsInstance(report["invalid_keys"], list)
+        self.assertIsInstance(report["invalid_ids"], list)
+        self.assertIsInstance(report["invalid_types"], list)
+
+    def test_valid_file_object_and_zip_reports(self):
+        reports = {
+            "file": validate(str(MINIMAL_CRATE)),
+            "object": validate_object(MINIMAL_CRATE.read_text(encoding="utf-8")),
+            "zip": validate_zip(str(ZIPPED_CRATE)),
+        }
+
+        for source, report in reports.items():
+            with self.subTest(source=source):
+                self.assert_report_shape(report)
+                self.assertTrue(report["is_valid"])
+                self.assertEqual(report["invalid_keys"], [])
+                self.assertEqual(report["invalid_ids"], [])
+                self.assertEqual(report["invalid_types"], [])
+                self.assertIsNone(report["error_type"])
+                self.assertIsNone(report["error_message"])
+
+    def test_invalid_schema_key_is_reported(self):
+        report = validate(str(BROKEN_SCHEMA_CRATE))
+
+        self.assert_report_shape(report)
         self.assertFalse(report["is_valid"])
         self.assertIn("nonschemakey", report["invalid_keys"])
         self.assertEqual(report["invalid_ids"], [])
-        self.assertEqual(report["invalid_types"], [])
         self.assertIsNone(report["error_type"])
-        self.assertIsNone(report["error_message"])
 
-    def test_validate_object(self):
-        crate_object = '''{
-            "@context": "https://w3id.org/ro/crate/1.1/context",
+    def test_dangling_local_id_is_reported(self):
+        crate_object = {
+            "@context": RO_CRATE_CONTEXT,
             "@graph": [
                 {
                     "@type": "CreativeWork",
                     "@id": "ro-crate-metadata.json",
                     "conformsTo": {"@id": "https://w3id.org/ro/crate/1.1"},
-                    "about": {"@id": "./"}
+                    "about": {"@id": "./"},
                 },
                 {
                     "@id": "./",
                     "@type": "Dataset",
                     "name": "Example",
                     "description": "Example",
-                    "datePublished": "2017",
-                    "license": {"@id": "https://creativecommons.org/licenses/by/4.0/"}
-                }
-            ]
-        }'''
-        report = validate_object(crate_object)
-        self.assertTrue(report["is_valid"])
-
-    def test_validate_zip(self):
-        crate_path = self.path / Path("tests/fixtures/zip_test/fixtures.zip")
-        report = validate_zip(str(crate_path))
-        self.assertTrue(report["is_valid"])
-
-    def test_to_list(self):
-        crate_path = self.path / Path("tests/fixtures/_ro-crate-metadata-minimal.json")
-        crate = read(str(crate_path), 0)
-
-        entities = crate.to_list()
-
-        self.assertIsInstance(entities, list)
-        self.assertEqual(len(entities), 3)
-
-        ids = {entity["id"] for entity in entities}
-        expected_ids = {
-            "ro-crate-metadata.json",
-            "./",
-            "https://creativecommons.org/licenses/by-nc-sa/3.0/au/",
+                    "datePublished": "2026-01-01",
+                    "license": {"@id": "https://creativecommons.org/licenses/by/4.0/"},
+                },
+                {
+                    "@id": "#run",
+                    "@type": "CreateAction",
+                    "instrument": {"@id": "#ghost"},
+                },
+            ],
         }
 
-        self.assertEqual(ids, expected_ids)
+        report = validate_object(json.dumps(crate_object))
 
-        entities_by_id = {entity["id"]: entity for entity in entities}
+        self.assert_report_shape(report)
+        self.assertFalse(report["is_valid"])
+        self.assertEqual(report["invalid_keys"], [])
+        self.assertEqual(report["invalid_ids"], ["#ghost"])
+        self.assertEqual(report["invalid_types"], [])
+        self.assertIsNone(report["error_type"])
 
-        metadata = entities_by_id["ro-crate-metadata.json"]
-        self.assertEqual(metadata["type"], self.metadata_fixture["type"])
-        self.assertEqual(metadata["conformsTo"], self.metadata_fixture["conformsTo"])
-        self.assertEqual(metadata["about"], self.metadata_fixture["about"])
+    def test_validation_returns_structured_read_errors(self):
+        reports = {
+            "invalid file": (validate(str(INVALID_JSON)), "JsonError"),
+            "missing file": (
+                validate(str(FIXTURES / "missing-ro-crate.json")),
+                "IoError",
+            ),
+            "invalid object": (validate_object("Invalid JSON"), "JsonError"),
+        }
 
-        root = entities_by_id["./"]
-        self.assertEqual(root["type"], self.root_fixture["type"])
-        self.assertEqual(root["name"], self.root_fixture["name"])
-        self.assertEqual(root["description"], self.root_fixture["description"])
-        self.assertEqual(root["datePublished"], self.root_fixture["datePublished"])
-        self.assertEqual(root["license"], self.root_fixture["license"])
-        self.assertEqual(root["identifier"], self.root_fixture["identifier"])
-
-        contextual = entities_by_id["https://creativecommons.org/licenses/by-nc-sa/3.0/au/"]
-        self.assertEqual(contextual["type"], self.contextual_fixture["type"])
-        self.assertEqual(contextual["description"], self.contextual_fixture["description"])
-        self.assertEqual(contextual["identifier"], self.contextual_fixture["identifier"])
-        self.assertEqual(contextual["name"], self.contextual_fixture["name"])
+        for source, (report, error_type) in reports.items():
+            with self.subTest(source=source):
+                self.assert_report_shape(report)
+                self.assertFalse(report["is_valid"])
+                self.assertEqual(report["invalid_keys"], [])
+                self.assertEqual(report["invalid_ids"], [])
+                self.assertEqual(report["invalid_types"], [])
+                self.assertEqual(report["error_type"], error_type)
+                self.assertTrue(report["error_message"])
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

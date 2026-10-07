@@ -178,6 +178,84 @@ crate.update_data(data_target)
 crate.write()
 ```
 
+Smaller changes can be made in place without rewriting the whole entity:
+
+```python
+crate.add_dynamic_entity_property("data_file.txt", {"contentSize": 42, "author": {"id": "#JohnDoe"}})
+crate.remove_dynamic_entity_property("data_file.txt", "contentSize")
+crate.add_type("data_file.txt", "SoftwareSourceCode")
+crate.remove_type("data_file.txt", "SoftwareSourceCode")
+crate.add_data_to_partof_root("data_file.txt")  # adds to the root's hasPart
+crate.replace_id("#JohnDoe", "#JaneDoe")         # updates every reference too
+```
+
+# Querying a RO-Crate
+
+```python
+crate.get_all_ids()                    # every entity ID
+crate.get_all_properties()             # every property key in use
+crate.get_all_property_values("name")  # [(entity id, value), ...]
+crate.get_specific_value("Jane Doe")   # [(entity id, property), ...]
+crate.get_linked_ids("./")             # IDs an entity links to
+crate.validate()                       # same report as validate()
+crate.to_json()                        # RO-Crate JSON-LD string
+```
+
+The context can be inspected and changed too:
+
+```python
+crate.get_rocrate_version()                 # "1.3"
+crate.add_context({"@base": "https://example.org/crate/"})
+crate.get_specific_context("@base")         # "https://example.org/crate/"
+crate.replace_context({"@base": "https://example.org/v2/"}, {"@base": "https://example.org/crate/"})
+crate.remove_context({"@base": "https://example.org/v2/"})
+```
+
+`crate.add_urn_uuid()` adds a `urn:uuid` `@base` and returns the UUID; `zip` and
+`write_parquet` use it to identify the crate.
+
+Crates can also be read from a URL with `read_remote(url, validation_level)` and
+validated with `validate_remote(url)`. `load_schema("1.3")` returns the bundled
+RO-Crate JSON-LD context.
+
+# Subcrates
+
+```python
+crate.get_subcrates()                               # entities that reference other crates
+crate.fetch_subcrates(recursive=True, strict=False) # fetch them, skipping any that fail
+```
+
+# RDF
+
+```python
+from rocraters import from_rdf
+
+turtle = crate.to_rdf("turtle", base="https://example.org/crate/")
+crate = from_rdf(turtle, "turtle")
+
+# Keep the crate's own context for the conversion back
+graph = crate.to_rdf_graph(base="https://example.org/crate/")
+restored = graph.to_rocrate()
+
+crate.expand_term("name")                     # "http://schema.org/name"
+crate.compact_iri("http://schema.org/name")   # "name"
+```
+
+Relative IDs need a hierarchical base IRI, so convert before adding a `urn:uuid`
+`@base`. Formats are `turtle`, `ntriples`, `nquads` and `rdfxml`. Pass
+`allow_relative=True` to keep relative IDs as they are, `allow_remote=True` to
+fetch unknown contexts, or `contexts={url: json_text}` to provide them.
+
+See [docs/parity.md](../docs/parity.md) for how every core function maps to the
+Python API and the CLI, and `rocraters.pyi` for full signatures.
+
 # Custom compilation 
 
 PyO3 is used to handle python bindings. Maturin is used as the build tool.
+
+RDF and subcrate fetching are built by default. Parquet and CSV export
+(`write_parquet`, `write_csv`) pull in polars, so they are opt-in:
+
+```bash
+maturin build --release --features parquet
+```

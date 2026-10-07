@@ -21,6 +21,17 @@ serde = { version = "1.0", features = ["derive"] }
 json_to_table = "0.12.0"
 tabled = "0.20.0"
 log = { workspace = true }
+url = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.24"
+
+[features]
+default = ["rdf", "subcrate-resolution"]
+parquet = ["ro-crate-rs/parquet"]
+rdf = ["ro-crate-rs/rdf"]
+subcrate-resolution = ["ro-crate-rs/subcrate-resolution"]
 
 [[bin]]
 name = "rocraters"  

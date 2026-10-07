@@ -143,7 +143,7 @@ class TestApi(unittest.TestCase):
         self.assertTrue(Path.exists(self.path / Path("tests/fixtures/test_experiment/test_experiment.zip")))
 
     def test_get_context(self):
-        crate_path = self.path / Path("tests/fixtures/_ro-crate-metadata-minimal.json")
+        crate_path = self.path / Path("tests/fixtures/_ro-crate-metadata-broken-schema.json")
         crate = read(str(crate_path), 0)
 
         context = crate.get_all_context()
@@ -159,7 +159,7 @@ class TestApi(unittest.TestCase):
         )
 
     def test_get_context_extended(self):
-        crate_path = self.path / Path("python/tests/fixtures/_ro-crate-metadata-minimal.json")
+        crate_path = self.path / Path("tests/fixtures/_ro-crate-metadata-minimal.json")
         crate = read(str(crate_path), 0)
 
         context = crate.get_all_context()

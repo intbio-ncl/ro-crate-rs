@@ -11,10 +11,9 @@ use constraints::{DataType, EntityValue, Id, License};
 use data_entity::DataEntity;
 use json_to_table::json_to_table;
 use log::debug;
-use read::{crate_path, read_crate};
+use read::crate_path;
 use rocraters::ro_crate::context::{ContextItem, RoCrateContext};
 use rocraters::ro_crate::graph_vector::GraphVector;
-use rocraters::ro_crate::read::parse_zip;
 use rocraters::ro_crate::rocrate::RoCrate;
 use rocraters::ro_crate::{constraints, data_entity, metadata_descriptor, read, root, write};
 use serde_json::Value as JsonValue;
@@ -23,69 +22,54 @@ use std::collections::HashMap;
 use std::io::{self, Write};
 use std::path::PathBuf;
 use tabled::settings::{object::Rows, Style, Width};
-use write::{write_crate, zip_crate};
+use write::zip_crate;
 pub mod args;
+mod commands;
+mod core_compat;
+mod crate_io;
+#[cfg(feature = "rdf")]
+mod rdf;
+
+use crate_io::{fail, load_crate, load_for_update, parse_context_item, save_crate};
 
 fn main() {
     let args = args::RoCrateArgs::parse();
 
     match args.crate_action {
         CrateAction::Init(init_command) => {
-            if init_command.minimal {
-                let mut rocrate = RoCrate::default();
-                rocrate = create_default_crate(rocrate);
-                write_crate(&rocrate, "ro-crate-metadata.json".to_string());
-                return;
-            }
-
-            if init_command.default {
-                let rocrate = RoCrate::default();
-                debug!("{:?}", rocrate);
-
-                write_crate(&rocrate, "ro-crate-metadata.json".to_string()).unwrap()
+            let mut rocrate = if !init_command.context_items.is_empty() {
+                create_rocrate_from_items(&init_command.context_items, init_command.embedded)
+            } else if init_command.default {
+                RoCrate::default()
+            } else if let Some(input) = init_command.context_type {
+                debug!("Recieved context_type {}", input);
+                create_rocrate_with_context(input)
             } else {
-                if let Some(input) = init_command.context_type {
-                    debug!("Recieved context_type {}", input);
-                    let mut rocrate = create_rocrate_with_context(input);
-                    if init_command.minimal {
-                        rocrate = create_default_crate(rocrate)
-                    }
-                    write_crate(&rocrate, "ro-crate-metadata.json".to_string()).unwrap()
-                } else {
-                    println!("What context type is required? Input number. \n1.) Reference \n2.) Extended \n3.) Embedded");
-                }
+                RoCrate::default()
+            };
+            debug!("{:?}", rocrate);
+
+            if init_command.minimal {
+                rocrate = create_default_crate(rocrate)
             }
+            save_crate(&rocrate, "ro-crate-metadata.json")
         }
         CrateAction::Add(add_command) => {
-            if add_command.target_crate.ends_with("zip") {
-                println!("Cannot update Zip");
-                return;
-            }
-
-            let mut rocrate = open_and_load_crate(&add_command.target_crate);
+            let mut rocrate = load_for_update(&add_command.target_crate);
             rocrate = add_entity(rocrate, &add_command);
 
-            write_crate(&rocrate, add_command.target_crate).unwrap()
+            save_crate(&rocrate, &add_command.target_crate)
         }
         CrateAction::Delete(delete_command) => {
-            if delete_command.target_crate.ends_with("zip") {
-                println!("Cannot update Zip");
-                return;
-            }
-
-            let mut rocrate = open_and_load_crate(&delete_command.target_crate);
+            let mut rocrate = load_for_update(&delete_command.target_crate);
 
             rocrate = delete_entity(rocrate, &delete_command);
 
-            write_crate(&rocrate, delete_command.target_crate).unwrap()
+            save_crate(&rocrate, &delete_command.target_crate)
         }
         CrateAction::Modify(modify_command) => match modify_command {
             ModifyCommand::AddIdValue(add_id_value_command) => {
-                if add_id_value_command.target_crate.ends_with("zip") {
-                    println!("Cannot update Zip");
-                    return;
-                }
-                let mut rocrate = open_and_load_crate(&add_id_value_command.target_crate);
+                let mut rocrate = load_for_update(&add_id_value_command.target_crate);
                 let mut values: HashMap<String, EntityValue> = HashMap::new();
                 values.insert(
                     add_id_value_command.key,
@@ -94,15 +78,10 @@ fn main() {
 
                 rocrate.add_dynamic_entity_property(&add_id_value_command.id, values);
 
-                write_crate(&rocrate, add_id_value_command.target_crate).unwrap()
+                save_crate(&rocrate, &add_id_value_command.target_crate)
             }
             ModifyCommand::AddIdVecValues(add_id_vec_values_command) => {
-                if add_id_vec_values_command.target_crate.ends_with("zip") {
-                    println!("Cannot update Zip");
-                    return;
-                }
-
-                let mut rocrate = open_and_load_crate(&add_id_vec_values_command.target_crate);
+                let mut rocrate = load_for_update(&add_id_vec_values_command.target_crate);
                 let mut values: HashMap<String, EntityValue> = HashMap::new();
                 let mut id_vec: Vec<String> = Vec::new();
                 for id_value in add_id_vec_values_command.values {
@@ -115,19 +94,16 @@ fn main() {
 
                 rocrate.add_dynamic_entity_property(&add_id_vec_values_command.id, values);
 
-                write_crate(&rocrate, add_id_vec_values_command.target_crate).unwrap()
+                save_crate(&rocrate, &add_id_vec_values_command.target_crate)
             }
             ModifyCommand::AddMultiple(add_multiple_command) => {
-                if add_multiple_command.target_crate.ends_with("zip") {
-                    println!("Cannot update Zip");
-                    return;
-                }
-
-                let mut rocrate = open_and_load_crate(&add_multiple_command.target_crate);
+                let mut rocrate = load_for_update(&add_multiple_command.target_crate);
                 let id = &add_multiple_command.id;
 
                 while let Some(dynamic_entity) = add_dynamic_entity() {
-                    rocrate.add_dynamic_entity_property(id, dynamic_entity);
+                    for (key, value) in dynamic_entity {
+                        core_compat::set_property(&mut rocrate, id, key, value);
+                    }
 
                     println!("Exit? (Y/n)");
                     let mut answer = String::new();
@@ -137,22 +113,24 @@ fn main() {
                     }
                 }
 
-                write_crate(&rocrate, add_multiple_command.target_crate).unwrap()
+                save_crate(&rocrate, &add_multiple_command.target_crate)
             }
             ModifyCommand::RemoveField(remove_field_command) => {
-                if remove_field_command.target_crate.ends_with("zip") {
-                    println!("Cannot update Zip");
-                    return;
-                }
-
-                let mut rocrate = open_and_load_crate(&remove_field_command.target_crate);
+                let mut rocrate = load_for_update(&remove_field_command.target_crate);
                 rocrate.remove_dynamic_entity_property(
                     &remove_field_command.id,
                     &remove_field_command.field,
                 );
 
-                write_crate(&rocrate, remove_field_command.target_crate).unwrap()
+                save_crate(&rocrate, &remove_field_command.target_crate)
             }
+            ModifyCommand::AddField(command) => commands::add_field(command),
+            ModifyCommand::AddType(command) => commands::add_type(command),
+            ModifyCommand::RemoveType(command) => commands::remove_type(command),
+            ModifyCommand::ReplaceId(command) => commands::replace_id(command),
+            ModifyCommand::AddHasPart(command) => commands::add_has_part(command),
+            ModifyCommand::Upsert(command) => commands::upsert(command),
+            ModifyCommand::PrefixIds(command) => commands::prefix_ids(command),
         },
         CrateAction::Read(read_command) => match read_command {
             ReadCommand::Zip(read_zip_command) => {
@@ -184,7 +162,10 @@ fn main() {
                 }
             }
             ReadCommand::Crate(read_crate_command) => {
-                let rocrate = open_and_load_crate(&read_crate_command.target_crate);
+                let rocrate = load_crate(
+                    &read_crate_command.target_crate,
+                    read_crate_command.validation_level,
+                );
 
                 if read_crate_command.raw_struct {
                     println!("{:#?}", rocrate);
@@ -245,6 +226,8 @@ fn main() {
                             }
                         }
                     }
+                } else {
+                    fail(format!("Entity '{}' not found", id));
                 }
             }
             ReadCommand::Fields(read_fields_command) => {
@@ -276,54 +259,52 @@ fn main() {
                     print_as_table(values, "Object ID", "Value", "Count");
                 }
             }
+            ReadCommand::Ids(command) => commands::read_ids(command),
+            ReadCommand::Properties(command) => commands::read_properties(command),
+            ReadCommand::Links(command) => commands::read_links(command),
         },
         CrateAction::Package(package_command) => match package_command {
             PackageCommand::Zip(zip_command) => {
-                let path: PathBuf;
-                if zip_command.target_crate == "./" {
-                    path = std::env::current_dir().unwrap();
-                } else {
-                    path = crate_path(zip_command.target_crate.as_str());
+                // zip_crate takes the metadata file, so a crate directory is resolved to it
+                let mut path: PathBuf = crate_path(zip_command.target_crate.as_str());
+                if path.is_dir() {
+                    path = path.join("ro-crate-metadata.json");
                 }
                 println!(
-                    "Path: {:?}, External: {:?}, Unique: {:?}, Flatted: {:?}",
+                    "Path: {:?}, External: {:?}, Flatten: {:?}, Unique: {:?}",
                     path, zip_command.external, zip_command.flatten, zip_command.unique
                 );
-                let zip = zip_crate(
+                if let Err(e) = zip_crate(
                     &path,
                     zip_command.external,
-                    1,
+                    zip_command.validation_level,
                     zip_command.flatten,
                     zip_command.unique,
-                );
-                println!("ZIP OUTPUT: {:?}", zip);
+                ) {
+                    fail(format!("Failed to zip crate: {}", e));
+                }
+                println!("Crate zipped");
             }
         },
         CrateAction::Validate(validate_command) => match validate_command {
-            ValidateCommand::Basic(basic) => {
-                let crate_name = crate_path(&basic.target_crate);
-                match read_crate(&crate_name, 2) {
-                    Ok(_rocrate) => println!("Crate Valid"),
-                    Err(e) => println!("Crate not valid: {:?}", e),
-                }
-            }
+            ValidateCommand::Basic(basic) => commands::validate(basic),
         },
+        CrateAction::Context(command) => commands::context(command),
+        CrateAction::Subcrates(command) => commands::subcrates(command),
+        CrateAction::Schema(command) => commands::schema(command),
+        #[cfg(feature = "rdf")]
+        CrateAction::Rdf(command) => rdf::rdf(command),
+        #[cfg(feature = "parquet")]
+        CrateAction::Convert(command) => commands::convert(command),
     }
 }
 
-/// Input requires target_crate file string
+/// Input requires target_crate file string, zip archive, URL or `-` for stdin
 fn open_and_load_crate(input: &str) -> RoCrate {
     if input.ends_with(".zip") {
         open_and_load_zip_crate(input, 0)
     } else {
-        let target_crate = crate_path(input);
-        match read_crate(&target_crate, 1) {
-            Ok(ro_crate) => ro_crate,
-            Err(e) => {
-                eprintln!("Error processing crate: {:?}", e);
-                std::process::exit(1)
-            }
-        }
+        load_crate(input, 1)
     }
 }
 
@@ -338,13 +319,39 @@ fn open_and_load_zip_crate(input: &str, validation_level: i8) -> RoCrate {
         std::process::exit(1)
     }
 
-    match parse_zip(input, validation_level) {
+    match core_compat::parse_zip_checked(input, validation_level) {
         Ok(ro_crate) => ro_crate,
         Err(e) => {
             eprintln!("Error processing zip crate: {:?}", e);
             std::process::exit(1)
         }
     }
+}
+
+/// Builds a crate from --context-item values: a single URL is a reference
+/// context, otherwise items form an extended (or with `embedded`, embedded) context
+fn create_rocrate_from_items(items: &[String], embedded: bool) -> RoCrate {
+    let items: Vec<ContextItem> = items.iter().map(|item| parse_context_item(item)).collect();
+
+    let context = if embedded {
+        let maps = items
+            .into_iter()
+            .map(|item| match item {
+                ContextItem::EmbeddedContext(map) => map,
+                ContextItem::ReferenceItem(reference) => fail(format!(
+                    "--embedded needs JSON object context items, got '{}'",
+                    reference
+                )),
+            })
+            .collect();
+        RoCrateContext::EmbeddedContext(maps)
+    } else if let [ContextItem::ReferenceItem(reference)] = items.as_slice() {
+        RoCrateContext::ReferenceContext(reference.clone())
+    } else {
+        RoCrateContext::ExtendedContext(items)
+    };
+
+    RoCrate::new(context, Vec::new())
 }
 
 fn create_rocrate_with_context(context_type: ContextType) -> RoCrate {
@@ -748,8 +755,10 @@ fn search_and_print_recursive(
                         );
                     }
                 }
-                // Recursively search the object
-                search_and_print_recursive(value, search_value, occurrences, location);
+                // Scalars were compared above, so only descend into nested values
+                if value.is_object() || value.is_array() {
+                    search_and_print_recursive(value, search_value, occurrences, location);
+                }
             }
         }
         JsonValue::Array(arr) => {

@@ -55,6 +55,9 @@ full python implementation.
 2. [rocraters python bindings](python/README_py.md)
 3. [cli tool](cli/README.md)
 
+The CLI and Python bindings expose the whole core API; see
+[docs/parity.md](docs/parity.md) for the mapping.
+
 # Compatability 
 
 RO-Crate v1.1, v1.2 and v1.3

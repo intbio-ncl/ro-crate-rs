@@ -2943,6 +2943,7 @@ dependencies = [
  "tempfile",
  "url",
  "uuid",
+ "zip",
 ]
 
 [[package]]

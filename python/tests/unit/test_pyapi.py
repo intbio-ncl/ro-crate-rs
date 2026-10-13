@@ -9,7 +9,10 @@ from rocraters import (
     validate_zip,
     zip,
 )
+import shutil
+import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 
@@ -135,12 +138,36 @@ class TestApi(unittest.TestCase):
         self.assertEqual(root, self.root_fixture)
 
     def test_zip_crate(self):
+        fixtures = self.path / Path("tests/fixtures")
+        with tempfile.TemporaryDirectory() as tmp:
+            # Zipping rewrites the metadata file, so work on a copy of the fixture
+            crate_dir = Path(tmp) / "test_experiment"
+            shutil.copytree(fixtures / "test_experiment", crate_dir)
+            shutil.copy(fixtures / "external.txt", tmp)
+            zip(str(crate_dir / "_ro-crate-metadata-minimal.json"), True, 1, False, False)
 
-        # TODO: FIX
-        crate_path = self.path / Path("tests/fixtures/test_experiment/_ro-crate-metadata-minimal.json")
-        zip(str(crate_path), True, 1, False, False)
+            with zipfile.ZipFile(crate_dir / "test_experiment.zip") as archive:
+                names = archive.namelist()
+            self.assertIn("data.csv", names)
+            self.assertIn("external/external.txt", names)
 
-        self.assertTrue(Path.exists(self.path / Path("tests/fixtures/test_experiment/test_experiment.zip")))
+    def test_zip_crate_include_hidden(self):
+        fixtures = self.path / Path("tests/fixtures")
+        with tempfile.TemporaryDirectory() as tmp:
+            crate_dir = Path(tmp) / "test_experiment"
+            shutil.copytree(fixtures / "test_experiment", crate_dir)
+            (crate_dir / ".zenodo.json").write_text("{}")
+            (crate_dir / ".env").write_text("SECRET=1")
+            crate_path = str(crate_dir / "_ro-crate-metadata-minimal.json")
+
+            with self.assertRaises(OSError):
+                zip(crate_path, False, 1, False, False, include_hidden=[".missing"])
+
+            zip(crate_path, False, 1, False, False, include_hidden=[Path(".zenodo.json")])
+            with zipfile.ZipFile(crate_dir / "test_experiment.zip") as archive:
+                names = archive.namelist()
+            self.assertIn(".zenodo.json", names)
+            self.assertNotIn(".env", names)
 
     def test_get_context(self):
         crate_path = self.path / Path("tests/fixtures/_ro-crate-metadata-broken-schema.json")

@@ -18,7 +18,7 @@ need a metadata file. In Python, `crate` is a `PyRoCrate`.
 | `read::load_remote` | `read crate -t URL` | `read_remote(url, level)` |
 | `write::write_crate` | written by every changing command | `crate.write(path)` |
 | `Serialize for RoCrate` | `read crate --json` | `crate.to_json(pretty)` |
-| `write::zip_crate` | `package zip [-e BOOL] [-f] [-u] [-l LEVEL]` | `zip(path, external, level, flatten, unique)` |
+| `write::zip_crate` | `package zip [-e BOOL] [-f] [-u] [-l LEVEL] [-i PATH]...` | `zip(path, external, level, flatten, unique, include_hidden=None)` |
 | `object_storage::relative_to_object_store` | `modify prefix-ids ROOT` | `prefix_object_id(crate, root)` |
 
 ## Validation and schema

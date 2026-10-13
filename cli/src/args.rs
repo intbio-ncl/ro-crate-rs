@@ -5,6 +5,7 @@
 #[cfg(feature = "rdf")]
 use clap::ValueEnum;
 use clap::{ArgAction, Args, Parser, Subcommand};
+use std::path::PathBuf;
 use std::str::FromStr;
 
 #[derive(Debug, Parser)]
@@ -319,9 +320,14 @@ pub struct ZipCrateCommand {
     /// Target crate directory or metadata file
     #[clap(short,long,default_value_t=String::from("./"))]
     pub target_crate: String,
-    /// Copy and include external reachable data files (`--external false` to disable)
-    #[clap(short, long, default_value_t = true, num_args = 0..=1, default_missing_value = "true", action = ArgAction::Set)]
+    /// Also copy data files the crate references outside its directory. Only use on
+    /// crates you trust: a crate can reference any local path
+    #[clap(short, long, default_value_t = false, num_args = 0..=1, default_missing_value = "true", action = ArgAction::Set)]
     pub external: bool,
+    /// Hidden file or folder to package anyway, relative to the crate directory.
+    /// Repeat for multiple paths; a folder is included with everything inside it
+    #[clap(short = 'i', long = "include-hidden", value_name = "PATH")]
+    pub include_hidden: Vec<PathBuf>,
     /// Flatten contents to remove folder stucture in zip
     #[clap(short, long, default_value_t = false)]
     pub flatten: bool,

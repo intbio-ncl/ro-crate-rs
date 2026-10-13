@@ -34,9 +34,7 @@ use pyo3::{
     Py, PyAny,
 };
 use std::collections::HashMap;
-use std::path::Path;
-#[cfg(feature = "parquet")]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Maps a schema version onto its "major.minor" string
 fn schema_version_to_str(version: RoCrateSchemaVersion) -> Option<&'static str> {
@@ -1091,20 +1089,31 @@ fn prefix_object_id(rocrate: &mut PyRoCrate, object_root: &str) {
 /// strict).
 /// * `flatten` - If true, flattens the directory structure inside the ZIP.
 /// * `unique` - If true, ensures unique file names within the ZIP.
+/// * `include_hidden` - Hidden files or folders to package anyway, relative to the crate
+///   directory.
 ///
 /// # Errors
 /// Raises an `IOError` if the crate cannot be read or the archive written.
 #[pyfunction]
+#[pyo3(signature = (crate_path, external, validation_level, flatten, unique, include_hidden = None))]
 fn zip(
     crate_path: &str,
     external: bool,
     validation_level: i8,
     flatten: bool,
     unique: bool,
+    include_hidden: Option<Vec<PathBuf>>,
 ) -> PyResult<()> {
     let path = Path::new(crate_path).to_path_buf();
-    rs_zip_crate(&path, external, validation_level, flatten, unique)
-        .map_err(|e| PyIOError::new_err(format!("Failed to zip crate: {e}")))
+    rs_zip_crate(
+        &path,
+        external,
+        validation_level,
+        flatten,
+        unique,
+        &include_hidden.unwrap_or_default(),
+    )
+    .map_err(|e| PyIOError::new_err(format!("Failed to zip crate: {e}")))
 }
 
 impl Default for PyRoCrate {

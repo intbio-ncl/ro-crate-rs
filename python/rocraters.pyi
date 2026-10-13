@@ -9,6 +9,7 @@ Some functions depend on cargo features the wheel was built with: RDF
 tabular export (`parquet`) is opt-in.
 """
 
+import os
 from typing import Any, Literal, Optional, TypedDict, Union
 
 ContextItem = Union[str, dict[str, str]]
@@ -322,16 +323,25 @@ def load_schema(version: SpecVersion = "1.3") -> dict[str, Any]:
     """Returns the bundled RO-Crate JSON-LD context document for a version"""
 
 def zip(
-    crate_path: str, external: bool, validation_level: int, flatten: bool, unique: bool
+    crate_path: str,
+    external: bool,
+    validation_level: int,
+    flatten: bool,
+    unique: bool,
+    include_hidden: Optional[list[Union[str, os.PathLike[str]]]] = None,
 ) -> None:
     """
     Zips a crate directory next to its ro-crate-metadata.json.
 
     :param crate_path: path to the ro-crate-metadata.json file
-    :param external: copy externally referenced files into an external/ folder
+    :param external: copy externally referenced files into an external/ folder.
+        A crate can reference any local path, so only enable for crates you trust
     :param flatten: drop the directory structure inside the zip
     :param unique: name the zip after the crate's urn:uuid
-    :raises OSError: if the crate cannot be read or the zip written
+    :param include_hidden: hidden files or folders to package anyway, relative to the
+        crate directory. A folder is included with everything inside it
+    :raises OSError: if the crate cannot be read, an include_hidden path is not inside
+        the crate directory, or the zip written
     """
 
 def prefix_object_id(rocrate: PyRoCrate, object_root: str) -> None:

@@ -280,6 +280,7 @@ fn main() {
                     zip_command.validation_level,
                     zip_command.flatten,
                     zip_command.unique,
+                    &zip_command.include_hidden,
                 ) {
                     fail(format!("Failed to zip crate: {}", e));
                 }

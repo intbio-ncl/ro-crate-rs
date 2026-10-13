@@ -147,6 +147,15 @@ from rocraters import zip
 zip("ro-crate-metadata.json", True, 1, False, True)
 ```
 
+A crate can reference any local path, so only pull in external files for crates
+you trust. Hidden files and symbolic links in the crate directory are skipped.
+To package specific hidden files or folders anyway, list them relative to the
+crate directory:
+
+```python
+zip("ro-crate-metadata.json", False, 1, False, False, include_hidden=[".github", ".zenodo.json"])
+```
+
 # Modifying a RO-Crate 
 
 As per the libraries purpose, modification, ie the deletion, update and addition of entites is intended to be as simple as possible, whilst ensuring minimal conformance:

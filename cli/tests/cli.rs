@@ -1347,11 +1347,46 @@ mod package {
     }
 
     #[test]
-    fn zip_external_can_be_disabled() {
-        let dir = example_dir();
-        ok(dir.path(), &["package", "zip", "--external", "false"]);
-        ok(dir.path(), &["package", "zip", "-e"]);
-        err(dir.path(), &["package", "zip", "-t", "missing"]);
+    fn zip_external_is_opt_in() {
+        let parent = tempfile::tempdir().unwrap();
+        let d = parent.path().join("mycrate");
+        fs::create_dir(&d).unwrap();
+        fs::write(parent.path().join("outside.txt"), "x").unwrap();
+        let mut crate_ = crate_json();
+        crate_["@graph"][2]["@id"] = json!("../outside.txt");
+        write_json(&d.join("ro-crate-metadata.json"), &crate_);
+
+        ok(&d, &["package", "zip"]);
+        let ids = ok(&d, &["read", "ids", "-t", "mycrate.zip"]);
+        assert!(lines(&ids).contains(&"../outside.txt"));
+
+        ok(&d, &["package", "zip", "-e"]);
+        let ids = ok(&d, &["read", "ids", "-t", "mycrate.zip"]);
+        assert!(lines(&ids).contains(&"external/outside.txt"));
+
+        ok(&d, &["package", "zip", "--external", "false"]);
+        err(&d, &["package", "zip", "-t", "missing"]);
+    }
+
+    #[test]
+    fn zip_include_hidden() {
+        let parent = tempfile::tempdir().unwrap();
+        let d = parent.path().join("mycrate");
+        fs::create_dir_all(d.join(".config")).unwrap();
+        write_json(&d.join("ro-crate-metadata.json"), &crate_json());
+        fs::write(d.join(".config").join("settings.toml"), "x").unwrap();
+        fs::write(d.join(".zenodo.json"), "{}").unwrap();
+        fs::write(d.join(".env"), "SECRET=1").unwrap();
+
+        let args = ["package", "zip", "-i", ".zenodo.json", "--include-hidden", ".config"];
+        ok(&d, &args);
+        let archive = zip::ZipArchive::new(fs::File::open(d.join("mycrate.zip")).unwrap()).unwrap();
+        let names: Vec<&str> = archive.file_names().collect();
+        assert!(names.contains(&".zenodo.json"));
+        assert!(names.contains(&".config/settings.toml"));
+        assert!(!names.contains(&".env"));
+
+        err(&d, &["package", "zip", "-i", ".missing"]);
     }
 }
 

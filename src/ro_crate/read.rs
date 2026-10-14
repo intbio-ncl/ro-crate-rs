@@ -1,7 +1,8 @@
 //! Allows RO-Crates (ro-crate-metadata.json) files to be read into the
 //! RoCrate data structure
 
-use crate::ro_crate::constraints::Id;
+use crate::ro_crate::constraints::{DataType, Id};
+use crate::ro_crate::graph_vector::GraphVector;
 use crate::ro_crate::rocrate::RoCrate;
 use crate::ro_crate::schema::load_rocrate_schema;
 use crate::ro_crate::write::is_not_url;
@@ -277,6 +278,57 @@ pub fn validate_crate_keys(rocrate: &RoCrate) -> ValidationResult {
 
             validation.invalid_ids = dangling_local_ids(rocrate);
 
+            let descriptor = rocrate.graph.iter().find_map(|entity| match entity {
+                GraphVector::MetadataDescriptor(metadata)
+                    if metadata.id == "ro-crate-metadata.json" =>
+                {
+                    Some(metadata)
+                }
+                _ => None,
+            });
+            match descriptor {
+                Some(metadata) => {
+                    let root_id = match &metadata.about {
+                        Id::Id(id) => Some(id.as_str()),
+                        Id::IdArray(_) => None,
+                    };
+                    if !root_id.is_some_and(|id| {
+                        rocrate.graph.iter().any(|entity| {
+                            matches!(entity, GraphVector::RootDataEntity(root) if root.id == id)
+                        })
+                    }) {
+                        validation
+                            .invalid_ids
+                            .push(root_id.unwrap_or("metadata descriptor about").to_string());
+                    }
+                }
+                None => validation
+                    .invalid_ids
+                    .push("ro-crate-metadata.json".to_string()),
+            }
+
+            for entity in &rocrate.graph {
+                let data_type = match entity {
+                    GraphVector::MetadataDescriptor(item) => &item.type_,
+                    GraphVector::RootDataEntity(item) => &item.type_,
+                    GraphVector::DataEntity(item) => &item.type_,
+                    GraphVector::ContextualEntity(item) => &item.type_,
+                };
+                let terms = match data_type {
+                    DataType::Term(term) => vec![term.as_str()],
+                    DataType::TermArray(terms) => terms.iter().map(String::as_str).collect(),
+                };
+                for term in terms {
+                    if !set1.contains(term) && !set2.contains(term) && is_not_url(term) {
+                        validation
+                            .invalid_types
+                            .push(format!("{}: {term}", entity.get_id()));
+                    }
+                }
+            }
+            validation.invalid_ids.sort();
+            validation.invalid_ids.dedup();
+
             if validation.is_valid() {
                 ValidationResult::Valid
             } else {
@@ -417,6 +469,42 @@ mod tests {
 
         let crate_result = read_crate(&path, 2);
         assert!(crate_result.is_ok());
+    }
+
+    #[test]
+    fn strict_validation_rejects_missing_required_entities() {
+        let empty = r#"{"@context":"https://w3id.org/ro/crate/1.1/context","@graph":[]}"#;
+        assert!(matches!(
+            read_crate_obj(empty, 2),
+            Err(CrateReadError::VocabNotValid(_))
+        ));
+
+        let mut fixture: serde_json::Value = serde_json::from_slice(
+            &fs::read(fixture_path("_ro-crate-metadata-minimal.json")).unwrap(),
+        )
+        .unwrap();
+        fixture["@graph"].as_array_mut().unwrap().remove(1);
+        assert!(matches!(
+            read_crate_obj(&fixture.to_string(), 2),
+            Err(CrateReadError::VocabNotValid(_))
+        ));
+    }
+
+    #[test]
+    fn strict_validation_reports_unknown_type() {
+        let mut fixture: serde_json::Value = serde_json::from_slice(
+            &fs::read(fixture_path("_ro-crate-metadata-minimal.json")).unwrap(),
+        )
+        .unwrap();
+        fixture["@graph"][2]["@type"] = serde_json::json!("UnknownUnmappedType");
+        let crate_data: RoCrate = serde_json::from_value(fixture).unwrap();
+        match validate_crate_keys(&crate_data) {
+            ValidationResult::Invalid(validation) => assert!(validation
+                .invalid_types
+                .iter()
+                .any(|item| item.contains("UnknownUnmappedType"))),
+            _ => panic!("unknown type should be invalid"),
+        }
     }
 
     #[test]

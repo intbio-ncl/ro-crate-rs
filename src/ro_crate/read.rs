@@ -18,6 +18,7 @@ use thiserror::Error;
 use zip::ZipArchive;
 
 pub(crate) const MAX_METADATA_BYTES: usize = 16 * 1024 * 1024;
+#[cfg(feature = "subcrate-resolution")]
 pub(crate) const MAX_ARCHIVE_BYTES: usize = 128 * 1024 * 1024;
 #[cfg(feature = "rdf")]
 pub(crate) const MAX_CONTEXT_BYTES: usize = 2 * 1024 * 1024;

@@ -199,9 +199,10 @@ pub enum EntityValue {
     EntityVecf64(Vec<f64>),
     EntityLicense(License),
     EntityDataType(DataType),
-    // Option to capture nulls before nesting
-    EntityNull(Option<bool>),
     EntityBool(bool),
+    // Serde tries untagged variants in order. A bool must be matched before
+    // Option<bool>, which also accepts non-null booleans.
+    EntityNull(Option<bool>),
     EntityNone(Option<String>),
     EntityVec(Vec<EntityValue>),
     EntityObject(HashMap<String, EntityValue>),
@@ -360,6 +361,16 @@ mod tests {
             EntityValue::EntityBool(value) => assert!(value),
             _ => panic!("EntityBool variant expected"),
         }
+    }
+
+    #[test]
+    fn deserialized_booleans_keep_the_boolean_variant() {
+        for (json, expected) in [("true", true), ("false", false)] {
+            let value: EntityValue = serde_json::from_str(json).unwrap();
+            assert_eq!(value, EntityValue::EntityBool(expected));
+        }
+        let null: EntityValue = serde_json::from_str("null").unwrap();
+        assert_eq!(null, EntityValue::EntityNull(None));
     }
 
     #[test]

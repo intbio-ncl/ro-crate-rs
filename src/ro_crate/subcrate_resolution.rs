@@ -6,7 +6,7 @@ use log::warn;
 use reqwest::blocking::Response;
 use reqwest::header::{HeaderMap, ToStrError};
 use sha2::Digest;
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::io::Read;
 use std::string::FromUtf8Error;
 use zip::result::ZipError;
@@ -24,6 +24,7 @@ pub enum FetchError {
     BagItError(String),
     FromUTF8Error(FromUtf8Error),
     RegexError(regex::Error),
+    TraversalLimit(String),
 }
 
 impl std::fmt::Display for FetchError {
@@ -59,6 +60,7 @@ impl std::fmt::Display for FetchError {
             FetchError::RegexError(err) => {
                 write!(f, "RegexError `{}`", err)
             }
+            FetchError::TraversalLimit(reason) => write!(f, "Subcrate traversal limit: {reason}"),
         }
     }
 }
@@ -103,38 +105,85 @@ impl From<regex::Error> for FetchError {
 
 /// Fails when a subcrate cannot be resolved
 pub fn fetch_subcrates_recursive(rocrate: &RoCrate) -> Result<Vec<RoCrate>, FetchError> {
-    let mut flattened = Vec::new();
-    let mut queue = fetch_subcrates(rocrate)?
-        .into_iter()
-        .collect::<VecDeque<RoCrate>>();
-
-    while let Some(subcrate) = queue.pop_front() {
-        let subsubcrates = fetch_subcrates(&subcrate)?;
-        for sub in subsubcrates {
-            queue.push_back(sub);
-        }
-        flattened.push(subcrate);
-    }
-
-    Ok(flattened)
+    walk_subcrates(rocrate, true)
 }
 
 /// Does not fail when a subcrate cannot be resolved
 pub fn try_fetch_subcrates_recursive(rocrate: &RoCrate) -> Vec<RoCrate> {
+    walk_subcrates(rocrate, false).expect("lenient subcrate traversal cannot fail")
+}
+
+const MAX_SUBCRATES: usize = 256;
+const MAX_SUBCRATE_DEPTH: usize = 16;
+
+fn walk_subcrates(rocrate: &RoCrate, strict: bool) -> Result<Vec<RoCrate>, FetchError> {
     let mut flattened = Vec::new();
-    let mut queue = try_fetch_subcrates(rocrate)
+    let mut seen = HashSet::new();
+    let mut queue = subcrate_ids(rocrate)
         .into_iter()
-        .collect::<VecDeque<RoCrate>>();
+        .map(|id| (id, 1))
+        .collect::<VecDeque<_>>();
 
-    while let Some(subcrate) = queue.pop_front() {
-        let subsubcrates = try_fetch_subcrates(&subcrate);
-        for sub in subsubcrates {
-            queue.push_back(sub);
+    while let Some((id, depth)) = queue.pop_front() {
+        let key = normalize_subcrate_id(&id);
+        if !seen.insert(key) {
+            continue;
         }
-        flattened.push(subcrate);
-    }
+        if seen.len() > MAX_SUBCRATES || depth > MAX_SUBCRATE_DEPTH {
+            let reason = format!(
+                "at most {MAX_SUBCRATES} distinct subcrates and {MAX_SUBCRATE_DEPTH} levels"
+            );
+            if strict {
+                return Err(FetchError::TraversalLimit(reason));
+            }
+            warn!("{reason}");
+            break;
+        }
 
-    flattened
+        let subcrate = if is_not_url(&id) {
+            try_resolve_local(&id)
+        } else {
+            try_resolve_remote(&id)
+        };
+        match subcrate {
+            Ok(subcrate) => {
+                queue.extend(
+                    subcrate_ids(&subcrate)
+                        .into_iter()
+                        .map(|id| (id, depth + 1)),
+                );
+                flattened.push(subcrate);
+            }
+            Err(err) if strict => return Err(err),
+            Err(err) => warn!("{err}"),
+        }
+    }
+    Ok(flattened)
+}
+
+fn normalize_subcrate_id(id: &str) -> String {
+    if is_not_url(id) {
+        let path = local_subcrate_path(id);
+        path.canonicalize()
+            .unwrap_or(path)
+            .to_string_lossy()
+            .to_string()
+    } else {
+        url::Url::parse(id)
+            .map(|url| url.to_string())
+            .unwrap_or_else(|_| id.to_string())
+    }
+}
+
+fn subcrate_ids(rocrate: &RoCrate) -> Vec<String> {
+    rocrate
+        .get_subcrates()
+        .into_iter()
+        .filter_map(|entity| match entity {
+            crate::ro_crate::graph_vector::GraphVector::DataEntity(data) => Some(get_id(data)),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Fails when a subcrate cannot be resolved
@@ -200,17 +249,21 @@ pub fn try_fetch_subcrates(rocrate: &RoCrate) -> Vec<RoCrate> {
 }
 
 fn try_resolve_local(id: &str) -> Result<RoCrate, FetchError> {
-    let path = if id.ends_with('/') {
-        format!("{id}ro-crate-metadata.json")
-    } else {
-        id.to_string()
-    };
+    let path = local_subcrate_path(id);
 
     let mut file = std::fs::File::open(path)?;
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer)?;
 
     Ok(serde_json::from_slice(buffer.as_slice())?)
+}
+
+fn local_subcrate_path(id: &str) -> std::path::PathBuf {
+    if id.ends_with('/') {
+        std::path::PathBuf::from(id).join("ro-crate-metadata.json")
+    } else {
+        std::path::PathBuf::from(id)
+    }
 }
 
 fn try_direct_resolve_or_zip(response: Response) -> Result<RoCrate, FetchError> {
@@ -499,6 +552,72 @@ mod subcrate_tests {
     use crate::ro_crate::data_entity::DataEntity;
     use crate::ro_crate::modify::DynamicEntityManipulation;
     use std::collections::HashMap;
+
+    #[test]
+    fn recursive_fetch_stops_at_self_referential_subcrate() {
+        let directory = tempfile::tempdir().unwrap();
+        let metadata_path = directory.path().join("ro-crate-metadata.json");
+        let crate_json = serde_json::json!({
+            "@context": "https://w3id.org/ro/crate/1.1/context",
+            "@graph": [
+                {
+                    "@id": "ro-crate-metadata.json",
+                    "@type": "CreativeWork",
+                    "conformsTo": {"@id": "https://w3id.org/ro/crate/1.1"},
+                    "about": {"@id": "./"}
+                },
+                {
+                    "@id": metadata_path.to_string_lossy(),
+                    "@type": "Dataset",
+                    "conformsTo": {"@id": "https://w3id.org/ro/crate/1.1"}
+                }
+            ]
+        });
+        std::fs::write(&metadata_path, crate_json.to_string()).unwrap();
+        let root: RoCrate = serde_json::from_value(crate_json).unwrap();
+
+        assert_eq!(fetch_subcrates_recursive(&root).unwrap().len(), 1);
+        assert_eq!(try_fetch_subcrates_recursive(&root).len(), 1);
+    }
+
+    #[test]
+    fn recursive_fetch_enforces_depth_limit() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths: Vec<_> = (0..=MAX_SUBCRATE_DEPTH + 1)
+            .map(|index| directory.path().join(format!("crate-{index}.json")))
+            .collect();
+
+        for (index, path) in paths.iter().enumerate() {
+            let mut graph = vec![serde_json::json!({
+                "@id": "ro-crate-metadata.json",
+                "@type": "CreativeWork",
+                "conformsTo": {"@id": "https://w3id.org/ro/crate/1.1"},
+                "about": {"@id": "./"}
+            })];
+            if let Some(next) = paths.get(index + 1) {
+                graph.push(serde_json::json!({
+                    "@id": next.to_string_lossy(),
+                    "@type": "Dataset",
+                    "conformsTo": {"@id": "https://w3id.org/ro/crate/1.1"}
+                }));
+            }
+            let metadata = serde_json::json!({
+                "@context": "https://w3id.org/ro/crate/1.1/context",
+                "@graph": graph
+            });
+            std::fs::write(path, metadata.to_string()).unwrap();
+        }
+
+        let root: RoCrate = serde_json::from_slice(&std::fs::read(&paths[0]).unwrap()).unwrap();
+        assert!(matches!(
+            fetch_subcrates_recursive(&root),
+            Err(FetchError::TraversalLimit(_))
+        ));
+        assert_eq!(
+            try_fetch_subcrates_recursive(&root).len(),
+            MAX_SUBCRATE_DEPTH
+        );
+    }
 
     #[test]
     fn bagit_with_bad_manifest_is_rejected() {

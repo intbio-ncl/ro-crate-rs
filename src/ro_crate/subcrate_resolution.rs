@@ -25,6 +25,7 @@ pub enum FetchError {
     FromUTF8Error(FromUtf8Error),
     RegexError(regex::Error),
     TraversalLimit(String),
+    RemoteAccessDisabled(String),
 }
 
 impl std::fmt::Display for FetchError {
@@ -61,6 +62,9 @@ impl std::fmt::Display for FetchError {
                 write!(f, "RegexError `{}`", err)
             }
             FetchError::TraversalLimit(reason) => write!(f, "Subcrate traversal limit: {reason}"),
+            FetchError::RemoteAccessDisabled(id) => {
+                write!(f, "Remote subcrate access is disabled for {id}")
+            }
         }
     }
 }
@@ -103,20 +107,45 @@ impl From<regex::Error> for FetchError {
     }
 }
 
+/// Network access is disabled by default because subcrate locators are supplied
+/// by crate metadata. Callers processing trusted remote references can opt in.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FetchOptions {
+    pub allow_remote: bool,
+}
+
 /// Fails when a subcrate cannot be resolved
 pub fn fetch_subcrates_recursive(rocrate: &RoCrate) -> Result<Vec<RoCrate>, FetchError> {
-    walk_subcrates(rocrate, true)
+    fetch_subcrates_recursive_with_options(rocrate, FetchOptions::default())
+}
+
+pub fn fetch_subcrates_recursive_with_options(
+    rocrate: &RoCrate,
+    options: FetchOptions,
+) -> Result<Vec<RoCrate>, FetchError> {
+    walk_subcrates(rocrate, true, options)
 }
 
 /// Does not fail when a subcrate cannot be resolved
 pub fn try_fetch_subcrates_recursive(rocrate: &RoCrate) -> Vec<RoCrate> {
-    walk_subcrates(rocrate, false).expect("lenient subcrate traversal cannot fail")
+    try_fetch_subcrates_recursive_with_options(rocrate, FetchOptions::default())
+}
+
+pub fn try_fetch_subcrates_recursive_with_options(
+    rocrate: &RoCrate,
+    options: FetchOptions,
+) -> Vec<RoCrate> {
+    walk_subcrates(rocrate, false, options).expect("lenient subcrate traversal cannot fail")
 }
 
 const MAX_SUBCRATES: usize = 256;
 const MAX_SUBCRATE_DEPTH: usize = 16;
 
-fn walk_subcrates(rocrate: &RoCrate, strict: bool) -> Result<Vec<RoCrate>, FetchError> {
+fn walk_subcrates(
+    rocrate: &RoCrate,
+    strict: bool,
+    options: FetchOptions,
+) -> Result<Vec<RoCrate>, FetchError> {
     let mut flattened = Vec::new();
     let mut seen = HashSet::new();
     let mut queue = subcrate_ids(rocrate)
@@ -140,11 +169,7 @@ fn walk_subcrates(rocrate: &RoCrate, strict: bool) -> Result<Vec<RoCrate>, Fetch
             break;
         }
 
-        let subcrate = if is_not_url(&id) {
-            try_resolve_local(&id)
-        } else {
-            try_resolve_remote(&id)
-        };
+        let subcrate = resolve_subcrate(&id, options);
         match subcrate {
             Ok(subcrate) => {
                 queue.extend(
@@ -188,6 +213,13 @@ fn subcrate_ids(rocrate: &RoCrate) -> Vec<String> {
 
 /// Fails when a subcrate cannot be resolved
 pub fn fetch_subcrates(rocrate: &RoCrate) -> Result<Vec<RoCrate>, FetchError> {
+    fetch_subcrates_with_options(rocrate, FetchOptions::default())
+}
+
+pub fn fetch_subcrates_with_options(
+    rocrate: &RoCrate,
+    options: FetchOptions,
+) -> Result<Vec<RoCrate>, FetchError> {
     let subcrates = rocrate.get_subcrates();
 
     let mut collected_subcrates = Vec::new();
@@ -201,11 +233,7 @@ pub fn fetch_subcrates(rocrate: &RoCrate) -> Result<Vec<RoCrate>, FetchError> {
         // Try to find the subcrate id
         let id = get_id(subcrate);
 
-        if is_not_url(&id) {
-            collected_subcrates.push(try_resolve_local(&id)?);
-        } else {
-            collected_subcrates.push(try_resolve_remote(&id)?);
-        }
+        collected_subcrates.push(resolve_subcrate(&id, options)?);
     }
 
     Ok(collected_subcrates)
@@ -213,6 +241,10 @@ pub fn fetch_subcrates(rocrate: &RoCrate) -> Result<Vec<RoCrate>, FetchError> {
 
 /// Does not fail when a subcrate is not found
 pub fn try_fetch_subcrates(rocrate: &RoCrate) -> Vec<RoCrate> {
+    try_fetch_subcrates_with_options(rocrate, FetchOptions::default())
+}
+
+pub fn try_fetch_subcrates_with_options(rocrate: &RoCrate, options: FetchOptions) -> Vec<RoCrate> {
     let subcrates = rocrate.get_subcrates();
 
     let mut collected_subcrates = Vec::new();
@@ -226,26 +258,23 @@ pub fn try_fetch_subcrates(rocrate: &RoCrate) -> Vec<RoCrate> {
         // Try to find the subcrate id
         let id = get_id(subcrate);
 
-        if is_not_url(&id) {
-            match try_resolve_local(&id) {
-                Ok(rocrate) => {
-                    collected_subcrates.push(rocrate);
-                    continue;
-                }
-                Err(err) => warn!("{}", err),
-            }
-        } else {
-            match try_resolve_remote(&id) {
-                Ok(rocrate) => {
-                    collected_subcrates.push(rocrate);
-                    continue;
-                }
-                Err(err) => warn!("{}", err),
-            }
+        match resolve_subcrate(&id, options) {
+            Ok(rocrate) => collected_subcrates.push(rocrate),
+            Err(err) => warn!("{err}"),
         }
     }
 
     collected_subcrates
+}
+
+fn resolve_subcrate(id: &str, options: FetchOptions) -> Result<RoCrate, FetchError> {
+    if is_not_url(id) {
+        try_resolve_local(id)
+    } else if options.allow_remote {
+        try_resolve_remote(id)
+    } else {
+        Err(FetchError::RemoteAccessDisabled(id.to_string()))
+    }
 }
 
 fn try_resolve_local(id: &str) -> Result<RoCrate, FetchError> {
@@ -552,6 +581,33 @@ mod subcrate_tests {
     use crate::ro_crate::data_entity::DataEntity;
     use crate::ro_crate::modify::DynamicEntityManipulation;
     use std::collections::HashMap;
+
+    #[test]
+    fn remote_subcrate_requires_opt_in() {
+        let root: RoCrate = serde_json::from_value(serde_json::json!({
+            "@context": "https://w3id.org/ro/crate/1.1/context",
+            "@graph": [
+                {
+                    "@id": "ro-crate-metadata.json",
+                    "@type": "CreativeWork",
+                    "conformsTo": {"@id": "https://w3id.org/ro/crate/1.1"},
+                    "about": {"@id": "./"}
+                },
+                {
+                    "@id": "http://127.0.0.1:12345/private",
+                    "@type": "Dataset",
+                    "conformsTo": {"@id": "https://w3id.org/ro/crate/1.1"}
+                }
+            ]
+        }))
+        .unwrap();
+
+        assert!(matches!(
+            fetch_subcrates(&root),
+            Err(FetchError::RemoteAccessDisabled(_))
+        ));
+        assert!(try_fetch_subcrates(&root).is_empty());
+    }
 
     #[test]
     fn recursive_fetch_stops_at_self_referential_subcrate() {

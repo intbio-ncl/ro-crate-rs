@@ -55,6 +55,7 @@ rocraters schema 1.3 --terms
 # Subcrates
 rocraters subcrates list
 rocraters subcrates fetch --recursive --lenient
+rocraters subcrates fetch --allow-remote  # only for trusted subcrate URLs
 
 # RDF
 rocraters rdf export --base https://example.org/crate/ -o crate.ttl

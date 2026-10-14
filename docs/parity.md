@@ -94,6 +94,10 @@ A context item is a URL, or a JSON object (CLI) or dict (Python) of term definit
 | `try_fetch_subcrates` | `subcrates fetch --lenient` | `crate.fetch_subcrates(strict=False)` |
 | `try_fetch_subcrates_recursive` | `subcrates fetch -r --lenient` | `crate.fetch_subcrates(recursive=True, strict=False)` |
 
+HTTP fetching is disabled by default. Use `FetchOptions { allow_remote: true }` with the core
+`*_with_options` functions, `subcrates fetch --allow-remote` in the CLI, or
+`crate.fetch_subcrates(allow_remote=True)` in Python for trusted remote references.
+
 ## RDF (`rdf` feature, on by default)
 
 | Core | CLI | Python |

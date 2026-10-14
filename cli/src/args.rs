@@ -586,6 +586,9 @@ pub struct SubcratesFetchCommand {
     /// Skip subcrates that cannot be resolved instead of failing
     #[clap(long)]
     pub lenient: bool,
+    /// Allow HTTP requests to URLs supplied by subcrate metadata
+    #[clap(long)]
+    pub allow_remote: bool,
 }
 
 #[derive(Debug, Args)]

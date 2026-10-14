@@ -19,7 +19,8 @@ use ::rocraters::ro_crate::root::RootDataEntity;
 use ::rocraters::ro_crate::schema::{load_rocrate_schema, RoCrateSchemaVersion};
 #[cfg(feature = "subcrate-resolution")]
 use ::rocraters::ro_crate::subcrate_resolution::{
-    fetch_subcrates, fetch_subcrates_recursive, try_fetch_subcrates, try_fetch_subcrates_recursive,
+    fetch_subcrates_recursive_with_options, fetch_subcrates_with_options,
+    try_fetch_subcrates_recursive_with_options, try_fetch_subcrates_with_options, FetchOptions,
 };
 use ::rocraters::ro_crate::{
     read::{read_crate, read_crate_obj},
@@ -504,7 +505,7 @@ impl PyRoCrate {
     /// Retrieves the subcrates referenced by this crate.
     ///
     /// Local subcrate paths are resolved relative to the current working
-    /// directory; remote subcrates are fetched over HTTP.
+    /// directory; remote subcrates are fetched over HTTP only when allow_remote is true.
     ///
     /// # Arguments
     /// * `recursive` - Also fetch the subcrates of each subcrate.
@@ -513,20 +514,22 @@ impl PyRoCrate {
     /// # Errors
     /// Raises an `IOError` when `strict` and a subcrate cannot be resolved.
     #[cfg(feature = "subcrate-resolution")]
-    #[pyo3(signature = (recursive = false, strict = true))]
+    #[pyo3(signature = (recursive = false, strict = true, allow_remote = false))]
     fn fetch_subcrates(
         &self,
         py: Python<'_>,
         recursive: bool,
         strict: bool,
+        allow_remote: bool,
     ) -> PyResult<Vec<PyRoCrate>> {
         let rocrate = &self.inner;
+        let options = FetchOptions { allow_remote };
         let subcrates = py
             .detach(|| match (recursive, strict) {
-                (false, true) => fetch_subcrates(rocrate),
-                (true, true) => fetch_subcrates_recursive(rocrate),
-                (false, false) => Ok(try_fetch_subcrates(rocrate)),
-                (true, false) => Ok(try_fetch_subcrates_recursive(rocrate)),
+                (false, true) => fetch_subcrates_with_options(rocrate, options),
+                (true, true) => fetch_subcrates_recursive_with_options(rocrate, options),
+                (false, false) => Ok(try_fetch_subcrates_with_options(rocrate, options)),
+                (true, false) => Ok(try_fetch_subcrates_recursive_with_options(rocrate, options)),
             })
             .map_err(|e| PyIOError::new_err(format!("Failed to fetch subcrates: {e}")))?;
 

@@ -358,8 +358,9 @@ class TestSubcrates(unittest.TestCase):
             crate = example_crate(extra=subcrate_refs(f"{url}/sub.json", f"{url}/missing.json"))
             with self.assertRaises(OSError):
                 crate.fetch_subcrates()
-            self.assertEqual(len(crate.fetch_subcrates(strict=False)), 1)
-            self.assertEqual(len(crate.fetch_subcrates(recursive=True, strict=False)), 2)
+            self.assertEqual(len(crate.fetch_subcrates(strict=False)), 0)
+            self.assertEqual(len(crate.fetch_subcrates(strict=False, allow_remote=True)), 1)
+            self.assertEqual(len(crate.fetch_subcrates(recursive=True, strict=False, allow_remote=True)), 2)
 
 
 class TestRdf(unittest.TestCase):

@@ -237,16 +237,22 @@ pub fn subcrates(command: SubcratesCommand) {
         #[cfg(feature = "subcrate-resolution")]
         SubcratesCommand::Fetch(command) => {
             use rocraters::ro_crate::subcrate_resolution::{
-                fetch_subcrates, fetch_subcrates_recursive, try_fetch_subcrates,
-                try_fetch_subcrates_recursive,
+                fetch_subcrates_recursive_with_options, fetch_subcrates_with_options,
+                try_fetch_subcrates_recursive_with_options, try_fetch_subcrates_with_options,
+                FetchOptions,
             };
 
             let rocrate = load_crate(&command.target.target_crate, 1);
+            let options = FetchOptions {
+                allow_remote: command.allow_remote,
+            };
             let subcrates = match (command.recursive, command.lenient) {
-                (false, false) => fetch_subcrates(&rocrate),
-                (true, false) => fetch_subcrates_recursive(&rocrate),
-                (false, true) => Ok(try_fetch_subcrates(&rocrate)),
-                (true, true) => Ok(try_fetch_subcrates_recursive(&rocrate)),
+                (false, false) => fetch_subcrates_with_options(&rocrate, options),
+                (true, false) => fetch_subcrates_recursive_with_options(&rocrate, options),
+                (false, true) => Ok(try_fetch_subcrates_with_options(&rocrate, options)),
+                (true, true) => Ok(try_fetch_subcrates_recursive_with_options(
+                    &rocrate, options,
+                )),
             }
             .unwrap_or_else(|e| fail(format!("Failed to fetch subcrates: {}", e)));
             println!("{}", to_string_pretty(&subcrates).unwrap());

@@ -1021,11 +1021,20 @@ mod subcrates {
         );
 
         err(d, &["subcrates", "fetch"]);
-        let fetched: Value =
+        let blocked: Value =
             serde_json::from_str(&ok(d, &["subcrates", "fetch", "--lenient"])).unwrap();
+        assert!(blocked.as_array().unwrap().is_empty());
+        let fetched: Value = serde_json::from_str(&ok(
+            d,
+            &["subcrates", "fetch", "--lenient", "--allow-remote"],
+        ))
+        .unwrap();
         assert_eq!(fetched.as_array().unwrap().len(), 1);
-        let recursive: Value =
-            serde_json::from_str(&ok(d, &["subcrates", "fetch", "-r", "--lenient"])).unwrap();
+        let recursive: Value = serde_json::from_str(&ok(
+            d,
+            &["subcrates", "fetch", "-r", "--lenient", "--allow-remote"],
+        ))
+        .unwrap();
         assert_eq!(recursive.as_array().unwrap().len(), 2);
     }
 
@@ -1378,7 +1387,14 @@ mod package {
         fs::write(d.join(".zenodo.json"), "{}").unwrap();
         fs::write(d.join(".env"), "SECRET=1").unwrap();
 
-        let args = ["package", "zip", "-i", ".zenodo.json", "--include-hidden", ".config"];
+        let args = [
+            "package",
+            "zip",
+            "-i",
+            ".zenodo.json",
+            "--include-hidden",
+            ".config",
+        ];
         ok(&d, &args);
         let archive = zip::ZipArchive::new(fs::File::open(d.join("mycrate.zip")).unwrap()).unwrap();
         let names: Vec<&str> = archive.file_names().collect();

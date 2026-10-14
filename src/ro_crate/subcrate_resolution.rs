@@ -9,8 +9,8 @@ use sha2::Digest;
 use std::collections::VecDeque;
 use std::io::Read;
 use std::string::FromUtf8Error;
-use zip::ZipArchive;
 use zip::result::ZipError;
+use zip::ZipArchive;
 
 #[derive(Debug)]
 pub enum FetchError {
@@ -378,6 +378,12 @@ fn try_zip(headers: &HeaderMap, bytes: bytes::Bytes) -> Result<RoCrate, FetchErr
             let reader = std::io::Cursor::new(bytes);
             let mut archive = ZipArchive::new(reader)?;
 
+            // A BagIt manifest is an integrity assertion. If verification fails,
+            // do not rediscover and return the same metadata via the generic ZIP path.
+            if archive.file_names().any(|name| name == "bagit.txt") {
+                return try_bagit(archive);
+            }
+
             // Try retrieving file by name
             match archive.by_name("ro-crate-metadata.json") {
                 Ok(mut file_in_zip) => {
@@ -392,17 +398,12 @@ fn try_zip(headers: &HeaderMap, bytes: bytes::Bytes) -> Result<RoCrate, FetchErr
                 Err(err) => warn!("{}", err),
             }
 
-            // Try to extract rocrate from bagit
-            match try_bagit(archive.clone()) {
-                Ok(rocrate) => {
-                    return Ok(rocrate);
-                }
-                Err(err) => warn!("{}", err),
-            }
-
             // Try finding rocrate in subdirectories
             let names: Vec<String> = archive.file_names().map(|e| e.to_string()).collect();
-            if let Some(rocrate) = names.iter().find(|x| x.contains("metadata.json")) {
+            if let Some(rocrate) = names
+                .iter()
+                .find(|name| name.ends_with("/ro-crate-metadata.json"))
+            {
                 let mut file_in_zip = archive.by_name(rocrate)?;
 
                 let mut buffer = Vec::new();
@@ -498,6 +499,39 @@ mod subcrate_tests {
     use crate::ro_crate::data_entity::DataEntity;
     use crate::ro_crate::modify::DynamicEntityManipulation;
     use std::collections::HashMap;
+
+    #[test]
+    fn bagit_with_bad_manifest_is_rejected() {
+        use std::io::Write;
+        use zip::write::SimpleFileOptions;
+
+        let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::<u8>::new()));
+        let options = SimpleFileOptions::default();
+        writer.start_file("bagit.txt", options).unwrap();
+        writer.write_all(b"BagIt-Version: 1.0\n").unwrap();
+        writer.start_file("manifest-sha256.txt", options).unwrap();
+        writer
+            .write_all(format!("{}  data/ro-crate-metadata.json\n", "0".repeat(64)).as_bytes())
+            .unwrap();
+        writer
+            .start_file("data/ro-crate-metadata.json", options)
+            .unwrap();
+        writer
+            .write_all(br#"{"@context":"https://w3id.org/ro/crate/1.3/context","@graph":[]}"#)
+            .unwrap();
+
+        let body = bytes::Bytes::from(writer.finish().unwrap().into_inner());
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            reqwest::header::CONTENT_TYPE,
+            reqwest::header::HeaderValue::from_static("application/zip"),
+        );
+
+        assert!(matches!(
+            try_zip(&headers, body),
+            Err(FetchError::BagItError(_))
+        ));
+    }
 
     // Helper function to create a DataEntity with properties
     fn create_data_entity_with_property(key: &str, value: &str) -> DataEntity {

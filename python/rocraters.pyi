@@ -135,7 +135,7 @@ class PyRoCrate:
     def get_subcrates(self) -> list[dict[str, Any]]:
         """Returns the data entities that reference other RO-Crates"""
 
-    def fetch_subcrates(self, recursive: bool = False, strict: bool = True, allow_remote: bool = False) -> list["PyRoCrate"]:
+    def fetch_subcrates(self, recursive: bool = False, strict: bool = True, allow_remote: bool = False, local_root: str | None = None) -> list["PyRoCrate"]:
         """
         Fetches the referenced subcrates. Local paths are resolved relative to
         the working directory. Remote IDs require allow_remote=True. Requires the
@@ -144,6 +144,7 @@ class PyRoCrate:
         :param recursive: also fetch the subcrates of each subcrate
         :param strict: raise if a subcrate cannot be resolved, rather than skip it
         :param allow_remote: allow HTTP requests to URLs supplied by crate metadata
+        :param local_root: directory that local subcrate paths must stay inside
         :raises OSError: if strict and a subcrate cannot be resolved
         """
 

@@ -4,8 +4,7 @@ pub mod subcrate_tests {
     use mockito::Matcher;
     use rocraters::ro_crate::rocrate::RoCrate;
     use rocraters::ro_crate::subcrate_resolution::{
-        fetch_subcrates, fetch_subcrates_recursive_with_options, fetch_subcrates_with_options,
-        FetchOptions,
+        fetch_subcrates_recursive_with_options, fetch_subcrates_with_options, FetchOptions,
     };
     use serde_json::json;
     use sha1::Digest;
@@ -314,7 +313,14 @@ pub mod subcrate_tests {
         });
 
         let root: RoCrate = serde_json::from_value(base_crate).unwrap();
-        let subcrates = fetch_subcrates(&root).unwrap();
+        let subcrates = fetch_subcrates_with_options(
+            &root,
+            FetchOptions {
+                local_root: Some(subdir1.path().parent().unwrap().to_path_buf()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
 
         assert_eq!(subcrates.len(), 3);
 
@@ -426,8 +432,14 @@ pub mod subcrate_tests {
 
         let root: RoCrate = serde_json::from_value(base_crate).unwrap();
 
-        let subcrates =
-            fetch_subcrates_with_options(&root, FetchOptions { allow_remote: true }).unwrap();
+        let subcrates = fetch_subcrates_with_options(
+            &root,
+            FetchOptions {
+                allow_remote: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert_eq!(subcrates.len(), 1);
 
         mock.assert();
@@ -611,8 +623,14 @@ pub mod subcrate_tests {
         });
 
         let root: RoCrate = serde_json::from_value(base_crate).unwrap();
-        let subcrates =
-            fetch_subcrates_with_options(&root, FetchOptions { allow_remote: true }).unwrap();
+        let subcrates = fetch_subcrates_with_options(
+            &root,
+            FetchOptions {
+                allow_remote: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
 
         assert_eq!(subcrates.len(), 3);
 
@@ -763,8 +781,14 @@ pub mod subcrate_tests {
         });
 
         let root: RoCrate = serde_json::from_value(base_crate).unwrap();
-        let subcrates =
-            fetch_subcrates_with_options(&root, FetchOptions { allow_remote: true }).unwrap();
+        let subcrates = fetch_subcrates_with_options(
+            &root,
+            FetchOptions {
+                allow_remote: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
 
         assert_eq!(subcrates.len(), 2);
 
@@ -908,8 +932,14 @@ pub mod subcrate_tests {
         });
 
         let root: RoCrate = serde_json::from_value(base_crate).unwrap();
-        let subcrates =
-            fetch_subcrates_with_options(&root, FetchOptions { allow_remote: true }).unwrap();
+        let subcrates = fetch_subcrates_with_options(
+            &root,
+            FetchOptions {
+                allow_remote: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
 
         assert_eq!(subcrates.len(), 1);
         for mock in mocks {
@@ -1162,8 +1192,14 @@ pub mod subcrate_tests {
 
         let root: RoCrate = serde_json::from_value(base_crate).unwrap();
 
-        let subcrates =
-            fetch_subcrates_with_options(&root, FetchOptions { allow_remote: true }).unwrap();
+        let subcrates = fetch_subcrates_with_options(
+            &root,
+            FetchOptions {
+                allow_remote: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert_eq!(subcrates.len(), 4);
         for m in mocks {
             m.assert();
@@ -1476,9 +1512,14 @@ pub mod subcrate_tests {
 
         let root: RoCrate = serde_json::from_value(base_crate).unwrap();
 
-        let subcrates =
-            fetch_subcrates_recursive_with_options(&root, FetchOptions { allow_remote: true })
-                .unwrap();
+        let subcrates = fetch_subcrates_recursive_with_options(
+            &root,
+            FetchOptions {
+                allow_remote: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
 
         assert_eq!(subcrates.len(), 30);
 

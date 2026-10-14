@@ -94,9 +94,12 @@ A context item is a URL, or a JSON object (CLI) or dict (Python) of term definit
 | `try_fetch_subcrates` | `subcrates fetch --lenient` | `crate.fetch_subcrates(strict=False)` |
 | `try_fetch_subcrates_recursive` | `subcrates fetch -r --lenient` | `crate.fetch_subcrates(recursive=True, strict=False)` |
 
-HTTP fetching is disabled by default. Use `FetchOptions { allow_remote: true }` with the core
+HTTP fetching is disabled by default. Use `FetchOptions { allow_remote: true, ..Default::default() }` with the core
 `*_with_options` functions, `subcrates fetch --allow-remote` in the CLI, or
 `crate.fetch_subcrates(allow_remote=True)` in Python for trusted remote references.
+Local paths are confined to the current working directory by default. The Rust
+`FetchOptions.local_root` and Python `local_root` argument can select the crate directory;
+the CLI derives it from the target metadata file.
 
 ## RDF (`rdf` feature, on by default)
 

@@ -243,8 +243,26 @@ pub fn subcrates(command: SubcratesCommand) {
             };
 
             let rocrate = load_crate(&command.target.target_crate, 1);
+            let target = std::path::Path::new(&command.target.target_crate);
+            let local_root = if command.target.target_crate == "-"
+                || command.target.target_crate.starts_with("http://")
+                || command.target.target_crate.starts_with("https://")
+            {
+                None
+            } else if target.is_dir() {
+                Some(target.to_path_buf())
+            } else {
+                target.parent().map(|parent| {
+                    if parent.as_os_str().is_empty() {
+                        std::path::PathBuf::from(".")
+                    } else {
+                        parent.to_path_buf()
+                    }
+                })
+            };
             let options = FetchOptions {
                 allow_remote: command.allow_remote,
+                local_root,
             };
             let subcrates = match (command.recursive, command.lenient) {
                 (false, false) => fetch_subcrates_with_options(&rocrate, options),

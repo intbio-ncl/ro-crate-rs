@@ -344,10 +344,10 @@ class TestSubcrates(unittest.TestCase):
             self.crate.fetch_subcrates()
 
     def test_fetch_subcrates_lenient(self):
-        subcrates = self.crate.fetch_subcrates(strict=False)
+        subcrates = self.crate.fetch_subcrates(strict=False, local_root=self.tmp.name)
         self.assertEqual(len(subcrates), 1)
         self.assertIn("data.csv", subcrates[0].get_all_ids())
-        self.assertEqual(len(self.crate.fetch_subcrates(recursive=True, strict=False)), 2)
+        self.assertEqual(len(self.crate.fetch_subcrates(recursive=True, strict=False, local_root=self.tmp.name)), 2)
 
     def test_fetch_remote_subcrates(self):
         files = {

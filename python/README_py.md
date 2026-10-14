@@ -233,6 +233,7 @@ RO-Crate JSON-LD context.
 crate.get_subcrates()                               # entities that reference other crates
 crate.fetch_subcrates(recursive=True, strict=False) # fetch them, skipping any that fail
 crate.fetch_subcrates(allow_remote=True)             # opt in to URLs supplied by crate metadata
+crate.fetch_subcrates(local_root="/path/to/crate")    # allow local references inside this directory
 ```
 
 # RDF

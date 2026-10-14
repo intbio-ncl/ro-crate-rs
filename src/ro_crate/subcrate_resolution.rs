@@ -8,6 +8,7 @@ use reqwest::header::{HeaderMap, ToStrError};
 use sha2::Digest;
 use std::collections::{HashSet, VecDeque};
 use std::io::Read;
+use std::path::{Path, PathBuf};
 use std::string::FromUtf8Error;
 use zip::result::ZipError;
 use zip::ZipArchive;
@@ -26,6 +27,7 @@ pub enum FetchError {
     RegexError(regex::Error),
     TraversalLimit(String),
     RemoteAccessDisabled(String),
+    LocalAccessDenied(PathBuf),
 }
 
 impl std::fmt::Display for FetchError {
@@ -64,6 +66,13 @@ impl std::fmt::Display for FetchError {
             FetchError::TraversalLimit(reason) => write!(f, "Subcrate traversal limit: {reason}"),
             FetchError::RemoteAccessDisabled(id) => {
                 write!(f, "Remote subcrate access is disabled for {id}")
+            }
+            FetchError::LocalAccessDenied(path) => {
+                write!(
+                    f,
+                    "Local subcrate path is outside the allowed root: {}",
+                    path.display()
+                )
             }
         }
     }
@@ -109,9 +118,12 @@ impl From<regex::Error> for FetchError {
 
 /// Network access is disabled by default because subcrate locators are supplied
 /// by crate metadata. Callers processing trusted remote references can opt in.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct FetchOptions {
     pub allow_remote: bool,
+    /// Directory that local subcrate paths must remain inside. Defaults to the
+    /// current working directory.
+    pub local_root: Option<PathBuf>,
 }
 
 /// Fails when a subcrate cannot be resolved
@@ -154,7 +166,7 @@ fn walk_subcrates(
         .collect::<VecDeque<_>>();
 
     while let Some((id, depth)) = queue.pop_front() {
-        let key = normalize_subcrate_id(&id);
+        let key = normalize_subcrate_id(&id, &options);
         if !seen.insert(key) {
             continue;
         }
@@ -169,7 +181,7 @@ fn walk_subcrates(
             break;
         }
 
-        let subcrate = resolve_subcrate(&id, options);
+        let subcrate = resolve_subcrate(&id, &options);
         match subcrate {
             Ok(subcrate) => {
                 queue.extend(
@@ -186,9 +198,9 @@ fn walk_subcrates(
     Ok(flattened)
 }
 
-fn normalize_subcrate_id(id: &str) -> String {
+fn normalize_subcrate_id(id: &str, options: &FetchOptions) -> String {
     if is_not_url(id) {
-        let path = local_subcrate_path(id);
+        let path = local_subcrate_path(id, options.local_root.as_deref().unwrap_or(Path::new(".")));
         path.canonicalize()
             .unwrap_or(path)
             .to_string_lossy()
@@ -233,7 +245,7 @@ pub fn fetch_subcrates_with_options(
         // Try to find the subcrate id
         let id = get_id(subcrate);
 
-        collected_subcrates.push(resolve_subcrate(&id, options)?);
+        collected_subcrates.push(resolve_subcrate(&id, &options)?);
     }
 
     Ok(collected_subcrates)
@@ -258,7 +270,7 @@ pub fn try_fetch_subcrates_with_options(rocrate: &RoCrate, options: FetchOptions
         // Try to find the subcrate id
         let id = get_id(subcrate);
 
-        match resolve_subcrate(&id, options) {
+        match resolve_subcrate(&id, &options) {
             Ok(rocrate) => collected_subcrates.push(rocrate),
             Err(err) => warn!("{err}"),
         }
@@ -267,9 +279,9 @@ pub fn try_fetch_subcrates_with_options(rocrate: &RoCrate, options: FetchOptions
     collected_subcrates
 }
 
-fn resolve_subcrate(id: &str, options: FetchOptions) -> Result<RoCrate, FetchError> {
+fn resolve_subcrate(id: &str, options: &FetchOptions) -> Result<RoCrate, FetchError> {
     if is_not_url(id) {
-        try_resolve_local(id)
+        try_resolve_local(id, options)
     } else if options.allow_remote {
         try_resolve_remote(id)
     } else {
@@ -277,8 +289,16 @@ fn resolve_subcrate(id: &str, options: FetchOptions) -> Result<RoCrate, FetchErr
     }
 }
 
-fn try_resolve_local(id: &str) -> Result<RoCrate, FetchError> {
-    let path = local_subcrate_path(id);
+fn try_resolve_local(id: &str, options: &FetchOptions) -> Result<RoCrate, FetchError> {
+    let root = options
+        .local_root
+        .as_deref()
+        .unwrap_or(Path::new("."))
+        .canonicalize()?;
+    let path = local_subcrate_path(id, &root).canonicalize()?;
+    if !path.starts_with(&root) {
+        return Err(FetchError::LocalAccessDenied(path));
+    }
 
     let mut file = std::fs::File::open(path)?;
     let mut buffer = Vec::new();
@@ -287,11 +307,17 @@ fn try_resolve_local(id: &str) -> Result<RoCrate, FetchError> {
     Ok(serde_json::from_slice(buffer.as_slice())?)
 }
 
-fn local_subcrate_path(id: &str) -> std::path::PathBuf {
-    if id.ends_with('/') {
-        std::path::PathBuf::from(id).join("ro-crate-metadata.json")
+fn local_subcrate_path(id: &str, root: &Path) -> PathBuf {
+    let candidate = Path::new(id);
+    let candidate = if candidate.is_absolute() {
+        candidate.to_path_buf()
     } else {
-        std::path::PathBuf::from(id)
+        root.join(candidate)
+    };
+    if id.ends_with('/') {
+        candidate.join("ro-crate-metadata.json")
+    } else {
+        candidate
     }
 }
 
@@ -583,6 +609,32 @@ mod subcrate_tests {
     use std::collections::HashMap;
 
     #[test]
+    fn local_subcrate_cannot_escape_allowed_root() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let secret = outside.path().join("secret.json");
+        std::fs::write(&secret, b"{}").unwrap();
+        let options = FetchOptions {
+            local_root: Some(root.path().to_path_buf()),
+            ..Default::default()
+        };
+
+        assert!(matches!(
+            try_resolve_local(secret.to_str().unwrap(), &options),
+            Err(FetchError::LocalAccessDenied(_))
+        ));
+
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&secret, root.path().join("linked.json")).unwrap();
+            assert!(matches!(
+                try_resolve_local("linked.json", &options),
+                Err(FetchError::LocalAccessDenied(_))
+            ));
+        }
+    }
+
+    #[test]
     fn remote_subcrate_requires_opt_in() {
         let root: RoCrate = serde_json::from_value(serde_json::json!({
             "@context": "https://w3id.org/ro/crate/1.1/context",
@@ -632,8 +684,20 @@ mod subcrate_tests {
         std::fs::write(&metadata_path, crate_json.to_string()).unwrap();
         let root: RoCrate = serde_json::from_value(crate_json).unwrap();
 
-        assert_eq!(fetch_subcrates_recursive(&root).unwrap().len(), 1);
-        assert_eq!(try_fetch_subcrates_recursive(&root).len(), 1);
+        let options = FetchOptions {
+            local_root: Some(directory.path().to_path_buf()),
+            ..Default::default()
+        };
+        assert_eq!(
+            fetch_subcrates_recursive_with_options(&root, options.clone())
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            try_fetch_subcrates_recursive_with_options(&root, options).len(),
+            1
+        );
     }
 
     #[test]
@@ -665,12 +729,16 @@ mod subcrate_tests {
         }
 
         let root: RoCrate = serde_json::from_slice(&std::fs::read(&paths[0]).unwrap()).unwrap();
+        let options = FetchOptions {
+            local_root: Some(directory.path().to_path_buf()),
+            ..Default::default()
+        };
         assert!(matches!(
-            fetch_subcrates_recursive(&root),
+            fetch_subcrates_recursive_with_options(&root, options.clone()),
             Err(FetchError::TraversalLimit(_))
         ));
         assert_eq!(
-            try_fetch_subcrates_recursive(&root).len(),
+            try_fetch_subcrates_recursive_with_options(&root, options).len(),
             MAX_SUBCRATE_DEPTH
         );
     }

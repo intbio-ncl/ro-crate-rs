@@ -514,16 +514,20 @@ impl PyRoCrate {
     /// # Errors
     /// Raises an `IOError` when `strict` and a subcrate cannot be resolved.
     #[cfg(feature = "subcrate-resolution")]
-    #[pyo3(signature = (recursive = false, strict = true, allow_remote = false))]
+    #[pyo3(signature = (recursive = false, strict = true, allow_remote = false, local_root = None))]
     fn fetch_subcrates(
         &self,
         py: Python<'_>,
         recursive: bool,
         strict: bool,
         allow_remote: bool,
+        local_root: Option<String>,
     ) -> PyResult<Vec<PyRoCrate>> {
         let rocrate = &self.inner;
-        let options = FetchOptions { allow_remote };
+        let options = FetchOptions {
+            allow_remote,
+            local_root: local_root.map(PathBuf::from),
+        };
         let subcrates = py
             .detach(|| match (recursive, strict) {
                 (false, true) => fetch_subcrates_with_options(rocrate, options),

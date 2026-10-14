@@ -17,6 +17,26 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 use zip::ZipArchive;
 
+pub(crate) const MAX_METADATA_BYTES: usize = 16 * 1024 * 1024;
+pub(crate) const MAX_ARCHIVE_BYTES: usize = 128 * 1024 * 1024;
+#[cfg(feature = "rdf")]
+pub(crate) const MAX_CONTEXT_BYTES: usize = 2 * 1024 * 1024;
+
+pub(crate) fn read_with_limit(mut reader: impl Read, limit: usize) -> io::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    reader
+        .by_ref()
+        .take(limit as u64 + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > limit {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Input exceeds {limit} bytes"),
+        ));
+    }
+    Ok(bytes)
+}
+
 /// Reads and deserialises an RO-Crate from a specified file path.
 ///
 /// This function attempts to load an RO-Crate from a JSON file located at `crate_path`.
@@ -138,10 +158,10 @@ pub fn read_crate_obj(crate_obj: &str, validation_level: i8) -> Result<RoCrate, 
 /// * 'url' - An url containing a valid ro-crate json object
 /// * 'valid' - A boolean flag indiciating whether to validate the crate's keys against the schema.
 pub fn load_remote(url: url::Url, validation_level: i8) -> Result<RoCrate, CrateReadError> {
-    let content = reqwest::blocking::get(url)
-        .map_err(|e| CrateReadError::ReqwestError(e))?
-        .text()
-        .map_err(|e| CrateReadError::ReqwestError(e))?;
+    let response = reqwest::blocking::get(url)?;
+    let content = read_with_limit(response, MAX_METADATA_BYTES)?;
+    let content =
+        String::from_utf8(content).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
     read_crate_obj(&content, validation_level)
 }
@@ -339,8 +359,7 @@ pub fn parse_zip(zip_path: &str, validation_level: i8) -> Result<RoCrate, CrateR
     let mut file_in_zip = archive.by_name("ro-crate-metadata.json").unwrap();
 
     // 3. Read the file contents into memory
-    let mut buffer = Vec::new();
-    file_in_zip.read_to_end(&mut buffer)?;
+    let buffer = read_with_limit(&mut file_in_zip, MAX_METADATA_BYTES)?;
 
     match serde_json::from_slice::<RoCrate>(&buffer) {
         Ok(rocrate) => {
@@ -365,6 +384,16 @@ pub enum ValidationResult {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn bounded_reader_rejects_data_after_limit() {
+        let data = std::io::Cursor::new(b"123456".as_slice());
+        let err = super::read_with_limit(data, 5).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert_eq!(
+            super::read_with_limit(b"12345".as_slice(), 5).unwrap(),
+            b"12345"
+        );
+    }
 
     use super::*;
 

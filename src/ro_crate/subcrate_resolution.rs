@@ -1,5 +1,6 @@
 use crate::ro_crate::constraints::Id;
 use crate::ro_crate::data_entity::DataEntity;
+use crate::ro_crate::read::{read_with_limit, MAX_ARCHIVE_BYTES, MAX_METADATA_BYTES};
 use crate::ro_crate::rocrate::RoCrate;
 use crate::ro_crate::write::is_not_url;
 use log::warn;
@@ -7,7 +8,6 @@ use reqwest::blocking::Response;
 use reqwest::header::{HeaderMap, ToStrError};
 use sha2::Digest;
 use std::collections::{HashSet, VecDeque};
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::string::FromUtf8Error;
 use zip::result::ZipError;
@@ -301,8 +301,7 @@ fn try_resolve_local(id: &str, options: &FetchOptions) -> Result<RoCrate, FetchE
     }
 
     let mut file = std::fs::File::open(path)?;
-    let mut buffer = Vec::new();
-    file.read_to_end(&mut buffer)?;
+    let buffer = read_with_limit(&mut file, MAX_METADATA_BYTES)?;
 
     Ok(serde_json::from_slice(buffer.as_slice())?)
 }
@@ -324,10 +323,12 @@ fn local_subcrate_path(id: &str, root: &Path) -> PathBuf {
 fn try_direct_resolve_or_zip(response: Response) -> Result<RoCrate, FetchError> {
     let headers = response.headers().clone();
     let redirect_url = response.url().to_string();
-    let body = response.bytes()?;
+    let body = bytes::Bytes::from(read_with_limit(response, MAX_ARCHIVE_BYTES)?);
 
-    if let Ok(ro_crate) = serde_json::from_slice::<RoCrate>(&body) {
-        return Ok(ro_crate);
+    if body.len() <= MAX_METADATA_BYTES {
+        if let Ok(ro_crate) = serde_json::from_slice::<RoCrate>(&body) {
+            return Ok(ro_crate);
+        }
     }
 
     if let Ok(ro_crate) = try_zip(&headers, body) {
@@ -496,8 +497,7 @@ fn try_zip(headers: &HeaderMap, bytes: bytes::Bytes) -> Result<RoCrate, FetchErr
             match archive.by_name("ro-crate-metadata.json") {
                 Ok(mut file_in_zip) => {
                     // Read the file contents into memory
-                    let mut buffer = Vec::new();
-                    file_in_zip.read_to_end(&mut buffer)?;
+                    let buffer = read_with_limit(&mut file_in_zip, MAX_METADATA_BYTES)?;
 
                     let subcrate: RoCrate = serde_json::from_slice(&buffer)?;
 
@@ -514,8 +514,7 @@ fn try_zip(headers: &HeaderMap, bytes: bytes::Bytes) -> Result<RoCrate, FetchErr
             {
                 let mut file_in_zip = archive.by_name(rocrate)?;
 
-                let mut buffer = Vec::new();
-                file_in_zip.read_to_end(&mut buffer)?;
+                let buffer = read_with_limit(&mut file_in_zip, MAX_METADATA_BYTES)?;
 
                 let subcrate: RoCrate = serde_json::from_slice(&buffer)?;
 
@@ -534,8 +533,7 @@ fn try_bagit(
         //    then return data/ro-crate-metadata.json
         let mut rocrate = archive.by_name("data/ro-crate-metadata.json")?;
         // Parse ro-crate
-        let mut ro_crate_buffer = Vec::new();
-        rocrate.read_to_end(&mut ro_crate_buffer)?;
+        let ro_crate_buffer = read_with_limit(&mut rocrate, MAX_METADATA_BYTES)?;
         let subcrate = serde_json::from_slice(&ro_crate_buffer)?;
         drop(rocrate);
 
@@ -577,8 +575,7 @@ fn try_verify_hash(
         Hash::Sha256 => "manifest-sha256.txt",
     };
     let mut sha512 = archive.by_name(manifest)?;
-    let mut buffer = Vec::new();
-    sha512.read_to_end(&mut buffer)?;
+    let buffer = read_with_limit(&mut sha512, MAX_METADATA_BYTES)?;
 
     let hashes = String::from_utf8(buffer)?;
     let hash = hashes
@@ -607,6 +604,34 @@ mod subcrate_tests {
     use crate::ro_crate::data_entity::DataEntity;
     use crate::ro_crate::modify::DynamicEntityManipulation;
     use std::collections::HashMap;
+
+    #[test]
+    fn zip_metadata_is_bounded_after_decompression() {
+        use std::io::Write;
+
+        let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::<u8>::new()));
+        writer
+            .start_file(
+                "ro-crate-metadata.json",
+                zip::write::SimpleFileOptions::default()
+                    .compression_method(zip::CompressionMethod::Deflated),
+            )
+            .unwrap();
+        writer
+            .write_all(&vec![b'a'; MAX_METADATA_BYTES + 1])
+            .unwrap();
+        let body = bytes::Bytes::from(writer.finish().unwrap().into_inner());
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            reqwest::header::CONTENT_TYPE,
+            reqwest::header::HeaderValue::from_static("application/zip"),
+        );
+
+        assert!(matches!(
+            try_zip(&headers, body),
+            Err(FetchError::IoError(error)) if error.kind() == std::io::ErrorKind::InvalidData
+        ));
+    }
 
     #[test]
     fn local_subcrate_cannot_escape_allowed_root() {

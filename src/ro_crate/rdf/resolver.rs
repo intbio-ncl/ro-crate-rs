@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 
 use crate::ro_crate::context::{ContextItem, RoCrateContext};
 use crate::ro_crate::schema::{
-    ROCRATE_SCHEMA_1_1, ROCRATE_SCHEMA_1_2, ROCRATE_SCHEMA_1_3, RoCrateSchemaVersion,
+    RoCrateSchemaVersion, ROCRATE_SCHEMA_1_1, ROCRATE_SCHEMA_1_2, ROCRATE_SCHEMA_1_3,
 };
 
 use super::context::ResolvedContext;
@@ -247,7 +247,15 @@ impl ContextResolverBuilder {
             });
         }
 
-        let body = response.text().map_err(|e| ContextError::FetchFailed {
+        let body = crate::ro_crate::read::read_with_limit(
+            response,
+            crate::ro_crate::read::MAX_CONTEXT_BYTES,
+        )
+        .map_err(|e| ContextError::FetchFailed {
+            url: url.to_string(),
+            reason: e.to_string(),
+        })?;
+        let body = String::from_utf8(body).map_err(|e| ContextError::FetchFailed {
             url: url.to_string(),
             reason: e.to_string(),
         })?;

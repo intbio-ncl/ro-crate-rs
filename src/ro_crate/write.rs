@@ -3,18 +3,19 @@
 //! Allows basic ro-crate-metadata.json file creation, as well as archiving
 //! via zip.
 
-use crate::ro_crate::read::{CrateReadError, read_crate};
+use crate::ro_crate::read::{read_crate, CrateReadError};
 use crate::ro_crate::rocrate::RoCrate;
 use dirs;
 use log::{debug, error};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use tempfile::NamedTempFile;
 use thiserror::Error;
 use url::Url;
 use walkdir::WalkDir;
-use zip::{ZipWriter, write::SimpleFileOptions};
+use zip::{write::SimpleFileOptions, ZipWriter};
 
 #[derive(Error, Debug)]
 pub enum WriteError {
@@ -36,10 +37,16 @@ pub enum WriteError {
     ContextError(String),
     #[error("Read Error: {0}")]
     ReadError(#[from] CrateReadError),
-    #[error("Refusing to package external folder {0:?}: it is the home folder or contains the crate")]
+    #[error(
+        "Refusing to package external folder {0:?}: it is the home folder or contains the crate"
+    )]
     UnsafeExternalPath(PathBuf),
     #[error("Hidden path to include must exist inside the crate directory: {0:?}")]
     InvalidIncludePath(PathBuf),
+    #[error("Duplicate ZIP entry: {0}")]
+    DuplicateZipEntry(String),
+    #[error("Directory traversal error: {0}")]
+    WalkDirError(#[from] walkdir::Error),
 }
 
 /// Serializes and writes an RO-Crate object to a JSON file.
@@ -89,10 +96,7 @@ fn write_crate_to_zip(
         .map_err(|e| WriteError::ZipOperationError(e.to_string()))?;
 
     // Start a new file in the zip archive with the given name and options
-    zip_data
-        .zip
-        .start_file(name, zip_data.options)
-        .map_err(|e| WriteError::ZipOperationError(e.to_string()))?;
+    zip_data.start_file(&name)?;
 
     zip_data
         .zip
@@ -156,16 +160,6 @@ pub fn zip_crate(
 
     // Attach unique identifier if not already present
     rocrate.context.add_urn_uuid();
-    // This saves a modified copy with the updated urn -> prevents duplicate if already
-    // present
-    write_crate(
-        &rocrate,
-        zip_paths
-            .absolute_path
-            .canonicalize()?
-            .to_string_lossy()
-            .to_string(),
-    )?;
     if unique {
         let base_id = rocrate
             .context
@@ -184,27 +178,52 @@ pub fn zip_crate(
     }
     debug!("ZIP PATH NAME {:?}", zip_paths.zip_file_name);
 
-    let mut zip_data = build_zip(&zip_paths)?;
+    // Keep the existing archive intact until every entry has been written and
+    // the central directory has been finalized.
+    let archive_temp = NamedTempFile::new_in(&zip_paths.root_path)?;
+    let mut zip_data = build_zip(archive_temp.reopen()?);
 
-    let _ = directory_walk(
+    directory_walk(
         &mut rocrate,
         &zip_paths,
         &mut zip_data,
         flatten,
         &include_hidden,
-    );
+    )?;
 
     if external {
         zip_data = zip_crate_external(&mut rocrate, zip_data, &zip_paths)?
     }
 
-    let _ = write_crate_to_zip(
+    write_crate_to_zip(
         &rocrate,
         "ro-crate-metadata.json".to_string(),
         &mut zip_data,
-    );
+    )?;
 
-    let _ = zip_data.zip.finish();
+    let archive_file = zip_data
+        .zip
+        .finish()
+        .map_err(|e| WriteError::ZipOperationError(e.to_string()))?;
+    archive_file.sync_all()?;
+    drop(archive_file);
+
+    // Update the source metadata only after the archive is complete. If this
+    // fails, the temporary archive is discarded and the old archive survives.
+    let mut metadata_temp = NamedTempFile::new_in(&zip_paths.root_path)?;
+    let source_permissions = fs::metadata(&zip_paths.absolute_path)?.permissions();
+    metadata_temp
+        .as_file()
+        .set_permissions(source_permissions)?;
+    serde_json::to_writer_pretty(&mut metadata_temp, &rocrate)?;
+    metadata_temp.write_all(b"\n")?;
+    metadata_temp.as_file().sync_all()?;
+    metadata_temp
+        .persist(&zip_paths.absolute_path)
+        .map_err(|e| WriteError::IoError(e.error))?;
+    archive_temp
+        .persist(&zip_paths.zip_file_name)
+        .map_err(|e| WriteError::IoError(e.error))?;
 
     Ok(())
 }
@@ -237,8 +256,7 @@ fn construct_paths(crate_path: &Path) -> Result<RoCrateZipPaths, WriteError> {
     })
 }
 
-fn build_zip(path_information: &RoCrateZipPaths) -> Result<RoCrateZip, WriteError> {
-    let file = File::create(&path_information.zip_file_name).map_err(WriteError::IoError)?;
+fn build_zip(file: File) -> RoCrateZip {
     let zip = ZipWriter::new(file);
 
     // Can change this to deflated for standard compression
@@ -247,12 +265,28 @@ fn build_zip(path_information: &RoCrateZipPaths) -> Result<RoCrateZip, WriteErro
         .unix_permissions(0o755)
         .large_file(true);
 
-    Ok(RoCrateZip { zip, options })
+    RoCrateZip {
+        zip,
+        options,
+        names: HashSet::new(),
+    }
 }
 
 pub struct RoCrateZip {
     zip: ZipWriter<File>,
     options: SimpleFileOptions,
+    names: HashSet<String>,
+}
+
+impl RoCrateZip {
+    fn start_file(&mut self, name: &str) -> Result<(), WriteError> {
+        if !self.names.insert(name.to_string()) {
+            return Err(WriteError::DuplicateZipEntry(name.to_string()));
+        }
+        self.zip
+            .start_file(name, self.options)
+            .map_err(|e| WriteError::ZipOperationError(e.to_string()))
+    }
 }
 
 /// Sole focus must be on present data
@@ -288,10 +322,12 @@ fn directory_walk(
                     .iter()
                     .any(|p| p.starts_with(e.path()) || e.path().starts_with(p))
         })
-        .filter_map(|e| e.ok())
-        // Consider only regular files: directories are walked and symlinks are not followed
-        .filter(|e| e.file_type().is_file())
     {
+        let entry = entry?;
+        // Consider only regular files: directories are walked and symlinks are not followed.
+        if !entry.file_type().is_file() {
+            continue;
+        }
         let path = entry.path();
 
         if path == zip_paths.zip_file_name {
@@ -318,10 +354,7 @@ fn directory_walk(
 
         let mut file = fs::File::open(path).map_err(WriteError::IoError)?;
 
-        zip_data
-            .zip
-            .start_file(&file_name, zip_data.options)
-            .map_err(|e| WriteError::ZipOperationError(e.to_string()))?;
+        zip_data.start_file(&file_name)?;
 
         // Once copy the absolute path and relative path needs to be checked
         let abs_path = path.canonicalize()?;
@@ -329,17 +362,11 @@ fn directory_walk(
             data_vec.push(abs_path.clone());
         };
 
-        let copy_result = io::copy(&mut file, &mut zip_data.zip).map_err(WriteError::IoError);
-
-        match copy_result {
-            Ok(_) => {
-                for (key, value) in &contained {
-                    if abs_path == value.clone() {
-                        rocrate.update_id_recursive(key, &file_name)
-                    }
-                }
+        io::copy(&mut file, &mut zip_data.zip)?;
+        for (key, value) in &contained {
+            if abs_path == *value {
+                rocrate.update_id_recursive(key, &file_name)
             }
-            Err(e) => error!("{e}"),
         }
     }
     debug!("0 | Rocrate: {:?}", rocrate);
@@ -397,10 +424,7 @@ pub fn zip_crate_external(
             } else if path.is_file() {
                 let mut file = fs::File::open(&path).map_err(WriteError::IoError)?;
 
-                zip_data
-                    .zip
-                    .start_file(&zip_entry_name, zip_data.options)
-                    .map_err(|e| WriteError::ZipOperationError(e.to_string()))?;
+                zip_data.start_file(&zip_entry_name)?;
 
                 let copy_result =
                     io::copy(&mut file, &mut zip_data.zip).map_err(WriteError::IoError);
@@ -652,8 +676,8 @@ fn add_directory_recursively(
     for entry in WalkDir::new(base_dir)
         .into_iter()
         .filter_entry(|e| e.depth() == 0 || !is_hidden(e))
-        .filter_map(|e| e.ok())
     {
+        let entry = entry?;
         let p = entry.path();
         debug!("p = {:?}", p);
 
@@ -677,10 +701,7 @@ fn add_directory_recursively(
         } else if entry.file_type().is_file() {
             let mut file = fs::File::open(p).map_err(WriteError::IoError)?;
             debug!("FILE: {:?}", file);
-            zip_data
-                .zip
-                .start_file(&zip_entry_name, zip_data.options)
-                .map_err(|e| WriteError::ZipOperationError(e.to_string()))?;
+            zip_data.start_file(&zip_entry_name)?;
             io::copy(&mut file, &mut zip_data.zip).map_err(WriteError::IoError)?;
         }
     }
@@ -699,7 +720,7 @@ mod write_crate_tests {
 
     use std::io::Write;
 
-    use serde_json::{Value, json};
+    use serde_json::{json, Value};
 
     fn minimal_test_experiment_rocrate(tempdir: PathBuf) -> Value {
         let mut data = std::fs::File::create_new(tempdir.join("data.csv")).unwrap();
@@ -861,6 +882,7 @@ mod write_crate_tests {
             zip: ZipWriter::new(File::create(&zip_paths.zip_file_name).unwrap()),
             options: SimpleFileOptions::default()
                 .compression_method(zip::CompressionMethod::Deflated),
+            names: HashSet::new(),
         };
 
         let mut rocrate = read_crate(&file_path, 0).unwrap();
@@ -1014,6 +1036,7 @@ mod write_crate_tests {
             zip: ZipWriter::new(File::create(&zip_paths.zip_file_name).unwrap()),
             options: SimpleFileOptions::default()
                 .compression_method(zip::CompressionMethod::Deflated),
+            names: HashSet::new(),
         };
 
         assert!(zip_crate_external(&mut rocrate, zip_data, &zip_paths).is_ok());
@@ -1052,6 +1075,54 @@ mod write_crate_tests {
         let zipped = zip_crate(&ro_path, false, 0, false, false, &[]);
         println!("{:?}", zipped);
         assert!(parse_zip(&zip_path, 0).is_ok());
+    }
+
+    #[test]
+    fn test_zip_crate_flatten_collision_preserves_existing_files() {
+        let path = create_tempcrate(&|dir| {
+            fs::create_dir(dir.join("a")).unwrap();
+            fs::create_dir(dir.join("b")).unwrap();
+            fs::write(dir.join("a/data.csv"), "first").unwrap();
+            fs::write(dir.join("b/data.csv"), "second").unwrap();
+            ro_crate_minimal(dir)
+        });
+        let metadata_path = path.path().join("ro-crate-metadata.json");
+        let original_metadata = fs::read(&metadata_path).unwrap();
+        let archive_path = path.path().join(format!(
+            "{}.zip",
+            path.path().file_name().unwrap().to_string_lossy()
+        ));
+        fs::write(&archive_path, b"old archive").unwrap();
+
+        assert!(matches!(
+            zip_crate(&metadata_path, false, 0, true, false, &[]),
+            Err(WriteError::DuplicateZipEntry(name)) if name == "data.csv"
+        ));
+        assert_eq!(fs::read(&metadata_path).unwrap(), original_metadata);
+        assert_eq!(fs::read(&archive_path).unwrap(), b"old archive");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_zip_crate_unrepresentable_name_returns_error() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let path = create_tempcrate(&ro_crate_minimal);
+        let file_name = std::ffi::OsString::from_vec(vec![b'f', 0xff]);
+        fs::write(path.path().join(file_name), "content").unwrap();
+        let metadata_path = path.path().join("ro-crate-metadata.json");
+        let original_metadata = fs::read(&metadata_path).unwrap();
+        let archive_path = path.path().join(format!(
+            "{}.zip",
+            path.path().file_name().unwrap().to_string_lossy()
+        ));
+
+        assert!(matches!(
+            zip_crate(&metadata_path, false, 0, false, false, &[]),
+            Err(WriteError::FileNameConversionFailed)
+        ));
+        assert!(!archive_path.exists());
+        assert_eq!(fs::read(&metadata_path).unwrap(), original_metadata);
     }
 
     #[test]
@@ -1109,7 +1180,10 @@ mod write_crate_tests {
         assert!(names.contains(&"data.csv".to_string()));
         assert!(names.contains(&".described.txt".to_string()));
         for skipped in [".env", ".git/config", "link.txt"] {
-            assert!(!names.contains(&skipped.to_string()), "{skipped} was zipped");
+            assert!(
+                !names.contains(&skipped.to_string()),
+                "{skipped} was zipped"
+            );
         }
     }
 

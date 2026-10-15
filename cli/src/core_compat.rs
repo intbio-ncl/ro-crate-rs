@@ -9,13 +9,11 @@ use rocraters::ro_crate::graph_vector::GraphVector;
 use rocraters::ro_crate::read::{parse_zip, CrateReadError};
 use rocraters::ro_crate::rocrate::RoCrate;
 use std::collections::HashMap;
-use std::io;
-use std::panic;
 use uuid::Uuid;
 
 /// Sets a property on an entity, returning false if there is no such entity.
 ///
-/// `RoCrate::add_dynamic_entity_property` panics on values other than strings and IDs.
+/// Writes any supported entity value into the selected entity.
 pub fn set_property(rocrate: &mut RoCrate, id: &str, key: String, value: EntityValue) -> bool {
     let Some(entity) = rocrate.get_entity_mutable(id) else {
         return false;
@@ -73,13 +71,8 @@ pub fn add_to_root_has_part(rocrate: &mut RoCrate, id: &str) {
 }
 
 /// Returns the UUID of a urn:uuid @base.
-///
-/// `RoCrateContext::get_urn_uuid` panics when @base is not a urn:uuid.
 pub fn urn_uuid(context: &RoCrateContext) -> Option<String> {
-    context
-        .get_specific_context("@base")?
-        .strip_prefix("urn:uuid:")
-        .map(str::to_string)
+    context.get_urn_uuid()
 }
 
 /// Adds a urn:uuid @base if there is none, returning the UUID, or `None` if the
@@ -103,16 +96,8 @@ pub fn add_urn_uuid(context: &mut RoCrateContext) -> Option<String> {
 }
 
 /// Reads a zipped crate.
-///
-/// `parse_zip` panics on a missing file, an invalid archive or an archive
-/// without ro-crate-metadata.json.
 pub fn parse_zip_checked(path: &str, validation_level: i8) -> Result<RoCrate, CrateReadError> {
-    panic::catch_unwind(|| parse_zip(path, validation_level)).unwrap_or_else(|_| {
-        Err(CrateReadError::IoError(io::Error::other(format!(
-            "{} is not a readable RO-Crate zip archive",
-            path
-        ))))
-    })
+    parse_zip(path, validation_level)
 }
 
 /// Returns true for IRIs with no path to resolve against, such as urn:uuid:...

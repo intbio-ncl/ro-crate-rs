@@ -226,6 +226,8 @@ pub enum CrateReadError {
     SchemaError(String),
     #[error("{0}")]
     ReqwestError(#[from] reqwest::Error),
+    #[error("{0}")]
+    ZipError(#[from] zip::result::ZipError),
 }
 
 impl PartialEq for CrateReadError {
@@ -405,11 +407,11 @@ impl CrateValidation {
 /// Extracts an ro-crate-metadata.json file from a zipped ro-crate
 pub fn parse_zip(zip_path: &str, validation_level: i8) -> Result<RoCrate, CrateReadError> {
     // 1. Open the .zip file
-    let file = fs::File::open(zip_path).unwrap();
-    let mut archive = ZipArchive::new(file).unwrap();
+    let file = fs::File::open(zip_path)?;
+    let mut archive = ZipArchive::new(file)?;
 
     // 2. Retrieve the file by name
-    let mut file_in_zip = archive.by_name("ro-crate-metadata.json").unwrap();
+    let mut file_in_zip = archive.by_name("ro-crate-metadata.json")?;
 
     // 3. Read the file contents into memory
     let buffer = read_with_limit(&mut file_in_zip, MAX_METADATA_BYTES)?;
@@ -511,6 +513,31 @@ mod tests {
     fn test_parse_zip() {
         let zip = parse_zip("tests/fixtures/zip_test/fixtures.zip", 0);
         assert!(zip.is_ok());
+    }
+
+    #[test]
+    fn parse_zip_returns_errors_for_invalid_archives() {
+        let directory = tempfile::tempdir().unwrap();
+        let missing = directory.path().join("missing.zip");
+        assert!(matches!(
+            parse_zip(missing.to_str().unwrap(), 0),
+            Err(CrateReadError::IoError(_))
+        ));
+
+        let invalid = directory.path().join("invalid.zip");
+        fs::write(&invalid, b"not a zip").unwrap();
+        assert!(matches!(
+            parse_zip(invalid.to_str().unwrap(), 0),
+            Err(CrateReadError::ZipError(_))
+        ));
+
+        let empty = directory.path().join("empty.zip");
+        let writer = zip::ZipWriter::new(fs::File::create(&empty).unwrap());
+        writer.finish().unwrap();
+        assert!(matches!(
+            parse_zip(empty.to_str().unwrap(), 0),
+            Err(CrateReadError::ZipError(_))
+        ));
     }
 
     #[test]

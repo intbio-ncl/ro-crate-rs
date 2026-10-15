@@ -175,6 +175,15 @@ fn crate_read_error_to_report(py: Python<'_>, error: CrateReadError) -> PyResult
             Some("ReqwestError"),
             Some(err.to_string()),
         ),
+        CrateReadError::ZipError(err) => build_validation_report(
+            py,
+            false,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Some("ZipError"),
+            Some(err.to_string()),
+        ),
     }
 }
 

@@ -353,6 +353,7 @@ impl From<CrateReadError> for ValidationReport {
             CrateReadError::VocabNotValid(_) => "VocabNotValid",
             CrateReadError::SchemaError(_) => "SchemaError",
             CrateReadError::ReqwestError(_) => "ReqwestError",
+            CrateReadError::ZipError(_) => "ZipError",
         };
         ValidationReport::error(error_type, error.to_string())
     }

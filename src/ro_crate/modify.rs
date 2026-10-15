@@ -31,13 +31,9 @@ pub trait DynamicEntityManipulation: Serialize {
     /// # Arguments
     /// * 'values' - A 'Hashmap' containing a key and a valid EntityValue type
     fn add_dynamic_fields(&mut self, values: HashMap<String, EntityValue>) {
-        for (key, value) in values {
-            match value {
-                EntityValue::EntityString(s) => self.add_string_value(key, s),
-                EntityValue::EntityId(id) => self.add_id_value(key, id),
-                _ => todo!(),
-            }
-        }
+        self.dynamic_entity()
+            .get_or_insert_with(HashMap::new)
+            .extend(values);
     }
 
     /// Adds a string value to the dynamic entity.
@@ -460,6 +456,23 @@ mod tests {
         assert_eq!(
             entity.dynamic_entity.unwrap().get("key1").unwrap(),
             &EntityValue::EntityString("value1".to_string())
+        );
+    }
+
+    #[test]
+    fn add_dynamic_fields_accepts_boolean_values() {
+        let mut entity = TestEntity {
+            id: "test_id".to_string(),
+            type_: DataType::Term("test_type".to_string()),
+            dynamic_entity: None,
+        };
+        entity.add_dynamic_fields(HashMap::from([(
+            "enabled".to_string(),
+            EntityValue::EntityBool(true),
+        )]));
+        assert_eq!(
+            entity.dynamic_entity.unwrap().get("enabled"),
+            Some(&EntityValue::EntityBool(true))
         );
     }
 

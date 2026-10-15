@@ -212,8 +212,9 @@ impl RoCrateContext {
     }
 
     pub fn get_urn_uuid(&self) -> Option<String> {
-        let base = self.get_specific_context("@base");
-        base.map(|uuid| uuid.strip_prefix("urn:uuid:").unwrap().to_string())
+        self.get_specific_context("@base")?
+            .strip_prefix("urn:uuid:")
+            .map(str::to_string)
     }
 
     /// Get the schema version from the context URLs
@@ -238,6 +239,18 @@ mod write_crate_tests {
     use crate::ro_crate::schema;
     use std::path::Path;
     use std::path::PathBuf;
+
+    #[test]
+    fn get_urn_uuid_returns_none_for_non_uuid_base() {
+        let context =
+            super::RoCrateContext::ExtendedContext(vec![super::ContextItem::EmbeddedContext(
+                std::collections::HashMap::from([(
+                    "@base".to_string(),
+                    "https://example.org/".to_string(),
+                )]),
+            )]);
+        assert_eq!(context.get_urn_uuid(), None);
+    }
 
     fn fixture_path(relative_path: &str) -> PathBuf {
         Path::new("tests/fixtures").join(relative_path)

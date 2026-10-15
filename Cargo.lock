@@ -2942,7 +2942,6 @@ dependencies = [
  "tabled",
  "tempfile",
  "url",
- "uuid",
  "zip",
 ]
 

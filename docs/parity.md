@@ -123,20 +123,10 @@ The table is keyed by the crate's `urn:uuid` `@base`, so add one first with
 `cargo build -p ro-crate-rs-cli --features parquet` or
 `maturin build --features parquet`.
 
-## Core calls worked around
+## Known core behaviour
 
-Some core calls currently panic or have no effect, so the CLI and Python use the
-replacements in `cli/src/core_compat.rs` and `python/src/core_compat.rs`. Each
-replacement names the call it stands in for; switch back once the core is fixed.
+The CLI and Python call the core directly. Core behaviour they pass through unchanged:
 
-| Core call | Problem | Replacement |
-| --- | --- | --- |
-| `RoCrateContext::add_urn_uuid` | does nothing for an extended context without embedded terms | `add_urn_uuid` adds an embedded `@base` |
-
-Remaining core behaviour the tools pass through unchanged:
-
-- `RoCrateContext::add_urn_uuid` gives every embedded term map its own `@base`
-  when a crate has several maps and no `urn:uuid` yet.
 - `validate_crate_keys` reports a plain-string `license` (such as the `"Private"`
   default from `init -m`) as a missing local ID.
 

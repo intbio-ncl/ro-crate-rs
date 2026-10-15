@@ -174,41 +174,47 @@ impl RoCrateContext {
         }
     }
 
-    pub fn add_urn_uuid(&mut self) {
+    /// Adds a urn:uuid @base if the context has none, returning the UUID.
+    ///
+    /// Replaces an existing non-urn @base, or otherwise adds the @base to the first
+    /// embedded term map, adding a map if there is none. Returns `None` for a legacy
+    /// embedded-only context, which cannot hold an @base.
+    pub fn add_urn_uuid(&mut self) -> Option<String> {
+        if let Some(urn) = self.get_urn_uuid() {
+            return Some(urn);
+        }
+        let base = format!("urn:uuid:{}", Uuid::now_v7());
+
         match self {
-            RoCrateContext::ExtendedContext(context) => {
-                for x in context {
-                    match x {
-                        ContextItem::EmbeddedContext(embedded) => {
-                            let urn_found = embedded
-                                .get("@base")
-                                .is_some_and(|value| value.starts_with("urn:uuid:"));
-                            if !urn_found {
-                                embedded.insert(
-                                    "@base".to_string(),
-                                    format!("urn:uuid:{}", Uuid::now_v7()),
-                                );
-                            }
-                        }
-                        ContextItem::ReferenceItem(_) => {
-                            continue;
-                        }
+            RoCrateContext::ExtendedContext(items) => {
+                let is_map = |item: &ContextItem| matches!(item, ContextItem::EmbeddedContext(_));
+                let has_base = |item: &ContextItem| matches!(item, ContextItem::EmbeddedContext(map) if map.contains_key("@base"));
+                let target = items
+                    .iter()
+                    .position(has_base)
+                    .or_else(|| items.iter().position(is_map));
+
+                match target.map(|index| &mut items[index]) {
+                    Some(ContextItem::EmbeddedContext(map)) => {
+                        map.insert("@base".to_string(), base);
                     }
+                    _ => items.push(ContextItem::EmbeddedContext(HashMap::from([(
+                        "@base".to_string(),
+                        base,
+                    )]))),
                 }
             }
             RoCrateContext::ReferenceContext(reference) => {
-                let mut base_map = HashMap::new();
-                base_map.insert("@base".to_string(), format!("urn:uuid:{}", Uuid::now_v7()));
-
                 *self = RoCrateContext::ExtendedContext(vec![
                     ContextItem::ReferenceItem(reference.clone()),
-                    ContextItem::EmbeddedContext(base_map),
+                    ContextItem::EmbeddedContext(HashMap::from([("@base".to_string(), base)])),
                 ]);
             }
             RoCrateContext::EmbeddedContext(context) => {
-                debug!("EmbeddedContext legacy of {:?}", context)
+                debug!("EmbeddedContext legacy of {:?}", context);
             }
         }
+        self.get_urn_uuid()
     }
 
     pub fn get_urn_uuid(&self) -> Option<String> {
@@ -250,6 +256,99 @@ mod write_crate_tests {
                 )]),
             )]);
         assert_eq!(context.get_urn_uuid(), None);
+    }
+
+    fn reference(url: &str) -> super::ContextItem {
+        super::ContextItem::ReferenceItem(url.to_string())
+    }
+
+    fn embedded(entries: &[(&str, &str)]) -> super::ContextItem {
+        super::ContextItem::EmbeddedContext(
+            entries
+                .iter()
+                .map(|(key, value)| (key.to_string(), value.to_string()))
+                .collect(),
+        )
+    }
+
+    fn bases(context: &super::RoCrateContext) -> Vec<String> {
+        match context {
+            super::RoCrateContext::ExtendedContext(items) => items
+                .iter()
+                .filter_map(|item| match item {
+                    super::ContextItem::EmbeddedContext(map) => map.get("@base").cloned(),
+                    super::ContextItem::ReferenceItem(_) => None,
+                })
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    #[test]
+    fn add_urn_uuid_to_reference_contexts() {
+        let mut context =
+            super::RoCrateContext::ReferenceContext("https://w3id.org/ro/crate/1.3/context".into());
+        let urn = context.add_urn_uuid().unwrap();
+        assert_eq!(bases(&context), vec![format!("urn:uuid:{}", urn)]);
+
+        let mut context = super::RoCrateContext::ExtendedContext(vec![
+            reference("https://w3id.org/ro/crate/1.3/context"),
+            reference("https://example.org/terms"),
+        ]);
+        let urn = context.add_urn_uuid().unwrap();
+        assert_eq!(bases(&context), vec![format!("urn:uuid:{}", urn)]);
+        assert_eq!(context.add_urn_uuid(), Some(urn));
+    }
+
+    #[test]
+    fn add_urn_uuid_adds_one_base_to_several_maps() {
+        let mut context = super::RoCrateContext::ExtendedContext(vec![
+            reference("https://w3id.org/ro/crate/1.3/context"),
+            embedded(&[("name", "http://schema.org/name")]),
+            embedded(&[("author", "http://schema.org/author")]),
+        ]);
+        let urn = context.add_urn_uuid().unwrap();
+        assert_eq!(bases(&context), vec![format!("urn:uuid:{}", urn)]);
+        assert_eq!(
+            context.get_specific_context("name").unwrap(),
+            "http://schema.org/name"
+        );
+    }
+
+    #[test]
+    fn add_urn_uuid_replaces_a_non_urn_base() {
+        let mut context = super::RoCrateContext::ExtendedContext(vec![
+            reference("https://w3id.org/ro/crate/1.3/context"),
+            embedded(&[("name", "http://schema.org/name")]),
+            embedded(&[("@base", "https://example.org/")]),
+        ]);
+        let urn = context.add_urn_uuid().unwrap();
+        assert_eq!(bases(&context), vec![format!("urn:uuid:{}", urn)]);
+    }
+
+    #[test]
+    fn add_urn_uuid_keeps_an_existing_urn() {
+        let existing = "urn:uuid:01234567-89ab-cdef-0123-456789abcdef";
+        let mut context = super::RoCrateContext::ExtendedContext(vec![
+            reference("https://w3id.org/ro/crate/1.3/context"),
+            embedded(&[("@base", existing)]),
+            embedded(&[("name", "http://schema.org/name")]),
+        ]);
+        assert_eq!(
+            context.add_urn_uuid().as_deref(),
+            existing.strip_prefix("urn:uuid:")
+        );
+        assert_eq!(bases(&context), vec![existing.to_string()]);
+    }
+
+    #[test]
+    fn add_urn_uuid_cannot_extend_an_embedded_only_context() {
+        let mut context =
+            super::RoCrateContext::EmbeddedContext(vec![std::collections::HashMap::from([(
+                "name".to_string(),
+                "http://schema.org/name".to_string(),
+            )])]);
+        assert_eq!(context.add_urn_uuid(), None);
     }
 
     fn fixture_path(relative_path: &str) -> PathBuf {

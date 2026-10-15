@@ -1,6 +1,5 @@
 //! Python bindings for ro-crate-rs core
 
-mod core_compat;
 #[cfg(feature = "rdf")]
 mod rdf;
 mod utils;
@@ -417,7 +416,9 @@ impl PyRoCrate {
     /// # Errors
     /// Raises a `ValueError` if the context cannot hold an `@base`.
     fn add_urn_uuid(&mut self) -> PyResult<String> {
-        core_compat::add_urn_uuid(&mut self.inner.context)
+        self.inner
+            .context
+            .add_urn_uuid()
             .ok_or_else(|| PyValueError::new_err("Context does not support a urn:uuid @base"))
     }
 

@@ -25,7 +25,6 @@ use tabled::settings::{object::Rows, Style, Width};
 use write::zip_crate;
 pub mod args;
 mod commands;
-mod core_compat;
 mod crate_io;
 #[cfg(feature = "rdf")]
 mod rdf;

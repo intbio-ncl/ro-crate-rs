@@ -5,7 +5,6 @@ use crate::args::{
     ReadLinksCommand, ReadListCommand, ReplaceIdCommand, SchemaCommand, SubcratesCommand,
     UpsertCommand, ValidateCrateCommand,
 };
-use crate::core_compat;
 use crate::crate_io::{
     arg_or_stdin, fail, load_crate, load_for_update, parse_context_item, parse_entity_value,
     print_list, read_target, save_crate,
@@ -194,7 +193,7 @@ pub fn context(command: ContextCommand) {
         ContextCommand::AddUrn(command) => {
             let target = &command.target.target_crate;
             let mut rocrate = load_for_update(target);
-            match core_compat::add_urn_uuid(&mut rocrate.context) {
+            match rocrate.context.add_urn_uuid() {
                 Some(urn) => {
                     save_crate(&rocrate, target);
                     println!("{}", urn);

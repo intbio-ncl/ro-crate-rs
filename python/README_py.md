@@ -260,8 +260,10 @@ crate.expand_term("name")                     # "http://schema.org/name"
 crate.compact_iri("http://schema.org/name")   # "name"
 ```
 
-Relative IDs need a hierarchical base IRI, so convert before adding a `urn:uuid`
-`@base`. Formats are `turtle`, `ntriples`, `nquads` and `rdfxml`. Pass
+Relative IDs are resolved against the context's `@base`, or `base` if it has
+none. A `urn:uuid` `@base`, such as one added by `add_urn_uuid`, is resolved as
+`arcp://uuid,<uuid>/`, the base RO-Crate recommends for crates that are not on
+the web. Formats are `turtle`, `ntriples`, `nquads` and `rdfxml`. Pass
 `allow_relative=True` to keep relative IDs as they are, `allow_remote=True` to
 fetch unknown contexts, or `contexts={url: json_text}` to provide them.
 

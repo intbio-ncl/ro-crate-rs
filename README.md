@@ -62,3 +62,7 @@ The CLI and Python bindings expose the whole core API; see
 
 RO-Crate v1.1, v1.2 and v1.3
 
+# License 
+
+[Apache License, Version 2.0](LICENSE.md)
+

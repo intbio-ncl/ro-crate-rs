@@ -9,7 +9,7 @@ use crate::ro_crate::constraints::{DataType, EntityValue, Id, License};
 use crate::ro_crate::graph_vector::GraphVector;
 use crate::ro_crate::rocrate::RoCrate;
 
-use super::context::ResolvedContext;
+use super::context::{ResolvedContext, resolution_base};
 use super::error::RdfError;
 use super::graph::RdfGraph;
 use super::resolver::ContextResolverBuilder;
@@ -516,7 +516,7 @@ pub fn rocrate_to_rdf_with_options(
     if context.base.is_none()
         && let Some(base) = options.base_iri()
     {
-        context.base = Some(base.to_string());
+        context.base = Some(resolution_base(base));
     }
 
     let estimated_triples = crate_.graph.iter().map(estimate_entity_triples).sum();
@@ -730,18 +730,25 @@ mod tests {
         );
     }
 
+    fn has_subject(graph: &RdfGraph, iri: &str) -> bool {
+        graph.iter().any(|triple| {
+            matches!(&triple.subject, NamedOrBlankNode::NamedNode(node) if node.as_str() == iri)
+        })
+    }
+
     #[test]
-    fn test_rocrate_to_rdf_rejects_opaque_base() {
+    fn test_rocrate_to_rdf_resolves_urn_uuid_base_as_arcp() {
         use crate::ro_crate::context::{ContextItem, RoCrateContext};
+        use crate::ro_crate::rdf::rdf_graph_to_rocrate;
+
+        const URN: &str = "urn:uuid:01234567-89ab-cdef-0123-456789abcdef";
+        const ARCP: &str = "arcp://uuid,01234567-89ab-cdef-0123-456789abcdef/";
 
         let path = fixture_path("_ro-crate-metadata-minimal.json");
         let mut crate_ = read_crate(&path, 0).expect("Failed to read crate");
         crate_.context = RoCrateContext::ExtendedContext(vec![
             ContextItem::ReferenceItem("https://w3id.org/ro/crate/1.1/context".to_string()),
-            ContextItem::EmbeddedContext(HashMap::from([(
-                "@base".to_string(),
-                "urn:uuid:01234567-89ab-cdef-0123-456789abcdef".to_string(),
-            )])),
+            ContextItem::EmbeddedContext(HashMap::from([("@base".to_string(), URN.to_string())])),
         ]);
 
         for options in [
@@ -749,19 +756,53 @@ mod tests {
             ConversionOptions::AllowRelative,
             ConversionOptions::with_base(TEST_BASE_IRI),
         ] {
-            let error =
+            let graph =
                 rocrate_to_rdf_with_options(&crate_, ContextResolverBuilder::default(), options)
-                    .unwrap_err();
-            assert!(error.to_string().contains("non-hierarchical"), "{error}");
+                    .unwrap();
+            assert!(has_subject(&graph, ARCP));
+            assert!(has_subject(
+                &graph,
+                &format!("{ARCP}ro-crate-metadata.json")
+            ));
         }
 
-        let error = rocrate_to_rdf_with_options(
+        // The arcp IRIs are made relative again on the way back
+        let graph = rocrate_to_rdf_with_options(
+            &crate_,
+            ContextResolverBuilder::default(),
+            ConversionOptions::Strict,
+        )
+        .unwrap();
+        let restored = rdf_graph_to_rocrate(graph).unwrap();
+        let ids = restored.get_all_ids();
+        assert!(ids.iter().any(|id| *id == "./"), "{ids:?}");
+        assert!(
+            ids.iter().any(|id| *id == "ro-crate-metadata.json"),
+            "{ids:?}"
+        );
+
+        // A urn:uuid fallback base resolves the same way
+        let graph = rocrate_to_rdf_with_options(
             &read_crate(&path, 0).expect("Failed to read crate"),
             ContextResolverBuilder::default(),
-            ConversionOptions::with_base("urn:uuid:1234"),
+            ConversionOptions::with_base(URN),
         )
-        .unwrap_err();
-        assert!(error.to_string().contains("non-hierarchical"), "{error}");
+        .unwrap();
+        assert!(has_subject(&graph, ARCP));
+    }
+
+    #[test]
+    fn test_rocrate_to_rdf_rejects_opaque_base() {
+        let path = fixture_path("_ro-crate-metadata-minimal.json");
+        for base in ["urn:uuid:1234", "urn:isbn:0451450523"] {
+            let error = rocrate_to_rdf_with_options(
+                &read_crate(&path, 0).expect("Failed to read crate"),
+                ContextResolverBuilder::default(),
+                ConversionOptions::with_base(base),
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains("non-hierarchical"), "{error}");
+        }
     }
 
     #[test]

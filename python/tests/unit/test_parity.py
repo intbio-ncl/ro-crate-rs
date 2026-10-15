@@ -384,19 +384,20 @@ class TestRdf(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.crate.to_rdf("json", base=BASE)
         with self.assertRaises(ValueError):
-            self.crate.to_rdf(base="urn:uuid:1234")
-        self.crate.add_urn_uuid()
-        with self.assertRaises(ValueError):
-            self.crate.to_rdf()  # urn:uuid bases cannot resolve relative IRIs
-        with self.assertRaises(ValueError):
-            self.crate.to_rdf_graph()
+            self.crate.to_rdf(base="urn:uuid:1234")  # not a UUID, so no arcp base
+
+    def test_to_rdf_with_urn_base(self):
+        urn = self.crate.add_urn_uuid()
+        base = f"arcp://uuid,{urn}/"
+        self.assertIn(f"<{base}data.csv>", self.crate.to_rdf("ntriples"))
+        self.assertIn(f"<{base}>", self.crate.to_rdf_graph().serialize("ntriples"))
 
     def test_expand_with_urn_base(self):
-        self.crate.add_urn_uuid()
+        urn = self.crate.add_urn_uuid()
+        data = f"arcp://uuid,{urn}/data.csv"
         self.assertEqual(self.crate.expand_term("name"), "http://schema.org/name")
-        self.assertEqual(self.crate.expand_term("data.csv"), "data.csv")
-        with self.assertRaises(ValueError):
-            self.crate.expand_term("data.csv", strict=True)
+        self.assertEqual(self.crate.expand_term("data.csv"), data)
+        self.assertEqual(self.crate.expand_term("data.csv", strict=True), data)
 
     def test_remote_contexts(self):
         terms = json.dumps({"@context": {"foo": "https://example.org/terms#foo"}})

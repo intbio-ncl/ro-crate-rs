@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 use url::Url;
+use uuid::Uuid;
 
 use crate::ro_crate::context::RoCrateContext;
 use crate::ro_crate::rdf::error::ContextError;
@@ -133,6 +134,33 @@ fn resolve_relative_iri_or_keep(base: &str, relative: &str) -> Result<String, Co
     }
 }
 
+/// Resolves a relative IRI against a base IRI. With `allow_relative`, a relative
+/// IRI that navigates above the root or meets an opaque base is returned unchanged.
+fn resolve_relative_iri_checked(
+    base: &str,
+    relative: &str,
+    allow_relative: bool,
+) -> Result<String, ContextError> {
+    match resolve_relative_iri(base, relative) {
+        Err(
+            ContextError::RelativeResolutionError { .. } | ContextError::NonHierarchicalBase { .. },
+        ) if allow_relative => Ok(relative.to_string()),
+        result => result,
+    }
+}
+
+/// Returns the base IRI to resolve relative IRIs against.
+///
+/// A `urn:uuid:` base has no path to resolve against, so it is replaced by the
+/// equivalent `arcp://uuid,<uuid>/` base that RO-Crate recommends for crates
+/// that are not on the web. Other bases are returned unchanged.
+pub(crate) fn resolution_base(base: &str) -> String {
+    base.strip_prefix("urn:uuid:")
+        .and_then(|uuid| Uuid::parse_str(uuid).ok())
+        .map(|uuid| format!("arcp://uuid,{}/", uuid.hyphenated()))
+        .unwrap_or_else(|| base.to_string())
+}
+
 /// Checks if a term is an absolute IRI with a valid URI scheme.
 ///
 /// According to RFC 3986, a URI scheme:
@@ -251,9 +279,9 @@ impl ResolvedContext {
 
     /// Expands a term to its full IRI with strict validation.
     ///
-    /// Errors if a relative IRI is encountered without @base and `allow_relative`
-    /// is false, or if the result remains relative. Errors whatever `allow_relative`
-    /// is when @base is opaque (e.g., `urn:uuid:`) and cannot resolve a relative IRI.
+    /// Errors if a relative IRI cannot be resolved: there is no @base, it navigates
+    /// above the root, or @base is opaque (e.g., `urn:isbn:`). With `allow_relative`,
+    /// such IRIs are returned unchanged instead. Malformed IRIs always error.
     pub fn expand_term_checked(
         &self,
         term: &str,
@@ -282,7 +310,7 @@ impl ResolvedContext {
         // 4. Path-like relative IRIs -> resolve against @base
         if has_relative_component(term) {
             if let Some(base) = &self.base {
-                return resolve_relative_iri(base, term);
+                return resolve_relative_iri_checked(base, term, allow_relative);
             }
             if !allow_relative {
                 return Err(ContextError::InvalidContext(format!(
@@ -301,7 +329,7 @@ impl ResolvedContext {
         // 6. No @vocab - treat remaining unknown terms as relative IRIs
         // This handles cases like "file.json" which are filenames
         if let Some(base) = &self.base {
-            return resolve_relative_iri(base, term);
+            return resolve_relative_iri_checked(base, term, allow_relative);
         }
 
         // 7. No @base available for unknown term
@@ -755,12 +783,45 @@ mod tests {
         assert_eq!(ctx.expand_term("./file.txt").unwrap(), "./file.txt");
         assert_eq!(ctx.expand_term("data.csv").unwrap(), "data.csv");
 
-        for allow_relative in [false, true] {
-            let error = ctx
-                .expand_term_checked("./file.txt", allow_relative)
-                .unwrap_err();
-            assert!(matches!(error, ContextError::NonHierarchicalBase { .. }));
-            assert!(error.to_string().contains("non-hierarchical"));
+        let error = ctx.expand_term_checked("./file.txt", false).unwrap_err();
+        assert!(matches!(error, ContextError::NonHierarchicalBase { .. }));
+        assert!(error.to_string().contains("non-hierarchical"));
+        assert_eq!(
+            ctx.expand_term_checked("./file.txt", true).unwrap(),
+            "./file.txt"
+        );
+    }
+
+    #[test]
+    fn test_expand_term_checked_above_root() {
+        let ctx = test_context();
+        assert!(matches!(
+            ctx.expand_term_checked("../../../file.txt", false),
+            Err(ContextError::RelativeResolutionError { .. })
+        ));
+        assert_eq!(
+            ctx.expand_term_checked("../../../file.txt", true).unwrap(),
+            "../../../file.txt"
+        );
+        // Malformed IRIs are not relative IRIs to keep
+        assert!(matches!(
+            ctx.expand_term_checked("//[bad", true),
+            Err(ContextError::InvalidRelativeIri { .. })
+        ));
+    }
+
+    #[test]
+    fn test_resolution_base_maps_urn_uuid_to_arcp() {
+        assert_eq!(
+            resolution_base("urn:uuid:01234567-89AB-CDEF-0123-456789ABCDEF"),
+            "arcp://uuid,01234567-89ab-cdef-0123-456789abcdef/"
+        );
+        for base in [
+            "urn:uuid:1234",
+            "urn:isbn:0451450523",
+            "http://example.org/crate/",
+        ] {
+            assert_eq!(resolution_base(base), base);
         }
     }
 }

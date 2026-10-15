@@ -1,5 +1,5 @@
 [build-system]
-requires = ["maturin>=1.4,<2.0"]
+requires = ["maturin>=1.9.3,<2.0"]
 build-backend = "maturin"
 
 [project]
@@ -8,6 +8,9 @@ description = "Lightweight Python library for RO-Crate manipulation implemented 
 readme = "README_py.md"
 keywords = ["ro-crate", "rocrate", "research object", "rocraters"]
 requires-python = ">=3.10"
+license = "Apache-2.0"
+# maturin includes python/LICENSE.md itself; listing it in license-files clashes
+# with the root LICENSE.md that the path dependency adds to the sdist
 classifiers = [
     "Programming Language :: Rust",
     "Programming Language :: Python :: Implementation :: CPython",

@@ -4,8 +4,8 @@ This Project welcomes contributions, suggestions, and feedback. All contribution
 
 To suggest changes, improvements or issues, use the GitHub repository [issues](https://github.com/intbio-ncl/ro-crate-rs/issues) or [pull requests](https://github.com/intbio-ncl/ro-crate-rs/pulls) 
 
-The Project abides by the Organization's [code of conduct](/.CODE-OF-CONDUCT.md).
+The Project abides by the Organization's [code of conduct](./CODE-OF-CONDUCT.md).
 
 ---
-Part of MVG-0.1-beta.
+Adapted from MVG-0.1-beta.
 Made with love by GitHub. Licensed under the [CC-BY 4.0 License](https://creativecommons.org/licenses/by/4.0/).

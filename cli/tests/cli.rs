@@ -1098,10 +1098,53 @@ mod rdf {
         let d = dir.path();
         err(d, &["rdf", "export"]);
         err(d, &["rdf", "export", "--base", BASE, "--allow-relative"]);
-        ok(d, &["context", "add-urn"]);
+    }
+
+    #[test]
+    fn export_with_urn_base_uses_arcp() {
+        let dir = example_dir();
+        let d = dir.path();
+        let ids = |output: String| {
+            let restored: Value = serde_json::from_str(&output).unwrap();
+            let mut ids: Vec<String> = restored["@graph"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(|entity| entity["@id"].as_str().map(str::to_string))
+                .collect();
+            ids.sort();
+            ids
+        };
+        let web_ids = ids(ok(d, &["rdf", "roundtrip", "--base", BASE]));
+
+        let urn = ok(d, &["context", "add-urn"]);
+        let base = format!("arcp://uuid,{}/", urn.trim());
+        let ntriples = ok(d, &["rdf", "export", "-f", "nt"]);
+        assert!(
+            ntriples.contains(&format!("<{base}data.csv>")),
+            "{ntriples}"
+        );
+
+        // IDs come back relative, just as they do from a web base
+        assert_eq!(ids(ok(d, &["rdf", "roundtrip"])), web_ids);
+    }
+
+    #[test]
+    fn export_outside_root_needs_allow_relative() {
+        let dir = example_dir();
+        let d = dir.path();
+        ok(d, &["add", "../external.txt", "File"]);
+        let urn = ok(d, &["context", "add-urn"]);
+
         let stderr = handled_err(d, &["rdf", "export"]);
-        assert!(stderr.contains("non-hierarchical"), "{stderr}");
-        handled_err(d, &["rdf", "roundtrip"]);
+        assert!(stderr.contains("navigates above root"), "{stderr}");
+
+        let ntriples = ok(d, &["rdf", "export", "--allow-relative", "-f", "nt"]);
+        assert!(ntriples.contains("<../external.txt>"), "{ntriples}");
+        assert!(
+            ntriples.contains(&format!("<arcp://uuid,{}/data.csv>", urn.trim())),
+            "{ntriples}"
+        );
     }
 
     #[test]
@@ -1115,13 +1158,17 @@ mod rdf {
     fn expand_with_urn_base() {
         let dir = example_dir();
         let d = dir.path();
-        ok(d, &["context", "add-urn"]);
+        let urn = ok(d, &["context", "add-urn"]);
+        let data = format!("arcp://uuid,{}/data.csv", urn.trim());
         assert_eq!(
             ok(d, &["rdf", "expand", "name"]).trim(),
             "http://schema.org/name"
         );
-        assert_eq!(ok(d, &["rdf", "expand", "data.csv"]).trim(), "data.csv");
-        handled_err(d, &["rdf", "expand", "data.csv", "--strict"]);
+        assert_eq!(ok(d, &["rdf", "expand", "data.csv"]).trim(), data);
+        assert_eq!(
+            ok(d, &["rdf", "expand", "data.csv", "--strict"]).trim(),
+            data
+        );
     }
 
     #[test]

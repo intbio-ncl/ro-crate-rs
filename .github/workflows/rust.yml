@@ -25,6 +25,8 @@ jobs:
       # Core and CLI with the rdf, subcrate-resolution and parquet features
       - run: cargo test --workspace --all-features --verbose
       - run: cargo test -p ro-crate-rs-cli --no-default-features --verbose
+      # The CLI and Python packages ship their own copy of the license
+      - run: cmp LICENSE.md cli/LICENSE.md && cmp LICENSE.md python/LICENSE.md
 
   python:
     name: Python bindings

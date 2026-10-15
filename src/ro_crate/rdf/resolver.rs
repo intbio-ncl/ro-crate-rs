@@ -8,7 +8,7 @@ use crate::ro_crate::schema::{
     ROCRATE_SCHEMA_1_1, ROCRATE_SCHEMA_1_2, ROCRATE_SCHEMA_1_3, RoCrateSchemaVersion,
 };
 
-use super::context::ResolvedContext;
+use super::context::{ResolvedContext, resolution_base};
 use super::error::ContextError;
 
 /// URL for the RO-Crate 1.1 JSON-LD context.
@@ -271,7 +271,7 @@ impl ContextResolverBuilder {
     ) {
         for (key, value) in map {
             match key.as_str() {
-                "@base" if is_root => resolved.base = Some(value.clone()),
+                "@base" if is_root => resolved.base = Some(resolution_base(value)),
                 "@vocab" if is_root => resolved.vocab = Some(value.clone()),
                 // Handle other keywords, e.g. @type, @context, etc.
                 _ if key.starts_with('@') => {}

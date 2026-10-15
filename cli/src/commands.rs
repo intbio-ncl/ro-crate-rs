@@ -71,7 +71,7 @@ pub fn remove_type(command: EntityTypeCommand) {
     let mut rocrate = load_for_update(target);
     match rocrate.get_entity_mutable(&command.id) {
         Some(entity) => {
-            if let Err(e) = core_compat::remove_type(entity, command.data_type) {
+            if let Err(e) = entity.remove_type(command.data_type) {
                 fail(e);
             }
         }

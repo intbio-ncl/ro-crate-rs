@@ -10,20 +10,6 @@ use rocraters::ro_crate::rocrate::RoCrate;
 use std::collections::HashMap;
 use uuid::Uuid;
 
-/// Removes a type from an entity.
-///
-/// `GraphVector::remove_type` returns the reduced type without storing it.
-pub fn remove_type(entity: &mut GraphVector, data_type: String) -> Result<(), String> {
-    let updated = entity.remove_type(data_type)?;
-    match entity {
-        GraphVector::DataEntity(entity) => entity.type_ = updated,
-        GraphVector::ContextualEntity(entity) => entity.type_ = updated,
-        GraphVector::RootDataEntity(entity) => entity.type_ = updated,
-        GraphVector::MetadataDescriptor(entity) => entity.type_ = updated,
-    }
-    Ok(())
-}
-
 /// Adds an ID to the root data entity's hasPart.
 ///
 /// `RoCrate::add_data_to_partof_root` looks the ID up as if it were the root, so

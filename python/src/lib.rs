@@ -702,7 +702,10 @@ impl PyRoCrate {
             .inner
             .get_entity_mutable(id)
             .ok_or_else(|| entity_not_found(id))?;
-        core_compat::remove_type(entity, data_type).map_err(PyValueError::new_err)
+        entity
+            .remove_type(data_type)
+            .map(|_| ())
+            .map_err(PyValueError::new_err)
     }
 
     /// Adds or overwrites properties on an entity.

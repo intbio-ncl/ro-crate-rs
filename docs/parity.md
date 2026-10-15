@@ -79,7 +79,6 @@ A context item is a URL, or a JSON object (CLI) or dict (Python) of term definit
 | `RoCrate::update_id_recursive` | `modify replace-id OLD NEW` | `crate.replace_id(old, new)` |
 | `RoCrate::remove_dynamic_entity_property` | `modify remove-field ID KEY` | `crate.remove_dynamic_entity_property(id, key)` |
 | `GraphVector::add_type` | `modify add-type ID TYPE` | `crate.add_type(id, type)` |
-| `GraphVector::remove_type` | `modify remove-type ID TYPE` | `crate.remove_type(id, type)` |
 | `RoCrate::add_data_to_partof_root` | `modify add-has-part ID` | `crate.add_data_to_partof_root(id)` |
 
 ## Subcrates (`subcrate-resolution` feature, on by default)
@@ -133,7 +132,6 @@ replacement names the call it stands in for; switch back once the core is fixed.
 
 | Core call | Problem | Replacement |
 | --- | --- | --- |
-| `GraphVector::remove_type` | returns the reduced type without storing it | `remove_type` stores the result |
 | `RoCrate::add_data_to_partof_root` | looks the ID up as the root, so does nothing | `add_to_root_has_part` uses `RootDataEntity::add_entity_to_partof` |
 | `RootDataEntity::add_entity_to_partof` | replaces a single existing `hasPart` ID | `add_to_root_has_part` makes it a list first |
 | `RoCrateContext::add_urn_uuid` | does nothing for an extended context without embedded terms | `add_urn_uuid` adds an embedded `@base` |

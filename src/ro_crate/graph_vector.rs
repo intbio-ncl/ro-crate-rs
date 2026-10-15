@@ -156,14 +156,18 @@ impl GraphVector {
         }
     }
 
-    /// Removes a type from entity if there is a match
+    /// Removes a type from the entity, returning its updated type.
+    ///
+    /// Leaves the entity unchanged and errors if the type is not present or is its only type.
     pub fn remove_type(&mut self, remove_type: String) -> Result<DataType, String> {
-        match self {
-            GraphVector::MetadataDescriptor(entity) => entity.type_.remove_type(remove_type),
-            GraphVector::RootDataEntity(entity) => entity.type_.remove_type(remove_type),
-            GraphVector::DataEntity(entity) => entity.type_.remove_type(remove_type),
-            GraphVector::ContextualEntity(entity) => entity.type_.remove_type(remove_type),
-        }
+        let type_ = match self {
+            GraphVector::MetadataDescriptor(entity) => &mut entity.type_,
+            GraphVector::RootDataEntity(entity) => &mut entity.type_,
+            GraphVector::DataEntity(entity) => &mut entity.type_,
+            GraphVector::ContextualEntity(entity) => &mut entity.type_,
+        };
+        *type_ = type_.remove_type(remove_type)?;
+        Ok(type_.clone())
     }
 
     /// Removes a specific field from a dynamic entity within the RO-Crate graph.
@@ -398,4 +402,58 @@ fn is_data_entity(entity_type: &Value, id: &str) -> bool {
         },
         |s| matches!(s, "File" | "Dataset"),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entity_with_types(types: &[&str]) -> GraphVector {
+        GraphVector::DataEntity(DataEntity {
+            id: "data.csv".to_string(),
+            type_: DataType::TermArray(types.iter().map(|t| t.to_string()).collect()),
+            dynamic_entity: None,
+        })
+    }
+
+    fn entity_type(entity: &GraphVector) -> &DataType {
+        match entity {
+            GraphVector::DataEntity(entity) => &entity.type_,
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn remove_type_stores_the_reduced_type() {
+        let mut entity = entity_with_types(&["File", "Dataset", "SoftwareSourceCode"]);
+
+        let updated = entity.remove_type("Dataset".to_string()).unwrap();
+        let expected =
+            DataType::TermArray(vec!["File".to_string(), "SoftwareSourceCode".to_string()]);
+        assert_eq!(updated, expected);
+        assert_eq!(entity_type(&entity), &expected);
+
+        entity.remove_type("File".to_string()).unwrap();
+        assert_eq!(
+            entity_type(&entity),
+            &DataType::Term("SoftwareSourceCode".to_string())
+        );
+    }
+
+    #[test]
+    fn remove_type_leaves_entity_unchanged_on_error() {
+        let mut entity = entity_with_types(&["File", "Dataset"]);
+        assert!(entity.remove_type("Person".to_string()).is_err());
+        assert_eq!(
+            entity_type(&entity),
+            &DataType::TermArray(vec!["File".to_string(), "Dataset".to_string()])
+        );
+
+        let mut entity = entity_with_types(&["File"]);
+        assert!(entity.remove_type("File".to_string()).is_err());
+        assert_eq!(
+            entity_type(&entity),
+            &DataType::TermArray(vec!["File".to_string()])
+        );
+    }
 }

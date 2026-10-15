@@ -1,9 +1,8 @@
 //! Loading, saving and argument parsing shared by cli commands
 
-use crate::core_compat::parse_zip_checked;
 use rocraters::ro_crate::constraints::EntityValue;
 use rocraters::ro_crate::context::ContextItem;
-use rocraters::ro_crate::read::{load_remote, read_crate, read_crate_obj, CrateReadError};
+use rocraters::ro_crate::read::{load_remote, parse_zip, read_crate, read_crate_obj, CrateReadError};
 use rocraters::ro_crate::rocrate::RoCrate;
 use rocraters::ro_crate::write::write_crate;
 use std::collections::HashMap;
@@ -30,7 +29,7 @@ pub fn read_target(target: &str, validation_level: i8) -> Result<RoCrate, CrateR
             url::Url::parse(target).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
         load_remote(url, validation_level)
     } else if target.ends_with(".zip") {
-        parse_zip_checked(target, validation_level)
+        parse_zip(target, validation_level)
     } else {
         read_crate(&PathBuf::from(target), validation_level)
     }

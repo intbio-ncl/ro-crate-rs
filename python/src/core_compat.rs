@@ -6,29 +6,9 @@
 use ::rocraters::ro_crate::constraints::{EntityValue, Id};
 use ::rocraters::ro_crate::context::{ContextItem, RoCrateContext};
 use ::rocraters::ro_crate::graph_vector::GraphVector;
-use ::rocraters::ro_crate::read::{parse_zip, CrateReadError};
 use ::rocraters::ro_crate::rocrate::RoCrate;
 use std::collections::HashMap;
 use uuid::Uuid;
-
-/// Sets a property on an entity, returning false if there is no such entity.
-///
-/// Writes any supported entity value into the selected entity.
-pub fn set_property(rocrate: &mut RoCrate, id: &str, key: String, value: EntityValue) -> bool {
-    let Some(entity) = rocrate.get_entity_mutable(id) else {
-        return false;
-    };
-    let dynamic_entity = match entity {
-        GraphVector::DataEntity(entity) => &mut entity.dynamic_entity,
-        GraphVector::ContextualEntity(entity) => &mut entity.dynamic_entity,
-        GraphVector::RootDataEntity(entity) => &mut entity.dynamic_entity,
-        GraphVector::MetadataDescriptor(entity) => &mut entity.dynamic_entity,
-    };
-    dynamic_entity
-        .get_or_insert_with(HashMap::new)
-        .insert(key, value);
-    true
-}
 
 /// Removes a type from an entity.
 ///
@@ -70,11 +50,6 @@ pub fn add_to_root_has_part(rocrate: &mut RoCrate, id: &str) {
     root.add_entity_to_partof(id.to_string());
 }
 
-/// Returns the UUID of a urn:uuid @base.
-pub fn urn_uuid(context: &RoCrateContext) -> Option<String> {
-    context.get_urn_uuid()
-}
-
 /// Adds a urn:uuid @base if there is none, returning the UUID, or `None` if the
 /// context cannot hold one.
 ///
@@ -82,22 +57,19 @@ pub fn urn_uuid(context: &RoCrateContext) -> Option<String> {
 /// embedded terms, and adds an @base to every embedded map that lacks one even
 /// when the crate already has a urn.
 pub fn add_urn_uuid(context: &mut RoCrateContext) -> Option<String> {
-    if let Some(urn) = urn_uuid(context) {
+    if let Some(urn) = context.get_urn_uuid() {
         return Some(urn);
     }
     context.add_urn_uuid();
-    if let (None, RoCrateContext::ExtendedContext(items)) = (urn_uuid(context), &mut *context) {
+    if let (None, RoCrateContext::ExtendedContext(items)) =
+        (context.get_urn_uuid(), &mut *context)
+    {
         items.push(ContextItem::EmbeddedContext(HashMap::from([(
             "@base".to_string(),
             format!("urn:uuid:{}", Uuid::now_v7()),
         )])));
     }
-    urn_uuid(context)
-}
-
-/// Reads a zipped crate.
-pub fn parse_zip_checked(path: &str, validation_level: i8) -> Result<RoCrate, CrateReadError> {
-    parse_zip(path, validation_level)
+    context.get_urn_uuid()
 }
 
 /// Returns true for IRIs with no path to resolve against, such as urn:uuid:...

@@ -14,7 +14,6 @@ need a metadata file. In Python, `crate` is a `PyRoCrate`.
 | --- | --- | --- |
 | `read::read_crate` | `read crate -t FILE [-l LEVEL]` | `read(path, level)` |
 | `read::read_crate_obj` | `read crate -t -` | `read_object(json, level)` |
-| `read::parse_zip` | `read zip -t ZIP [-l LEVEL]` | `read_zip(path, level)` |
 | `read::load_remote` | `read crate -t URL` | `read_remote(url, level)` |
 | `write::write_crate` | written by every changing command | `crate.write(path)` |
 | `Serialize for RoCrate` | `read crate --json` | `crate.to_json(pretty)` |
@@ -51,7 +50,6 @@ CLI exits non-zero when a crate is not valid.
 | `RoCrate::get_context_items` | `context keys` | `crate.get_context_items()` |
 | `RoCrateContext::get_specific_context` | `context get KEY` | `crate.get_specific_context(key)` |
 | `RoCrateContext::add_urn_uuid` | `context add-urn` | `crate.add_urn_uuid()` |
-| `RoCrateContext::get_urn_uuid` | `context urn` | `crate.get_urn_uuid()` |
 | `RoCrate::get_rocrate_version` | `context version` | `crate.get_rocrate_version()` |
 
 A context item is a URL, or a JSON object (CLI) or dict (Python) of term definitions.
@@ -79,7 +77,6 @@ A context item is a URL, or a JSON object (CLI) or dict (Python) of term definit
 | `RoCrate::overwrite_by_id` / push | `modify upsert JSON`, `add ID TYPES` | `crate.update_data`, `update_contextual`, `update_root`, `update_descriptor` |
 | `RoCrate::remove_by_id` | `delete ID [-r]` | `crate.delete_entity(id, recursive)` |
 | `RoCrate::update_id_recursive` | `modify replace-id OLD NEW` | `crate.replace_id(old, new)` |
-| `RoCrate::add_dynamic_entity_property` | `modify add-field ID KEY VALUE [--json]`, `add-id-value`, `add-id-vec-values`, `add-multiple` | `crate.add_dynamic_entity_property(id, properties)` |
 | `RoCrate::remove_dynamic_entity_property` | `modify remove-field ID KEY` | `crate.remove_dynamic_entity_property(id, key)` |
 | `GraphVector::add_type` | `modify add-type ID TYPE` | `crate.add_type(id, type)` |
 | `GraphVector::remove_type` | `modify remove-type ID TYPE` | `crate.remove_type(id, type)` |
@@ -136,13 +133,10 @@ replacement names the call it stands in for; switch back once the core is fixed.
 
 | Core call | Problem | Replacement |
 | --- | --- | --- |
-| `RoCrate::add_dynamic_entity_property` | panics on values other than strings and IDs | `set_property` writes the entity's properties directly |
 | `GraphVector::remove_type` | returns the reduced type without storing it | `remove_type` stores the result |
 | `RoCrate::add_data_to_partof_root` | looks the ID up as the root, so does nothing | `add_to_root_has_part` uses `RootDataEntity::add_entity_to_partof` |
 | `RootDataEntity::add_entity_to_partof` | replaces a single existing `hasPart` ID | `add_to_root_has_part` makes it a list first |
-| `RoCrateContext::get_urn_uuid` | panics when `@base` is not a `urn:uuid` | `urn_uuid` |
 | `RoCrateContext::add_urn_uuid` | does nothing for an extended context without embedded terms | `add_urn_uuid` adds an embedded `@base` |
-| `read::parse_zip` | panics on a missing file, invalid archive or missing metadata file | `parse_zip_checked` returns an error |
 | `rdf::rocrate_to_rdf_with_options`, `ResolvedContext::expand_term` | panic resolving a relative IRI against an opaque `@base` such as `urn:uuid:` | conversion is refused with an error; expansion ignores the opaque base |
 
 Remaining core behaviour the tools pass through unchanged:

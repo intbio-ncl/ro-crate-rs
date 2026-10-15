@@ -13,7 +13,7 @@ use ::rocraters::ro_crate::graph_vector::GraphVector;
 use ::rocraters::ro_crate::metadata_descriptor::MetadataDescriptor;
 use ::rocraters::ro_crate::object_storage::relative_to_object_store;
 use ::rocraters::ro_crate::read::{
-    load_remote, validate_crate_keys, CrateReadError, ValidationResult,
+    load_remote, parse_zip, validate_crate_keys, CrateReadError, ValidationResult,
 };
 use ::rocraters::ro_crate::root::RootDataEntity;
 use ::rocraters::ro_crate::schema::{load_rocrate_schema, RoCrateSchemaVersion};
@@ -406,7 +406,7 @@ impl PyRoCrate {
     /// # Returns
     /// The UUID from a `urn:uuid:` `@base`, or `None` if there is none.
     fn get_urn_uuid(&self) -> Option<String> {
-        core_compat::urn_uuid(&self.inner.context)
+        self.inner.context.get_urn_uuid()
     }
 
     /// Adds a URN UUID to crate
@@ -722,12 +722,14 @@ impl PyRoCrate {
         if self.inner.get_entity(id).is_none() {
             return Ok(false);
         }
+        let mut values = HashMap::new();
         for (key, value) in properties {
-            let key = key.extract::<String>()?;
-            let value = utils::convert_pyobject_to_dynamic_entity(&value)?;
-            core_compat::set_property(&mut self.inner, id, key, value);
+            values.insert(
+                key.extract::<String>()?,
+                utils::convert_pyobject_to_dynamic_entity(&value)?,
+            );
         }
-        Ok(true)
+        Ok(self.inner.add_dynamic_entity_property(id, values))
     }
 
     /// Removes a property from an entity.
@@ -950,7 +952,7 @@ fn read_object(obj: &str, validation_level: i8) -> PyResult<PyRoCrate> {
 /// A `PyRoCrate` on success.
 #[pyfunction]
 fn read_zip(path: &str, validation_level: i8) -> PyResult<PyRoCrate> {
-    let rocrate = core_compat::parse_zip_checked(path, validation_level).map_err(read_error)?;
+    let rocrate = parse_zip(path, validation_level).map_err(read_error)?;
     Ok(PyRoCrate::from(rocrate))
 }
 
@@ -1005,7 +1007,7 @@ fn validate_object(py: Python<'_>, obj: &str) -> PyResult<Py<PyDict>> {
 /// Validates a ZIP-contained RO-Crate and returns a structured report dictionary.
 #[pyfunction]
 fn validate_zip(py: Python<'_>, path: &str) -> PyResult<Py<PyDict>> {
-    match core_compat::parse_zip_checked(path, 0) {
+    match parse_zip(path, 0) {
         Ok(rocrate) => validation_result_to_report(py, validate_crate_keys(&rocrate)),
         Err(err) => crate_read_error_to_report(py, err),
     }
@@ -1043,7 +1045,7 @@ fn load_schema(py: Python<'_>, version: &str) -> PyResult<Py<PyAny>> {
 /// The tabular conversion keys every row by the crate's urn:uuid
 #[cfg(feature = "parquet")]
 fn require_urn_uuid(rocrate: &PyRoCrate) -> PyResult<()> {
-    match core_compat::urn_uuid(&rocrate.inner.context) {
+    match rocrate.inner.context.get_urn_uuid() {
         Some(_) => Ok(()),
         None => Err(PyValueError::new_err(
             "Crate has no urn:uuid @base in its context: call add_urn_uuid() first",

@@ -101,9 +101,7 @@ fn main() {
                 let id = &add_multiple_command.id;
 
                 while let Some(dynamic_entity) = add_dynamic_entity() {
-                    for (key, value) in dynamic_entity {
-                        core_compat::set_property(&mut rocrate, id, key, value);
-                    }
+                    rocrate.add_dynamic_entity_property(id, dynamic_entity);
 
                     println!("Exit? (Y/n)");
                     let mut answer = String::new();
@@ -320,7 +318,7 @@ fn open_and_load_zip_crate(input: &str, validation_level: i8) -> RoCrate {
         std::process::exit(1)
     }
 
-    match core_compat::parse_zip_checked(input, validation_level) {
+    match read::parse_zip(input, validation_level) {
         Ok(ro_crate) => ro_crate,
         Err(e) => {
             eprintln!("Error processing zip crate: {:?}", e);

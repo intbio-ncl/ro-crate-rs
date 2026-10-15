@@ -17,6 +17,7 @@ use rocraters::ro_crate::read::{validate_crate_keys, CrateReadError, ValidationR
 use rocraters::ro_crate::schema::{load_rocrate_schema, RoCrateSchemaVersion};
 use serde::Serialize;
 use serde_json::to_string_pretty;
+use std::collections::HashMap;
 
 /// Maps a schema version onto its "major.minor" string
 fn schema_version_to_str(version: RoCrateSchemaVersion) -> Option<&'static str> {
@@ -49,7 +50,7 @@ pub fn add_field(command: AddFieldCommand) {
     let mut rocrate = load_for_update(target);
     let value = parse_entity_value(&command.value, command.json);
 
-    if !core_compat::set_property(&mut rocrate, &command.id, command.key, value) {
+    if !rocrate.add_dynamic_entity_property(&command.id, HashMap::from([(command.key, value)])) {
         entity_not_found(&command.id);
     }
     save_crate(&rocrate, target);
@@ -203,7 +204,7 @@ pub fn context(command: ContextCommand) {
         }
         ContextCommand::Urn(command) => {
             let rocrate = load_crate(&command.target.target_crate, 1);
-            match core_compat::urn_uuid(&rocrate.context) {
+            match rocrate.context.get_urn_uuid() {
                 Some(urn) => println!("{}", urn),
                 None => fail("Crate has no urn:uuid @base"),
             }
@@ -403,7 +404,7 @@ pub fn convert(command: crate::args::ConvertCommand) {
     };
 
     let rocrate = load_crate(&command.target.target_crate, 1);
-    if core_compat::urn_uuid(&rocrate.context).is_none() {
+    if rocrate.context.get_urn_uuid().is_none() {
         fail("Crate has no urn:uuid @base in its context: run `rocraters context add-urn` first");
     }
     let mut df = to_df(&rocrate);

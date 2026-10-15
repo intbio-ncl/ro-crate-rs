@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 
 use crate::ro_crate::context::{ContextItem, RoCrateContext};
 use crate::ro_crate::schema::{
-    RoCrateSchemaVersion, ROCRATE_SCHEMA_1_1, ROCRATE_SCHEMA_1_2, ROCRATE_SCHEMA_1_3,
+    ROCRATE_SCHEMA_1_1, ROCRATE_SCHEMA_1_2, ROCRATE_SCHEMA_1_3, RoCrateSchemaVersion,
 };
 
 use super::context::ResolvedContext;

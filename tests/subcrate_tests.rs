@@ -4,14 +4,14 @@ pub mod subcrate_tests {
     use mockito::Matcher;
     use rocraters::ro_crate::rocrate::RoCrate;
     use rocraters::ro_crate::subcrate_resolution::{
-        fetch_subcrates_recursive_with_options, fetch_subcrates_with_options, FetchOptions,
+        FetchOptions, fetch_subcrates_recursive_with_options, fetch_subcrates_with_options,
     };
     use serde_json::json;
     use sha1::Digest;
     use std::io::Write;
     use tempfile::tempdir;
-    use zip::write::SimpleFileOptions;
     use zip::ZipWriter;
+    use zip::write::SimpleFileOptions;
 
     #[test]
     fn test_try_resolve_local_files() {

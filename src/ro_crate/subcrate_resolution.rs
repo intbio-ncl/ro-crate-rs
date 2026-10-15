@@ -1,6 +1,6 @@
 use crate::ro_crate::constraints::Id;
 use crate::ro_crate::data_entity::DataEntity;
-use crate::ro_crate::read::{read_with_limit, MAX_ARCHIVE_BYTES, MAX_METADATA_BYTES};
+use crate::ro_crate::read::{MAX_ARCHIVE_BYTES, MAX_METADATA_BYTES, read_with_limit};
 use crate::ro_crate::rocrate::RoCrate;
 use crate::ro_crate::write::is_not_url;
 use log::warn;
@@ -10,8 +10,8 @@ use sha2::Digest;
 use std::collections::{HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::string::FromUtf8Error;
-use zip::result::ZipError;
 use zip::ZipArchive;
+use zip::result::ZipError;
 
 #[derive(Debug)]
 pub enum FetchError {

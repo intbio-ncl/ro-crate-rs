@@ -501,10 +501,12 @@ mod tests {
         fixture["@graph"][2]["@type"] = serde_json::json!("UnknownUnmappedType");
         let crate_data: RoCrate = serde_json::from_value(fixture).unwrap();
         match validate_crate_keys(&crate_data) {
-            ValidationResult::Invalid(validation) => assert!(validation
-                .invalid_types
-                .iter()
-                .any(|item| item.contains("UnknownUnmappedType"))),
+            ValidationResult::Invalid(validation) => assert!(
+                validation
+                    .invalid_types
+                    .iter()
+                    .any(|item| item.contains("UnknownUnmappedType"))
+            ),
             _ => panic!("unknown type should be invalid"),
         }
     }

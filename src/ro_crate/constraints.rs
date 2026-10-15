@@ -81,10 +81,10 @@ impl<'de> Deserialize<'de> for Id {
                 let key: Option<String> = map.next_key()?;
                 let id_value: String = map.next_value()?;
 
-                if let Some(key) = key {
-                    if key == "@id" {
-                        return Ok(Id::Id(id_value));
-                    }
+                if let Some(key) = key
+                    && key == "@id"
+                {
+                    return Ok(Id::Id(id_value));
                 }
 
                 Err(de::Error::missing_field("@id"))
@@ -394,9 +394,9 @@ mod tests {
 
     #[test]
     fn test_dynamic_entity_f64() {
-        let entity = EntityValue::Entityf64(3.14);
+        let entity = EntityValue::Entityf64(2.75);
         match entity {
-            EntityValue::Entityf64(value) => assert!((value - 3.14).abs() < f64::EPSILON),
+            EntityValue::Entityf64(value) => assert!((value - 2.75).abs() < f64::EPSILON),
             _ => panic!("Entityf64 variant expected"),
         }
     }

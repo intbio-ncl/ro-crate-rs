@@ -359,8 +359,7 @@ fn create_rocrate_with_context(context_type: ContextType) -> RoCrate {
             let mut answer = String::new();
             io::stdin().read_line(&mut answer).unwrap();
             let answer = answer.trim().to_string();
-            let rocrate = RoCrate::new(RoCrateContext::ReferenceContext(answer), Vec::new());
-            rocrate
+            RoCrate::new(RoCrateContext::ReferenceContext(answer), Vec::new())
         }
         ContextType::Embedded => {
             println!("Starting extended add");
@@ -386,12 +385,8 @@ fn create_rocrate_with_context(context_type: ContextType) -> RoCrate {
             key_value_pairs = loop_input(key_value_pairs);
             let embedded_context_item = ContextItem::EmbeddedContext(key_value_pairs);
             println!("{:?}", embedded_context_item);
-            let mut context_items = Vec::new();
-            context_items.push(answer);
-            context_items.push(embedded_context_item);
-
-            let rocrate = RoCrate::new(RoCrateContext::ExtendedContext(context_items), Vec::new());
-            rocrate
+            let context_items = vec![answer, embedded_context_item];
+            RoCrate::new(RoCrateContext::ExtendedContext(context_items), Vec::new())
         }
         ContextType::Extended => {
             println!("Starting Embedded add");
@@ -399,11 +394,8 @@ fn create_rocrate_with_context(context_type: ContextType) -> RoCrate {
             key_value_pairs = loop_input(key_value_pairs);
             let embedded_context_item = ContextItem::EmbeddedContext(key_value_pairs);
             println!("{:?}", embedded_context_item);
-            let mut context_items = Vec::new();
-            context_items.push(embedded_context_item);
-
-            let rocrate = RoCrate::new(RoCrateContext::ExtendedContext(context_items), Vec::new());
-            rocrate
+            let context_items = vec![embedded_context_item];
+            RoCrate::new(RoCrateContext::ExtendedContext(context_items), Vec::new())
         }
     }
 }
@@ -606,7 +598,7 @@ fn prompt_for_types() -> u8 {
         io::stdin().read_line(&mut answer).unwrap();
 
         match answer.trim().parse::<u8>() {
-            Ok(num) if num >= 1 && num <= 6 => return num,
+            Ok(num) if (1..=6).contains(&num) => return num,
             _ => println!("Please enter a number between 1 and 5."),
         }
     }

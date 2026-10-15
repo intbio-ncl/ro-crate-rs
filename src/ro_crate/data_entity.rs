@@ -65,10 +65,10 @@ impl DataEntity {
     /// An `Option<String>` containing the key if the value exists, or `None` otherwise.
     pub fn find_value_details(&self, target_value: &EntityValue) -> Option<(String, String)> {
         // Check dynamic fields
-        if let Some(dynamic_entity) = &self.dynamic_entity {
-            if let Some(key) = search_dynamic_entity_for_key(dynamic_entity, target_value) {
-                return Some((self.id.clone(), key));
-            }
+        if let Some(dynamic_entity) = &self.dynamic_entity
+            && let Some(key) = search_dynamic_entity_for_key(dynamic_entity, target_value)
+        {
+            return Some((self.id.clone(), key));
         }
 
         None

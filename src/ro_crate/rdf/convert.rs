@@ -513,10 +513,10 @@ pub fn rocrate_to_rdf_with_options(
     let mut context = resolver.resolve(&crate_.context)?;
 
     // Only use WithBase as a fallback if the document doesn't define @base
-    if context.base.is_none() {
-        if let Some(base) = options.base_iri() {
-            context.base = Some(base.to_string());
-        }
+    if context.base.is_none()
+        && let Some(base) = options.base_iri()
+    {
+        context.base = Some(base.to_string());
     }
 
     let estimated_triples = crate_.graph.iter().map(estimate_entity_triples).sum();

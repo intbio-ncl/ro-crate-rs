@@ -314,7 +314,7 @@ impl RoCrate {
                     // specification
                     let conforms_to = match entity {
                         EntityValue::EntityId(Id::Id(crate_path)) => {
-                            is_rocrate_spec(&crate_path)
+                            is_rocrate_spec(crate_path)
                         }
                         EntityValue::EntityVec(entity_values) => {
                             entity_values.iter().any(|v|{
@@ -369,6 +369,25 @@ impl fmt::Display for RoCrate {
             self.context, self.graph
         )
     }
+}
+
+/// Removes duplicates from a vector, leaving only unique elements.
+///
+/// This function sorts the vector and then removes any consecutive duplicate elements, ensuring that
+/// each element is unique. It requires the elements to implement the `Ord` trait to allow sorting.
+///
+/// # Arguments
+/// * `vec` - A mutable reference to the vector from which duplicates will be removed.
+///
+/// # Examples
+/// ```
+/// let mut numbers = vec![3, 1, 2, 3, 4, 2];
+/// dedup_vec(&mut numbers);
+/// assert_eq!(numbers, vec![1, 2, 3, 4]);
+/// ```
+fn dedup_vec<T: Ord>(vec: &mut Vec<T>) {
+    vec.sort();
+    vec.dedup();
 }
 
 #[cfg(test)]
@@ -436,25 +455,6 @@ mod tests {
             ])))
         );
     }
-}
-
-/// Removes duplicates from a vector, leaving only unique elements.
-///
-/// This function sorts the vector and then removes any consecutive duplicate elements, ensuring that
-/// each element is unique. It requires the elements to implement the `Ord` trait to allow sorting.
-///
-/// # Arguments
-/// * `vec` - A mutable reference to the vector from which duplicates will be removed.
-///
-/// # Examples
-/// ```
-/// let mut numbers = vec![3, 1, 2, 3, 4, 2];
-/// dedup_vec(&mut numbers);
-/// assert_eq!(numbers, vec![1, 2, 3, 4]);
-/// ```
-fn dedup_vec<T: Ord>(vec: &mut Vec<T>) {
-    vec.sort();
-    vec.dedup();
 }
 // Tests to make
 

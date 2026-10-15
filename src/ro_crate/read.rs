@@ -600,7 +600,7 @@ mod tests {
 
     #[test]
     fn test_crate_read_error_from_io_error() {
-        let io_error = io::Error::new(io::ErrorKind::Other, "io error");
+        let io_error = io::Error::other("io error");
         let crate_error: CrateReadError = io_error.into();
         matches!(crate_error, CrateReadError::IoError(_));
     }

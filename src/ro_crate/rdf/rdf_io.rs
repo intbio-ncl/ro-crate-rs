@@ -204,14 +204,14 @@ fn find_root_entities(triples: &[Triple]) -> Result<(String, String), RdfError> 
     //   - ?metadatafile schema:about ?crate
     let mut candidates: Vec<(String, String)> = Vec::new();
     for triple in triples {
-        if triple.predicate == schema_about {
-            if let NamedOrBlankNode::NamedNode(subject) = &triple.subject {
-                let metadatafile = subject.as_str();
-                if metadatafile.contains("ro-crate-metadata.json") {
-                    if let Term::NamedNode(object) = &triple.object {
-                        candidates.push((metadatafile.to_string(), object.as_str().to_string()));
-                    }
-                }
+        if triple.predicate == schema_about
+            && let NamedOrBlankNode::NamedNode(subject) = &triple.subject
+        {
+            let metadatafile = subject.as_str();
+            if metadatafile.contains("ro-crate-metadata.json")
+                && let Term::NamedNode(object) = &triple.object
+            {
+                candidates.push((metadatafile.to_string(), object.as_str().to_string()));
             }
         }
     }
@@ -226,14 +226,13 @@ fn find_root_entities(triples: &[Triple]) -> Result<(String, String), RdfError> 
     let mut result: Option<(String, String)> = None;
     for (metadatafile, crate_iri) in &candidates {
         for triple in triples {
-            if let NamedOrBlankNode::NamedNode(subject) = &triple.subject {
-                if subject.as_str() == crate_iri
-                    && triple.predicate == rdf_type
-                    && triple.object == Term::NamedNode(schema_dataset.clone())
-                {
-                    result = Some((metadatafile.clone(), crate_iri.clone()));
-                    break;
-                }
+            if let NamedOrBlankNode::NamedNode(subject) = &triple.subject
+                && subject.as_str() == crate_iri
+                && triple.predicate == rdf_type
+                && triple.object == Term::NamedNode(schema_dataset.clone())
+            {
+                result = Some((metadatafile.clone(), crate_iri.clone()));
+                break;
             }
         }
         if result.is_some() {
@@ -970,10 +969,10 @@ fn is_vocabulary_iri(iri: &str, context: &ResolvedContext) -> bool {
         }
     }
     // Check against @vocab if set
-    if let Some(vocab) = &context.vocab {
-        if iri.starts_with(vocab) {
-            return true;
-        }
+    if let Some(vocab) = &context.vocab
+        && iri.starts_with(vocab)
+    {
+        return true;
     }
     false
 }
@@ -1353,7 +1352,7 @@ mod tests {
         let result = parse_rdf(turtle, RdfFormat::Turtle, None);
         assert!(result.is_ok());
         let triples = result.unwrap();
-        assert!(triples.len() > 0);
+        assert!(!triples.is_empty());
     }
 
     #[test]
@@ -1796,10 +1795,10 @@ mod tests {
         }
 
         // Test xsd:double typed literal
-        let literal = Term::Literal(Literal::new_typed_literal("3.14", xsd_double.clone()));
+        let literal = Term::Literal(Literal::new_typed_literal("2.75", xsd_double.clone()));
         match term_to_entity_value(&literal) {
-            EntityValue::Entityf64(f) => assert!((f - 3.14).abs() < 0.0001),
-            _ => panic!("Expected Entityf64 for '3.14'^^xsd:double"),
+            EntityValue::Entityf64(f) => assert!((f - 2.75).abs() < 0.0001),
+            _ => panic!("Expected Entityf64 for '2.75'^^xsd:double"),
         }
 
         // Test xsd:string explicitly - should NOT parse as number
@@ -2020,16 +2019,16 @@ mod tests {
                 None
             }
         });
-        if let Some(root) = root {
-            if let Some(props) = &root.dynamic_entity {
-                // Check author reference
-                if let Some(EntityValue::EntityId(Id::Id(author_id))) = props.get("author") {
-                    assert_eq!(author_id, "./person/alice");
-                }
-                // Check hasPart reference
-                if let Some(EntityValue::EntityId(Id::Id(part_id))) = props.get("hasPart") {
-                    assert_eq!(part_id, "./data.csv");
-                }
+        if let Some(root) = root
+            && let Some(props) = &root.dynamic_entity
+        {
+            // Check author reference
+            if let Some(EntityValue::EntityId(Id::Id(author_id))) = props.get("author") {
+                assert_eq!(author_id, "./person/alice");
+            }
+            // Check hasPart reference
+            if let Some(EntityValue::EntityId(Id::Id(part_id))) = props.get("hasPart") {
+                assert_eq!(part_id, "./data.csv");
             }
         }
     }
@@ -2274,14 +2273,14 @@ mod tests {
         );
 
         // Verify author reference is compacted with "./" prefix
-        if let Some(props) = &root.dynamic_entity {
-            if let Some(EntityValue::EntityId(Id::Id(author_id))) = props.get("author") {
-                // Should be compacted to "./person/alice" not full IRI
-                assert_eq!(
-                    author_id, "./person/alice",
-                    "Author reference should use compacted IRI with ./ prefix"
-                );
-            }
+        if let Some(props) = &root.dynamic_entity
+            && let Some(EntityValue::EntityId(Id::Id(author_id))) = props.get("author")
+        {
+            // Should be compacted to "./person/alice" not full IRI
+            assert_eq!(
+                author_id, "./person/alice",
+                "Author reference should use compacted IRI with ./ prefix"
+            );
         }
 
         // Verify metadata descriptor
@@ -2521,32 +2520,32 @@ mod tests {
         });
         assert!(root.is_some(), "Root entity should exist");
 
-        if let Some(props) = &root.unwrap().dynamic_entity {
-            if let Some(EntityValue::EntityVec(parts)) = props.get("hasPart") {
-                let part_ids: Vec<String> = parts
-                    .iter()
-                    .filter_map(|v| {
-                        if let EntityValue::EntityId(Id::Id(id)) = v {
-                            Some(id.clone())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
+        if let Some(props) = &root.unwrap().dynamic_entity
+            && let Some(EntityValue::EntityVec(parts)) = props.get("hasPart")
+        {
+            let part_ids: Vec<String> = parts
+                .iter()
+                .filter_map(|v| {
+                    if let EntityValue::EntityId(Id::Id(id)) = v {
+                        Some(id.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
 
-                assert!(
-                    part_ids.contains(&"./data.csv".to_string()),
-                    "hasPart reference should have './' prefix"
-                );
-                assert!(
-                    part_ids.contains(&"./subdir/file.txt".to_string()),
-                    "hasPart reference should have './' prefix"
-                );
-                assert!(
-                    part_ids.contains(&"./images/photo.jpg".to_string()),
-                    "hasPart reference should have './' prefix"
-                );
-            }
+            assert!(
+                part_ids.contains(&"./data.csv".to_string()),
+                "hasPart reference should have './' prefix"
+            );
+            assert!(
+                part_ids.contains(&"./subdir/file.txt".to_string()),
+                "hasPart reference should have './' prefix"
+            );
+            assert!(
+                part_ids.contains(&"./images/photo.jpg".to_string()),
+                "hasPart reference should have './' prefix"
+            );
         }
     }
 
@@ -2888,7 +2887,7 @@ mod tests {
         let rdf_type = NamedNode::new_unchecked("http://www.w3.org/1999/02/22-rdf-syntax-ns#type");
         let schema_geo = NamedNode::new_unchecked("http://schema.org/GeoCoordinates");
 
-        let triples = vec![Triple::new(
+        let triples = [Triple::new(
             NamedOrBlankNode::BlankNode(bn.clone()),
             rdf_type,
             Term::NamedNode(schema_geo),

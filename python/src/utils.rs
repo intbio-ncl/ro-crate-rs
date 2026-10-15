@@ -537,9 +537,7 @@ fn create_data_type_from_dict(input: &Bound<'_, PyDict>) -> PyResult<DataType> {
     if let Ok(s) = value.extract::<&str>() {
         Ok(DataType::Term(s.to_string()))
     } else if let Ok(arr) = value.extract::<Vec<String>>() {
-        Ok(DataType::TermArray(
-            arr.into_iter().map(String::from).collect(),
-        ))
+        Ok(DataType::TermArray(arr))
     } else {
         Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
             "The 'type' key must be associated with a string or a list of strings",

@@ -325,10 +325,10 @@ fn try_direct_resolve_or_zip(response: Response) -> Result<RoCrate, FetchError> 
     let redirect_url = response.url().to_string();
     let body = bytes::Bytes::from(read_with_limit(response, MAX_ARCHIVE_BYTES)?);
 
-    if body.len() <= MAX_METADATA_BYTES {
-        if let Ok(ro_crate) = serde_json::from_slice::<RoCrate>(&body) {
-            return Ok(ro_crate);
-        }
+    if body.len() <= MAX_METADATA_BYTES
+        && let Ok(ro_crate) = serde_json::from_slice::<RoCrate>(&body)
+    {
+        return Ok(ro_crate);
     }
 
     if let Ok(ro_crate) = try_zip(&headers, body) {
@@ -356,7 +356,7 @@ fn try_resolve_remote(id: &str) -> Result<RoCrate, FetchError> {
     }
 
     // Try content negotiation
-    if let Ok(ro_crate) = try_content_negotiation(&id).and_then(try_direct_resolve_or_zip) {
+    if let Ok(ro_crate) = try_content_negotiation(id).and_then(try_direct_resolve_or_zip) {
         return Ok(ro_crate);
     }
 
@@ -372,20 +372,18 @@ fn try_resolve_remote(id: &str) -> Result<RoCrate, FetchError> {
 
 /// Extract the metadata URL from subjectOf property
 fn try_property(entity: &DataEntity, value: &str) -> Option<String> {
-    if let Some(dynamic_entities) = &entity.dynamic_entity {
-        if let Some(value) = dynamic_entities.get(value).cloned() {
-            match value {
-                super::constraints::EntityValue::EntityId(Id::Id(id)) => return Some(id),
-                _ => {}
-            }
-        }
+    if let Some(dynamic_entities) = &entity.dynamic_entity
+        && let Some(value) = dynamic_entities.get(value).cloned()
+        && let super::constraints::EntityValue::EntityId(Id::Id(id)) = value
+    {
+        return Some(id);
     }
     None
 }
 
 fn get_id(entity: &DataEntity) -> String {
     // 1. Try subjectOf (to url/path that leads to ro-crate-metadata.json)
-    let id = if let Some(subject_of) = try_property(entity, "subjectOf") {
+    if let Some(subject_of) = try_property(entity, "subjectOf") {
         subject_of
     } else {
         // 2. Try distribution (to url that leads to an archive)
@@ -395,8 +393,7 @@ fn get_id(entity: &DataEntity) -> String {
             // 3. Try retrieving ro-crate by id
             entity.id.clone()
         }
-    };
-    id
+    }
 }
 
 fn try_signposting(headers: &HeaderMap) -> Result<Response, FetchError> {
@@ -410,14 +407,12 @@ fn try_signposting(headers: &HeaderMap) -> Result<Response, FetchError> {
                 let response = reqwest::blocking::get(&url)?;
                 return Ok(response);
             }
-        } else {
-            if values.contains("rel=\"describedBy\"") || values.contains("rel=\"item\"") {
-                if let Some((link, _)) = values.split_once(";") {
-                    let url = link.replace("<", "").replace(">", "");
-                    let response = reqwest::blocking::get(&url)?;
-                    return Ok(response);
-                }
-            }
+        } else if (values.contains("rel=\"describedBy\"") || values.contains("rel=\"item\""))
+            && let Some((link, _)) = values.split_once(";")
+        {
+            let url = link.replace("<", "").replace(">", "");
+            let response = reqwest::blocking::get(&url)?;
+            return Ok(response);
         }
     }
     Err(FetchError::NotFound("No valid rocrate found".to_string()))
@@ -463,14 +458,12 @@ fn guess_location(redirect_url: &str) -> Result<Response, FetchError> {
     //    then try `https://about.workflowhub.eu/Workflow-RO-Crate/1.0/ro-crate-metadata.json`
     let guessed_url = if redirect_url.ends_with("/") {
         format!("{}ro-crate-metadata.json", redirect_url)
+    } else if regex.is_match(redirect_url) {
+        regex
+            .replace(redirect_url, "/ro-crate-metadata.json")
+            .to_string()
     } else {
-        if regex.is_match(redirect_url) {
-            regex
-                .replace(redirect_url, "/ro-crate-metadata.json")
-                .to_string()
-        } else {
-            format!("{}/ro-crate-metadata.json", redirect_url.to_string())
-        }
+        format!("{}/ro-crate-metadata.json", redirect_url)
     };
 
     let response = reqwest::blocking::Client::new().get(guessed_url).send()?;
@@ -482,44 +475,44 @@ fn try_zip(headers: &HeaderMap, bytes: bytes::Bytes) -> Result<RoCrate, FetchErr
     // 4. If retrieved resource has `Content-Type: application/zip` or is a ZIP file
     //    extract ro-crate-metadata.json or if only contains single folder, extract
     //    folder/ro-crate-metadata.json
-    if let Some(content_type) = headers.get("Content-Type") {
-        if content_type.to_str()?.contains("application/zip") {
-            let reader = std::io::Cursor::new(bytes);
-            let mut archive = ZipArchive::new(reader)?;
+    if let Some(content_type) = headers.get("Content-Type")
+        && content_type.to_str()?.contains("application/zip")
+    {
+        let reader = std::io::Cursor::new(bytes);
+        let mut archive = ZipArchive::new(reader)?;
 
-            // A BagIt manifest is an integrity assertion. If verification fails,
-            // do not rediscover and return the same metadata via the generic ZIP path.
-            if archive.file_names().any(|name| name == "bagit.txt") {
-                return try_bagit(archive);
-            }
+        // A BagIt manifest is an integrity assertion. If verification fails,
+        // do not rediscover and return the same metadata via the generic ZIP path.
+        if archive.file_names().any(|name| name == "bagit.txt") {
+            return try_bagit(archive);
+        }
 
-            // Try retrieving file by name
-            match archive.by_name("ro-crate-metadata.json") {
-                Ok(mut file_in_zip) => {
-                    // Read the file contents into memory
-                    let buffer = read_with_limit(&mut file_in_zip, MAX_METADATA_BYTES)?;
-
-                    let subcrate: RoCrate = serde_json::from_slice(&buffer)?;
-
-                    return Ok(subcrate);
-                }
-                Err(err) => warn!("{}", err),
-            }
-
-            // Try finding rocrate in subdirectories
-            let names: Vec<String> = archive.file_names().map(|e| e.to_string()).collect();
-            if let Some(rocrate) = names
-                .iter()
-                .find(|name| name.ends_with("/ro-crate-metadata.json"))
-            {
-                let mut file_in_zip = archive.by_name(rocrate)?;
-
+        // Try retrieving file by name
+        match archive.by_name("ro-crate-metadata.json") {
+            Ok(mut file_in_zip) => {
+                // Read the file contents into memory
                 let buffer = read_with_limit(&mut file_in_zip, MAX_METADATA_BYTES)?;
 
                 let subcrate: RoCrate = serde_json::from_slice(&buffer)?;
 
                 return Ok(subcrate);
             }
+            Err(err) => warn!("{}", err),
+        }
+
+        // Try finding rocrate in subdirectories
+        let names: Vec<String> = archive.file_names().map(|e| e.to_string()).collect();
+        if let Some(rocrate) = names
+            .iter()
+            .find(|name| name.ends_with("/ro-crate-metadata.json"))
+        {
+            let mut file_in_zip = archive.by_name(rocrate)?;
+
+            let buffer = read_with_limit(&mut file_in_zip, MAX_METADATA_BYTES)?;
+
+            let subcrate: RoCrate = serde_json::from_slice(&buffer)?;
+
+            return Ok(subcrate);
         }
     }
     Err(FetchError::NotFound("No subcrate found".to_string()))

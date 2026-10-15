@@ -62,7 +62,7 @@ pub mod subcrate_tests {
 
         let subcrate1_path = subdir1.path().join("ro-crate-metadata.json");
         let mut tmpfile = std::fs::File::create(subcrate1_path.clone()).unwrap();
-        tmpfile.write(subcrate1.to_string().as_bytes()).unwrap();
+        tmpfile.write_all(subcrate1.to_string().as_bytes()).unwrap();
 
         let subcrate2 = json!(
         {
@@ -112,7 +112,7 @@ pub mod subcrate_tests {
 
         let subcrate2_path = subdir2.path().join("ro-crate-metadata.json");
         let mut tmpfile = std::fs::File::create(subcrate2_path.clone()).unwrap();
-        tmpfile.write(subcrate2.to_string().as_bytes()).unwrap();
+        tmpfile.write_all(subcrate2.to_string().as_bytes()).unwrap();
 
         let subcrate3 = json!(
         {
@@ -175,7 +175,7 @@ pub mod subcrate_tests {
 
         let subcrate3_path = subdir3.path().join("ro-crate-metadata.json");
         let mut tmpfile = std::fs::File::create(subcrate3_path.clone()).unwrap();
-        tmpfile.write(subcrate3.to_string().as_bytes()).unwrap();
+        tmpfile.write_all(subcrate3.to_string().as_bytes()).unwrap();
 
         let base_crate = json!({
           "@context": "https://w3id.org/ro/crate/1.2/context",

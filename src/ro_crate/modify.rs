@@ -106,10 +106,10 @@ pub trait DynamicEntityManipulation: Serialize {
                 if key == search_property {
                     return Some(value.clone());
                 }
-                if let EntityValue::EntityObject(inner_object) = value {
-                    if let Some(result) = search_obj(inner_object, search_property) {
-                        return Some(result);
-                    }
+                if let EntityValue::EntityObject(inner_object) = value
+                    && let Some(result) = search_obj(inner_object, search_property)
+                {
+                    return Some(result);
                 }
             }
             None
@@ -121,10 +121,10 @@ pub trait DynamicEntityManipulation: Serialize {
                 if key == search_property {
                     return Some(value.clone());
                 }
-                if let EntityValue::EntityObject(object) = value {
-                    if let Some(result) = search_obj(object, search_property) {
-                        return Some(result);
-                    }
+                if let EntityValue::EntityObject(object) = value
+                    && let Some(result) = search_obj(object, search_property)
+                {
+                    return Some(result);
                 }
             }
         }
@@ -225,10 +225,10 @@ pub trait DynamicEntityManipulation: Serialize {
 
             // Potentially depreciated need to test
             for key in fallback_keys_to_modify {
-                if let Some(EntityValue::Fallback(fallback_value)) = dynamic_entity.get_mut(&key) {
-                    if let Some(fallback_value) = fallback_value.as_mut() {
-                        remove_matching_value_from_json(fallback_value, target_id);
-                    }
+                if let Some(EntityValue::Fallback(fallback_value)) = dynamic_entity.get_mut(&key)
+                    && let Some(fallback_value) = fallback_value.as_mut()
+                {
+                    remove_matching_value_from_json(fallback_value, target_id);
                 }
             }
 
@@ -361,10 +361,10 @@ pub fn search_dynamic_entity_for_key(
         }
 
         // If the value is a nested object, search recursively
-        if let EntityValue::EntityObject(inner_object) = value {
-            if let Some(inner_key) = search_dynamic_entity_for_key(inner_object, target_value) {
-                return Some(inner_key);
-            }
+        if let EntityValue::EntityObject(inner_object) = value
+            && let Some(inner_key) = search_dynamic_entity_for_key(inner_object, target_value)
+        {
+            return Some(inner_key);
         }
     }
 
@@ -488,7 +488,7 @@ mod tests {
         };
 
         entity.remove_field("key1");
-        assert!(entity.dynamic_entity.unwrap().get("key1").is_none());
+        assert!(!entity.dynamic_entity.unwrap().contains_key("key1"));
     }
 
     #[test]

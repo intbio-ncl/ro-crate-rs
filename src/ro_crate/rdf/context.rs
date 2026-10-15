@@ -341,20 +341,20 @@ impl ResolvedContext {
         }
 
         // 3. @vocab strip
-        if let Some(vocab) = &self.vocab {
-            if iri.starts_with(vocab) {
-                return iri[vocab.len()..].to_string();
-            }
+        if let Some(vocab) = &self.vocab
+            && iri.starts_with(vocab)
+        {
+            return iri[vocab.len()..].to_string();
         }
 
         // 4. @base relative
         if let Some(base) = &self.base {
             // Handle fragments when the base does not have a trailing slash.
             let base_no_slash = base.trim_end_matches('/');
-            if let Some(fragment_part) = iri.strip_prefix(base_no_slash) {
-                if fragment_part.starts_with('#') {
-                    return fragment_part.to_string(); // Returns "#section"
-                }
+            if let Some(fragment_part) = iri.strip_prefix(base_no_slash)
+                && fragment_part.starts_with('#')
+            {
+                return fragment_part.to_string(); // Returns "#section"
             }
 
             // Original logic for non-fragment cases

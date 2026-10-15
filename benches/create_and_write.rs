@@ -82,7 +82,7 @@ fn small_multicrates(c: &mut Criterion) {
                         }));
                 }
 
-                write_crate(&rocrate, "ro-crate-metadata_3.json".to_string());
+                write_crate(&rocrate, "ro-crate-metadata_3.json".to_string()).unwrap();
 
                 let crate_name = crate_path("ro-crate-metadata_3.json");
 

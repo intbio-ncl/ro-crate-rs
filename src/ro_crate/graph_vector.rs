@@ -395,7 +395,7 @@ fn is_data_entity(entity_type: &Value, id: &str) -> bool {
 
     entity_type.as_str().map_or_else(
         || {
-            entity_type.as_array().map_or(false, |arr| {
+            entity_type.as_array().is_some_and(|arr| {
                 arr.iter()
                     .any(|v| matches!(v.as_str(), Some("File" | "Dataset")))
             })

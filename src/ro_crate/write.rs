@@ -492,7 +492,7 @@ fn get_noncontained_paths(
         let temp_id = rocrate_path.join(id);
 
         // Resolve the absolute path of the current ID
-        if let Some(path) = Path::new(&temp_id).canonicalize().ok() {
+        if let Ok(path) = Path::new(&temp_id).canonicalize() {
             // Path exists and was canonicalized
             debug!("Absolute path: {:?}", path);
             // Check if the path is outside the base crate directory
@@ -552,25 +552,13 @@ fn get_noncontained_paths(
 }
 
 fn resolve_tilde_path(path: &str) -> PathBuf {
-    if let Some(home_dir) = dirs::home_dir() {
-        if path.starts_with("~") {
-            return home_dir.join(path.strip_prefix("~/").unwrap_or(""));
-        }
+    if let Some(home_dir) = dirs::home_dir()
+        && path.starts_with("~")
+    {
+        return home_dir.join(path.strip_prefix("~/").unwrap_or(""));
     }
     Path::new(path).to_path_buf()
 }
-/// Converts a relative path to an absolute one, if possible.
-///
-/// This utility function is useful for obtaining the absolute path representation of a file or directory.
-///
-/// # Arguments
-/// * `relative_path` - The path to be converted to its absolute form.
-///
-/// # Returns
-/// An `Option<PathBuf>` containing the absolute path, if the conversion was successful; otherwise, `None`.
-//fn get_absolute_path(relative_path: &Path) -> Option<PathBuf> {
-//    fs::canonicalize(relative_path).ok()
-//}
 
 /// Determines whether a given string is not a URL.
 ///
@@ -920,8 +908,7 @@ mod write_crate_tests {
             // tilde path
             let home = home_dir().unwrap();
             let home_dir = tempfile::tempdir_in(home).unwrap();
-            let mut file =
-                std::fs::File::create_new(&home_dir.path().join("tempfile.txt")).unwrap();
+            let mut file = std::fs::File::create_new(home_dir.path().join("tempfile.txt")).unwrap();
             file.write_all(b"hello user temp").unwrap();
             let temp_base = home_dir.path().file_name().unwrap().to_string_lossy();
             path_types.insert(format!("~/{}/tempfile.txt", temp_base), true);
@@ -996,10 +983,10 @@ mod write_crate_tests {
             println!("{:?}", test);
             if test.is_empty() {
                 println!("Test is empty for relative ID: {}", key);
-                assert_eq!(value, false)
+                assert!(!value)
             } else {
                 println!("Test is successful for relative ID: {}", key);
-                assert_eq!(value, true)
+                assert!(value)
             }
         }
     }

@@ -822,8 +822,6 @@ impl PyRoCrate {
         allow_remote: bool,
         contexts: Option<HashMap<String, String>>,
     ) -> PyResult<rdf::PyRdfGraph> {
-        core_compat::ensure_hierarchical_base(&self.inner.context, base.as_deref())
-            .map_err(PyValueError::new_err)?;
         let resolver = rdf::build_resolver(allow_remote, contexts)?;
         let options = rdf::conversion_options(base, allow_relative)?;
         let rocrate = &self.inner;
@@ -852,15 +850,7 @@ impl PyRoCrate {
         allow_remote: bool,
         contexts: Option<HashMap<String, String>>,
     ) -> PyResult<String> {
-        let mut resolved = rdf::resolve_context(py, &self.inner.context, allow_remote, contexts)?;
-        // Relative terms cannot be resolved against an opaque base such as urn:uuid:
-        if resolved
-            .base
-            .as_deref()
-            .is_some_and(core_compat::is_opaque_iri)
-        {
-            resolved.base = None;
-        }
+        let resolved = rdf::resolve_context(py, &self.inner.context, allow_remote, contexts)?;
         if strict {
             resolved.expand_term_checked(term, false)
         } else {

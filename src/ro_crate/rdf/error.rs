@@ -15,6 +15,10 @@ pub enum ContextError {
     InvalidContext(String),
     /// Failed to resolve a relative IRI (e.g., too many `../` segments).
     RelativeResolutionError { base: String, relative: String },
+    /// The @base is opaque (e.g., `urn:uuid:`), so has no path to resolve a relative IRI against.
+    NonHierarchicalBase { base: String, relative: String },
+    /// A relative IRI is malformed and cannot be resolved.
+    InvalidRelativeIri { relative: String, reason: String },
     /// HTTP client not initialized (call `allow_remote()` first).
     MissingClient,
 }
@@ -40,6 +44,16 @@ impl fmt::Display for ContextError {
                     "Cannot resolve '{}' against '{}': relative path navigates above root",
                     relative, base
                 )
+            }
+            ContextError::NonHierarchicalBase { base, relative } => {
+                write!(
+                    f,
+                    "Cannot resolve '{}' against non-hierarchical @base '{}'",
+                    relative, base
+                )
+            }
+            ContextError::InvalidRelativeIri { relative, reason } => {
+                write!(f, "Cannot resolve '{}': {}", relative, reason)
             }
             ContextError::MissingClient => {
                 write!(f, "HTTP client not initialized: call allow_remote() first")

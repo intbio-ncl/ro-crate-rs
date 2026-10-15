@@ -61,8 +61,7 @@ pub fn add_urn_uuid(context: &mut RoCrateContext) -> Option<String> {
         return Some(urn);
     }
     context.add_urn_uuid();
-    if let (None, RoCrateContext::ExtendedContext(items)) =
-        (context.get_urn_uuid(), &mut *context)
+    if let (None, RoCrateContext::ExtendedContext(items)) = (context.get_urn_uuid(), &mut *context)
     {
         items.push(ContextItem::EmbeddedContext(HashMap::from([(
             "@base".to_string(),
@@ -70,36 +69,4 @@ pub fn add_urn_uuid(context: &mut RoCrateContext) -> Option<String> {
         )])));
     }
     context.get_urn_uuid()
-}
-
-/// Returns true for IRIs with no path to resolve against, such as urn:uuid:...
-#[cfg(feature = "rdf")]
-pub fn is_opaque_iri(iri: &str) -> bool {
-    url::Url::parse(iri).is_ok_and(|url| url.cannot_be_a_base())
-}
-
-/// Rejects an opaque @base before RDF conversion.
-///
-/// The core RDF resolver panics when resolving a relative IRI against an opaque
-/// @base such as urn:uuid:. `fallback` is the base used when the context has none.
-#[cfg(feature = "rdf")]
-pub fn ensure_hierarchical_base(
-    context: &RoCrateContext,
-    fallback: Option<&str>,
-) -> Result<(), String> {
-    let base = match context {
-        RoCrateContext::EmbeddedContext(maps) => {
-            maps.iter().find_map(|map| map.get("@base").cloned())
-        }
-        _ => context.get_specific_context("@base"),
-    }
-    .or(fallback.map(str::to_string));
-
-    match base {
-        Some(base) if is_opaque_iri(&base) => Err(format!(
-            "Cannot resolve relative IRIs against non-hierarchical @base '{}'",
-            base
-        )),
-        _ => Ok(()),
-    }
 }

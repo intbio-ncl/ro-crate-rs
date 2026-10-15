@@ -1,7 +1,6 @@
 //! Handlers for converting crates to and from RDF
 
 use crate::args::{RdfCommand, RdfConversionArgs, RdfFormatArg, RdfImportCommand, RdfResolverArgs};
-use crate::core_compat::{ensure_hierarchical_base, is_opaque_iri};
 use crate::crate_io::{fail, load_crate, read_stdin, save_crate};
 use rocraters::ro_crate::rdf::{
     rdf_graph_to_rocrate, rdf_to_rocrate, rocrate_to_rdf_with_options, ContextResolverBuilder,
@@ -68,8 +67,6 @@ fn conversion_options(args: &RdfConversionArgs) -> ConversionOptions {
 }
 
 fn to_graph(rocrate: &RoCrate, args: &RdfConversionArgs) -> RdfGraph {
-    ensure_hierarchical_base(&rocrate.context, args.base.as_deref())
-        .unwrap_or_else(|e| fail(format!("Failed to convert crate to RDF: {}", e)));
     rocrate_to_rdf_with_options(
         rocrate,
         build_resolver(&args.resolver),
@@ -127,13 +124,9 @@ pub fn rdf(command: RdfCommand) {
         }
         RdfCommand::Expand(command) => {
             let rocrate = load_crate(&command.target.target_crate, 1);
-            let mut context = build_resolver(&command.resolver)
+            let context = build_resolver(&command.resolver)
                 .resolve(&rocrate.context)
                 .unwrap_or_else(|e| fail(format!("Failed to resolve context: {}", e)));
-            // Relative terms cannot be resolved against an opaque base such as urn:uuid:
-            if context.base.as_deref().is_some_and(is_opaque_iri) {
-                context.base = None;
-            }
             let expanded = if command.strict {
                 context.expand_term_checked(&command.term, false)
             } else {

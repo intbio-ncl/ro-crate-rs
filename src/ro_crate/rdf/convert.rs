@@ -731,6 +731,40 @@ mod tests {
     }
 
     #[test]
+    fn test_rocrate_to_rdf_rejects_opaque_base() {
+        use crate::ro_crate::context::{ContextItem, RoCrateContext};
+
+        let path = fixture_path("_ro-crate-metadata-minimal.json");
+        let mut crate_ = read_crate(&path, 0).expect("Failed to read crate");
+        crate_.context = RoCrateContext::ExtendedContext(vec![
+            ContextItem::ReferenceItem("https://w3id.org/ro/crate/1.1/context".to_string()),
+            ContextItem::EmbeddedContext(HashMap::from([(
+                "@base".to_string(),
+                "urn:uuid:01234567-89ab-cdef-0123-456789abcdef".to_string(),
+            )])),
+        ]);
+
+        for options in [
+            ConversionOptions::Strict,
+            ConversionOptions::AllowRelative,
+            ConversionOptions::with_base(TEST_BASE_IRI),
+        ] {
+            let error =
+                rocrate_to_rdf_with_options(&crate_, ContextResolverBuilder::default(), options)
+                    .unwrap_err();
+            assert!(error.to_string().contains("non-hierarchical"), "{error}");
+        }
+
+        let error = rocrate_to_rdf_with_options(
+            &read_crate(&path, 0).expect("Failed to read crate"),
+            ContextResolverBuilder::default(),
+            ConversionOptions::with_base("urn:uuid:1234"),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("non-hierarchical"), "{error}");
+    }
+
+    #[test]
     fn test_rocrate_to_rdf_minimal_1_2() {
         let path = fixture_path("_ro-crate-metadata-minimal-1_2.json");
         let crate_ = read_crate(&path, 0).expect("Failed to read crate");

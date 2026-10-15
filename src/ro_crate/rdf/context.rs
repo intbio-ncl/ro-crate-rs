@@ -36,7 +36,10 @@ pub struct ResolvedContext {
 ///
 /// # Errors
 /// Returns `ContextError::RelativeResolutionError` if the relative path
-/// attempts to navigate above the root (more `../` than path segments).
+/// attempts to navigate above the root (more `../` than path segments),
+/// `ContextError::NonHierarchicalBase` if the base is opaque (e.g., `urn:uuid:`)
+/// and the relative IRI is more than a fragment, and
+/// `ContextError::InvalidRelativeIri` if the relative IRI is malformed.
 fn resolve_relative_iri(base: &str, relative: &str) -> Result<String, ContextError> {
     // Handle fragment-only references: base + #fragment
     if relative.starts_with('#') {
@@ -46,6 +49,13 @@ fn resolve_relative_iri(base: &str, relative: &str) -> Result<String, ContextErr
 
     // Try URL-based resolution for bases with schemes
     if let Ok(base_url) = Url::parse(base) {
+        if base_url.cannot_be_a_base() {
+            return Err(ContextError::NonHierarchicalBase {
+                base: base.to_string(),
+                relative: relative.to_string(),
+            });
+        }
+
         // Validate parent directory references before resolution
         if relative.contains("../") {
             let parent_refs = relative.matches("../").count();
@@ -62,10 +72,12 @@ fn resolve_relative_iri(base: &str, relative: &str) -> Result<String, ContextErr
             }
         }
 
-        // join() should never fail for a valid parsed base URL
         let resolved = base_url
             .join(relative)
-            .expect("URL join should succeed for valid base URL");
+            .map_err(|e| ContextError::InvalidRelativeIri {
+                relative: relative.to_string(),
+                reason: e.to_string(),
+            })?;
         return Ok(resolved.to_string());
     }
 
@@ -110,6 +122,15 @@ fn resolve_relative_iri(base: &str, relative: &str) -> Result<String, ContextErr
     }
 
     Ok(result)
+}
+
+/// Resolves a relative IRI against a base IRI, returning it unchanged when the
+/// base is opaque (e.g., `urn:uuid:`) and has no path to resolve against.
+fn resolve_relative_iri_or_keep(base: &str, relative: &str) -> Result<String, ContextError> {
+    match resolve_relative_iri(base, relative) {
+        Err(ContextError::NonHierarchicalBase { .. }) => Ok(relative.to_string()),
+        result => result,
+    }
 }
 
 /// Checks if a term is an absolute IRI with a valid URI scheme.
@@ -181,8 +202,9 @@ impl ResolvedContext {
     /// Expands a term to its full IRI.
     ///
     /// Prefers explicit term/prefix mappings, then absolute IRIs, then @base/@vocab.
-    /// Returns `ContextError::RelativeResolutionError` if resolution would
-    /// navigate above the root.
+    /// Relative IRIs are returned unchanged when there is no @base or the @base
+    /// is opaque (e.g., `urn:uuid:`). Returns `ContextError::RelativeResolutionError`
+    /// if resolution would navigate above the root.
     pub fn expand_term(&self, term: &str) -> Result<String, ContextError> {
         // 1. Direct term mapping
         if let Some(iri) = self.terms.get(term) {
@@ -207,7 +229,7 @@ impl ResolvedContext {
         // 4. Path-like relative IRIs -> resolve against @base
         if has_relative_component(term) {
             if let Some(base) = &self.base {
-                return resolve_relative_iri(base, term);
+                return resolve_relative_iri_or_keep(base, term);
             }
             return Ok(term.to_string());
         }
@@ -220,7 +242,7 @@ impl ResolvedContext {
         // 6. No @vocab - treat remaining unknown terms as relative IRIs
         // This handles cases like "file.json" which are filenames
         if let Some(base) = &self.base {
-            return resolve_relative_iri(base, term);
+            return resolve_relative_iri_or_keep(base, term);
         }
 
         // 7. Return unchanged
@@ -230,7 +252,8 @@ impl ResolvedContext {
     /// Expands a term to its full IRI with strict validation.
     ///
     /// Errors if a relative IRI is encountered without @base and `allow_relative`
-    /// is false, or if the result remains relative.
+    /// is false, or if the result remains relative. Errors whatever `allow_relative`
+    /// is when @base is opaque (e.g., `urn:uuid:`) and cannot resolve a relative IRI.
     pub fn expand_term_checked(
         &self,
         term: &str,
@@ -692,5 +715,52 @@ mod tests {
             result.unwrap_err(),
             ContextError::RelativeResolutionError { .. }
         ));
+    }
+
+    #[test]
+    fn test_resolve_relative_against_opaque_base() {
+        let base = "urn:uuid:1234";
+        for relative in [
+            "./",
+            "./file.txt",
+            "../file.txt",
+            "data.csv",
+            "sub/file.txt",
+        ] {
+            assert!(matches!(
+                resolve_relative_iri(base, relative),
+                Err(ContextError::NonHierarchicalBase { .. })
+            ));
+        }
+        assert_eq!(
+            resolve_relative_iri(base, "#section1").unwrap(),
+            "urn:uuid:1234#section1"
+        );
+    }
+
+    #[test]
+    fn test_resolve_malformed_relative_iri() {
+        assert!(matches!(
+            resolve_relative_iri("http://example.org/crate/", "//[bad"),
+            Err(ContextError::InvalidRelativeIri { .. })
+        ));
+    }
+
+    #[test]
+    fn test_expand_with_opaque_base() {
+        let mut ctx = test_context();
+        ctx.base = Some("urn:uuid:1234".to_string());
+
+        assert_eq!(ctx.expand_term("name").unwrap(), "http://schema.org/name");
+        assert_eq!(ctx.expand_term("./file.txt").unwrap(), "./file.txt");
+        assert_eq!(ctx.expand_term("data.csv").unwrap(), "data.csv");
+
+        for allow_relative in [false, true] {
+            let error = ctx
+                .expand_term_checked("./file.txt", allow_relative)
+                .unwrap_err();
+            assert!(matches!(error, ContextError::NonHierarchicalBase { .. }));
+            assert!(error.to_string().contains("non-hierarchical"));
+        }
     }
 }

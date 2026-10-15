@@ -137,7 +137,6 @@ replacement names the call it stands in for; switch back once the core is fixed.
 | `RoCrate::add_data_to_partof_root` | looks the ID up as the root, so does nothing | `add_to_root_has_part` uses `RootDataEntity::add_entity_to_partof` |
 | `RootDataEntity::add_entity_to_partof` | replaces a single existing `hasPart` ID | `add_to_root_has_part` makes it a list first |
 | `RoCrateContext::add_urn_uuid` | does nothing for an extended context without embedded terms | `add_urn_uuid` adds an embedded `@base` |
-| `rdf::rocrate_to_rdf_with_options`, `ResolvedContext::expand_term` | panic resolving a relative IRI against an opaque `@base` such as `urn:uuid:` | conversion is refused with an error; expansion ignores the opaque base |
 
 Remaining core behaviour the tools pass through unchanged:
 

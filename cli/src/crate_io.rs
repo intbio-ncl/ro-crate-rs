@@ -2,7 +2,9 @@
 
 use rocraters::ro_crate::constraints::EntityValue;
 use rocraters::ro_crate::context::ContextItem;
-use rocraters::ro_crate::read::{load_remote, parse_zip, read_crate, read_crate_obj, CrateReadError};
+use rocraters::ro_crate::read::{
+    load_remote, parse_zip, read_crate, read_crate_obj, CrateReadError,
+};
 use rocraters::ro_crate::rocrate::RoCrate;
 use rocraters::ro_crate::write::write_crate;
 use std::collections::HashMap;

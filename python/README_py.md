@@ -18,7 +18,15 @@ full python implementation.*
 
 # Build 
 
-Built using PyO3 and maturin. Recommended to setup python venv, then install maturin (and remember maturin[patchelf])
+Built using PyO3 and maturin. To build from source, set up a python venv in this
+directory, install the build tools and build the package into it:
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+maturin develop
+```
 
 # Installation 
 

@@ -133,10 +133,10 @@ impl RootDataEntity {
     pub fn get_linked_ids(&self) -> Vec<Id> {
         let mut ids = Vec::new();
 
-        match &self.license {
-            License::Id(id) => ids.push(id.clone()),
-            License::Description(id) => ids.push(Id::Id(id.to_string())),
-        };
+        // A plain-string license is a literal, not a link to another entity
+        if let License::Id(id) = &self.license {
+            ids.push(id.clone());
+        }
 
         // Check for Id in the dynamic entity
         if let Some(dynamic_entity) = &self.dynamic_entity {

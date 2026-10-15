@@ -897,6 +897,15 @@ mod validate {
     }
 
     #[test]
+    fn minimal_crate_with_string_license_is_valid() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        ok(d, &["init", "-m"]);
+        assert_eq!(entity(d, "./")["license"], "Private");
+        assert_eq!(ok(d, &["validate", "basic"]).trim(), "Crate Valid");
+    }
+
+    #[test]
     fn read_errors_are_reported() {
         let dir = tempfile::tempdir().unwrap();
         let output = run(dir.path(), &["validate", "basic", "--json"], None);

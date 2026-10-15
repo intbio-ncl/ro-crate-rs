@@ -510,6 +510,20 @@ mod tests {
     }
 
     #[test]
+    fn validation_accepts_a_plain_string_license() {
+        let mut fixture: serde_json::Value = serde_json::from_slice(
+            &fs::read(fixture_path("_ro-crate-metadata-minimal.json")).unwrap(),
+        )
+        .unwrap();
+        fixture["@graph"][1]["license"] = serde_json::json!("Private");
+        let crate_data: RoCrate = serde_json::from_value(fixture).unwrap();
+        assert!(matches!(
+            validate_crate_keys(&crate_data),
+            ValidationResult::Valid
+        ));
+    }
+
+    #[test]
     fn test_parse_zip() {
         let zip = parse_zip("tests/fixtures/zip_test/fixtures.zip", 0);
         assert!(zip.is_ok());

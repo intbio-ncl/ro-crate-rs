@@ -123,13 +123,6 @@ The table is keyed by the crate's `urn:uuid` `@base`, so add one first with
 `cargo build -p ro-crate-rs-cli --features parquet` or
 `maturin build --features parquet`.
 
-## Known core behaviour
-
-The CLI and Python call the core directly. Core behaviour they pass through unchanged:
-
-- `validate_crate_keys` reports a plain-string `license` (such as the `"Private"`
-  default from `init -m`) as a missing local ID.
-
 ## Not exposed
 
 These public items are helpers or placeholders rather than operations on a crate:

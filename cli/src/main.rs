@@ -599,7 +599,7 @@ fn prompt_for_types() -> u8 {
 
         match answer.trim().parse::<u8>() {
             Ok(num) if (1..=6).contains(&num) => return num,
-            _ => println!("Please enter a number between 1 and 5."),
+            _ => println!("Please enter a number between 1 and 6."),
         }
     }
 }

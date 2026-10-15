@@ -745,7 +745,7 @@ impl PyRoCrate {
 
     /// Adds an entity ID to the root data entity's `hasPart`.
     fn add_data_to_partof_root(&mut self, id: &str) {
-        core_compat::add_to_root_has_part(&mut self.inner, id);
+        self.inner.add_data_to_partof_root(id);
     }
 
     /// Validates the crate's keys and local IDs against its RO-Crate version.

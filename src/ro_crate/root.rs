@@ -68,7 +68,15 @@ impl RootDataEntity {
                     id_array.push(id_target);
                 }
             }
-            // Insert a new IdArray with the provided `id` as the first element if `hasPart` does not exist or is not an `IdArray`
+            // Keeps a single existing ID alongside the new one
+            Some(EntityValue::EntityId(has_part @ Id::Id(_))) => {
+                if let Id::Id(existing) = has_part {
+                    if *existing != id_target {
+                        *has_part = Id::IdArray(vec![existing.clone(), id_target]);
+                    }
+                }
+            }
+            // Insert a new IdArray with the provided `id` as the first element if `hasPart` does not exist or is not an ID
             _ => {
                 dynamic_entity.insert(
                     "hasPart".to_string(),

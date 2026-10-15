@@ -207,9 +207,13 @@ impl RoCrate {
     /// data entity's `hasPart` property. If not, it adds a reference to ensure the data entity is correctly
     /// part of the overall data structure of the RO-Crate.
     pub fn add_data_to_partof_root(&mut self, id: &str) {
-        if let Some(GraphVector::RootDataEntity(root)) = self.get_entity_mutable(id) {
+        let root = self.graph.iter_mut().find_map(|entity| match entity {
+            GraphVector::RootDataEntity(root) => Some(root),
+            _ => None,
+        });
+        if let Some(root) = root {
             root.add_entity_to_partof(id.to_string());
-        };
+        }
     }
 
     /// Gets all properties found within RO-Crate
@@ -378,6 +382,58 @@ mod tests {
         assert_eq!(
             rocrate.context.get_schema_version(),
             Some(crate::ro_crate::schema::RoCrateSchemaVersion::V1_3)
+        );
+    }
+
+    fn root_has_part(rocrate: &RoCrate) -> Option<&EntityValue> {
+        rocrate.graph.iter().find_map(|entity| match entity {
+            GraphVector::RootDataEntity(root) => root.dynamic_entity.as_ref()?.get("hasPart"),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn add_data_to_partof_root_adds_to_root_has_part() {
+        let path = std::path::PathBuf::from("tests/fixtures/_ro-crate-metadata-minimal.json");
+        let mut rocrate = crate::ro_crate::read::read_crate(&path, 0).unwrap();
+
+        rocrate.add_data_to_partof_root("data.csv");
+        rocrate.add_data_to_partof_root("data.csv");
+        rocrate.add_data_to_partof_root("notes.txt");
+        assert_eq!(
+            root_has_part(&rocrate),
+            Some(&EntityValue::EntityId(Id::IdArray(vec![
+                "data.csv".to_string(),
+                "notes.txt".to_string()
+            ])))
+        );
+    }
+
+    #[test]
+    fn add_data_to_partof_root_keeps_a_single_existing_part() {
+        let path = std::path::PathBuf::from("tests/fixtures/_ro-crate-metadata-minimal.json");
+        let mut rocrate = crate::ro_crate::read::read_crate(&path, 0).unwrap();
+        rocrate.add_dynamic_entity_property(
+            "./",
+            HashMap::from([(
+                "hasPart".to_string(),
+                EntityValue::EntityId(Id::Id("data.csv".to_string())),
+            )]),
+        );
+
+        rocrate.add_data_to_partof_root("data.csv");
+        assert_eq!(
+            root_has_part(&rocrate),
+            Some(&EntityValue::EntityId(Id::Id("data.csv".to_string())))
+        );
+
+        rocrate.add_data_to_partof_root("notes.txt");
+        assert_eq!(
+            root_has_part(&rocrate),
+            Some(&EntityValue::EntityId(Id::IdArray(vec![
+                "data.csv".to_string(),
+                "notes.txt".to_string()
+            ])))
         );
     }
 }

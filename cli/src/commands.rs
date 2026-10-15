@@ -90,7 +90,7 @@ pub fn replace_id(command: ReplaceIdCommand) {
 pub fn add_has_part(command: EntityIdCommand) {
     let target = &command.target.target_crate;
     let mut rocrate = load_for_update(target);
-    core_compat::add_to_root_has_part(&mut rocrate, &command.id);
+    rocrate.add_data_to_partof_root(&command.id);
     save_crate(&rocrate, target);
 }
 

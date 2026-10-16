@@ -68,7 +68,15 @@ impl RootDataEntity {
                     id_array.push(id_target);
                 }
             }
-            // Insert a new IdArray with the provided `id` as the first element if `hasPart` does not exist or is not an `IdArray`
+            // Keeps a single existing ID alongside the new one
+            Some(EntityValue::EntityId(has_part @ Id::Id(_))) => {
+                if let Id::Id(existing) = has_part
+                    && *existing != id_target
+                {
+                    *has_part = Id::IdArray(vec![existing.clone(), id_target]);
+                }
+            }
+            // Insert a new IdArray with the provided `id` as the first element if `hasPart` does not exist or is not an ID
             _ => {
                 dynamic_entity.insert(
                     "hasPart".to_string(),
@@ -113,10 +121,10 @@ impl RootDataEntity {
     /// An `Option<String>` containing the key if the value exists, or `None` otherwise.
     pub fn find_value_details(&self, target_value: &EntityValue) -> Option<(String, String)> {
         // Check dynamic fields
-        if let Some(dynamic_entity) = &self.dynamic_entity {
-            if let Some(key) = search_dynamic_entity_for_key(dynamic_entity, target_value) {
-                return Some((self.id.clone(), key));
-            }
+        if let Some(dynamic_entity) = &self.dynamic_entity
+            && let Some(key) = search_dynamic_entity_for_key(dynamic_entity, target_value)
+        {
+            return Some((self.id.clone(), key));
         }
 
         None
@@ -125,10 +133,10 @@ impl RootDataEntity {
     pub fn get_linked_ids(&self) -> Vec<Id> {
         let mut ids = Vec::new();
 
-        match &self.license {
-            License::Id(id) => ids.push(id.clone()),
-            License::Description(id) => ids.push(Id::Id(id.to_string())),
-        };
+        // A plain-string license is a literal, not a link to another entity
+        if let License::Id(id) = &self.license {
+            ids.push(id.clone());
+        }
 
         // Check for Id in the dynamic entity
         if let Some(dynamic_entity) = &self.dynamic_entity {

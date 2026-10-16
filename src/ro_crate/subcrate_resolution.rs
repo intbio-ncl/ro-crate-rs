@@ -1,13 +1,14 @@
 use crate::ro_crate::constraints::Id;
 use crate::ro_crate::data_entity::DataEntity;
+use crate::ro_crate::read::{MAX_ARCHIVE_BYTES, MAX_METADATA_BYTES, read_with_limit};
 use crate::ro_crate::rocrate::RoCrate;
 use crate::ro_crate::write::is_not_url;
 use log::warn;
 use reqwest::blocking::Response;
 use reqwest::header::{HeaderMap, ToStrError};
 use sha2::Digest;
-use std::collections::VecDeque;
-use std::io::Read;
+use std::collections::{HashSet, VecDeque};
+use std::path::{Path, PathBuf};
 use std::string::FromUtf8Error;
 use zip::ZipArchive;
 use zip::result::ZipError;
@@ -24,6 +25,9 @@ pub enum FetchError {
     BagItError(String),
     FromUTF8Error(FromUtf8Error),
     RegexError(regex::Error),
+    TraversalLimit(String),
+    RemoteAccessDisabled(String),
+    LocalAccessDenied(PathBuf),
 }
 
 impl std::fmt::Display for FetchError {
@@ -58,6 +62,17 @@ impl std::fmt::Display for FetchError {
             }
             FetchError::RegexError(err) => {
                 write!(f, "RegexError `{}`", err)
+            }
+            FetchError::TraversalLimit(reason) => write!(f, "Subcrate traversal limit: {reason}"),
+            FetchError::RemoteAccessDisabled(id) => {
+                write!(f, "Remote subcrate access is disabled for {id}")
+            }
+            FetchError::LocalAccessDenied(path) => {
+                write!(
+                    f,
+                    "Local subcrate path is outside the allowed root: {}",
+                    path.display()
+                )
             }
         }
     }
@@ -101,44 +116,122 @@ impl From<regex::Error> for FetchError {
     }
 }
 
+/// Network access is disabled by default because subcrate locators are supplied
+/// by crate metadata. Callers processing trusted remote references can opt in.
+#[derive(Clone, Debug, Default)]
+pub struct FetchOptions {
+    pub allow_remote: bool,
+    /// Directory that local subcrate paths must remain inside. Defaults to the
+    /// current working directory.
+    pub local_root: Option<PathBuf>,
+}
+
 /// Fails when a subcrate cannot be resolved
 pub fn fetch_subcrates_recursive(rocrate: &RoCrate) -> Result<Vec<RoCrate>, FetchError> {
-    let mut flattened = Vec::new();
-    let mut queue = fetch_subcrates(rocrate)?
-        .into_iter()
-        .collect::<VecDeque<RoCrate>>();
+    fetch_subcrates_recursive_with_options(rocrate, FetchOptions::default())
+}
 
-    while let Some(subcrate) = queue.pop_front() {
-        let subsubcrates = fetch_subcrates(&subcrate)?;
-        for sub in subsubcrates {
-            queue.push_back(sub);
-        }
-        flattened.push(subcrate);
-    }
-
-    Ok(flattened)
+pub fn fetch_subcrates_recursive_with_options(
+    rocrate: &RoCrate,
+    options: FetchOptions,
+) -> Result<Vec<RoCrate>, FetchError> {
+    walk_subcrates(rocrate, true, options)
 }
 
 /// Does not fail when a subcrate cannot be resolved
 pub fn try_fetch_subcrates_recursive(rocrate: &RoCrate) -> Vec<RoCrate> {
+    try_fetch_subcrates_recursive_with_options(rocrate, FetchOptions::default())
+}
+
+pub fn try_fetch_subcrates_recursive_with_options(
+    rocrate: &RoCrate,
+    options: FetchOptions,
+) -> Vec<RoCrate> {
+    walk_subcrates(rocrate, false, options).expect("lenient subcrate traversal cannot fail")
+}
+
+const MAX_SUBCRATES: usize = 256;
+const MAX_SUBCRATE_DEPTH: usize = 16;
+
+fn walk_subcrates(
+    rocrate: &RoCrate,
+    strict: bool,
+    options: FetchOptions,
+) -> Result<Vec<RoCrate>, FetchError> {
     let mut flattened = Vec::new();
-    let mut queue = try_fetch_subcrates(rocrate)
+    let mut seen = HashSet::new();
+    let mut queue = subcrate_ids(rocrate)
         .into_iter()
-        .collect::<VecDeque<RoCrate>>();
+        .map(|id| (id, 1))
+        .collect::<VecDeque<_>>();
 
-    while let Some(subcrate) = queue.pop_front() {
-        let subsubcrates = try_fetch_subcrates(&subcrate);
-        for sub in subsubcrates {
-            queue.push_back(sub);
+    while let Some((id, depth)) = queue.pop_front() {
+        let key = normalize_subcrate_id(&id, &options);
+        if !seen.insert(key) {
+            continue;
         }
-        flattened.push(subcrate);
-    }
+        if seen.len() > MAX_SUBCRATES || depth > MAX_SUBCRATE_DEPTH {
+            let reason = format!(
+                "at most {MAX_SUBCRATES} distinct subcrates and {MAX_SUBCRATE_DEPTH} levels"
+            );
+            if strict {
+                return Err(FetchError::TraversalLimit(reason));
+            }
+            warn!("{reason}");
+            break;
+        }
 
-    flattened
+        let subcrate = resolve_subcrate(&id, &options);
+        match subcrate {
+            Ok(subcrate) => {
+                queue.extend(
+                    subcrate_ids(&subcrate)
+                        .into_iter()
+                        .map(|id| (id, depth + 1)),
+                );
+                flattened.push(subcrate);
+            }
+            Err(err) if strict => return Err(err),
+            Err(err) => warn!("{err}"),
+        }
+    }
+    Ok(flattened)
+}
+
+fn normalize_subcrate_id(id: &str, options: &FetchOptions) -> String {
+    if is_not_url(id) {
+        let path = local_subcrate_path(id, options.local_root.as_deref().unwrap_or(Path::new(".")));
+        path.canonicalize()
+            .unwrap_or(path)
+            .to_string_lossy()
+            .to_string()
+    } else {
+        url::Url::parse(id)
+            .map(|url| url.to_string())
+            .unwrap_or_else(|_| id.to_string())
+    }
+}
+
+fn subcrate_ids(rocrate: &RoCrate) -> Vec<String> {
+    rocrate
+        .get_subcrates()
+        .into_iter()
+        .filter_map(|entity| match entity {
+            crate::ro_crate::graph_vector::GraphVector::DataEntity(data) => Some(get_id(data)),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Fails when a subcrate cannot be resolved
 pub fn fetch_subcrates(rocrate: &RoCrate) -> Result<Vec<RoCrate>, FetchError> {
+    fetch_subcrates_with_options(rocrate, FetchOptions::default())
+}
+
+pub fn fetch_subcrates_with_options(
+    rocrate: &RoCrate,
+    options: FetchOptions,
+) -> Result<Vec<RoCrate>, FetchError> {
     let subcrates = rocrate.get_subcrates();
 
     let mut collected_subcrates = Vec::new();
@@ -152,11 +245,7 @@ pub fn fetch_subcrates(rocrate: &RoCrate) -> Result<Vec<RoCrate>, FetchError> {
         // Try to find the subcrate id
         let id = get_id(subcrate);
 
-        if is_not_url(&id) {
-            collected_subcrates.push(try_resolve_local(&id)?);
-        } else {
-            collected_subcrates.push(try_resolve_remote(&id)?);
-        }
+        collected_subcrates.push(resolve_subcrate(&id, &options)?);
     }
 
     Ok(collected_subcrates)
@@ -164,6 +253,10 @@ pub fn fetch_subcrates(rocrate: &RoCrate) -> Result<Vec<RoCrate>, FetchError> {
 
 /// Does not fail when a subcrate is not found
 pub fn try_fetch_subcrates(rocrate: &RoCrate) -> Vec<RoCrate> {
+    try_fetch_subcrates_with_options(rocrate, FetchOptions::default())
+}
+
+pub fn try_fetch_subcrates_with_options(rocrate: &RoCrate, options: FetchOptions) -> Vec<RoCrate> {
     let subcrates = rocrate.get_subcrates();
 
     let mut collected_subcrates = Vec::new();
@@ -177,48 +270,64 @@ pub fn try_fetch_subcrates(rocrate: &RoCrate) -> Vec<RoCrate> {
         // Try to find the subcrate id
         let id = get_id(subcrate);
 
-        if is_not_url(&id) {
-            match try_resolve_local(&id) {
-                Ok(rocrate) => {
-                    collected_subcrates.push(rocrate);
-                    continue;
-                }
-                Err(err) => warn!("{}", err),
-            }
-        } else {
-            match try_resolve_remote(&id) {
-                Ok(rocrate) => {
-                    collected_subcrates.push(rocrate);
-                    continue;
-                }
-                Err(err) => warn!("{}", err),
-            }
+        match resolve_subcrate(&id, &options) {
+            Ok(rocrate) => collected_subcrates.push(rocrate),
+            Err(err) => warn!("{err}"),
         }
     }
 
     collected_subcrates
 }
 
-fn try_resolve_local(id: &str) -> Result<RoCrate, FetchError> {
-    let path = if id.ends_with('/') {
-        format!("{id}ro-crate-metadata.json")
+fn resolve_subcrate(id: &str, options: &FetchOptions) -> Result<RoCrate, FetchError> {
+    if is_not_url(id) {
+        try_resolve_local(id, options)
+    } else if options.allow_remote {
+        try_resolve_remote(id)
     } else {
-        id.to_string()
-    };
+        Err(FetchError::RemoteAccessDisabled(id.to_string()))
+    }
+}
+
+fn try_resolve_local(id: &str, options: &FetchOptions) -> Result<RoCrate, FetchError> {
+    let root = options
+        .local_root
+        .as_deref()
+        .unwrap_or(Path::new("."))
+        .canonicalize()?;
+    let path = local_subcrate_path(id, &root).canonicalize()?;
+    if !path.starts_with(&root) {
+        return Err(FetchError::LocalAccessDenied(path));
+    }
 
     let mut file = std::fs::File::open(path)?;
-    let mut buffer = Vec::new();
-    file.read_to_end(&mut buffer)?;
+    let buffer = read_with_limit(&mut file, MAX_METADATA_BYTES)?;
 
     Ok(serde_json::from_slice(buffer.as_slice())?)
+}
+
+fn local_subcrate_path(id: &str, root: &Path) -> PathBuf {
+    let candidate = Path::new(id);
+    let candidate = if candidate.is_absolute() {
+        candidate.to_path_buf()
+    } else {
+        root.join(candidate)
+    };
+    if id.ends_with('/') {
+        candidate.join("ro-crate-metadata.json")
+    } else {
+        candidate
+    }
 }
 
 fn try_direct_resolve_or_zip(response: Response) -> Result<RoCrate, FetchError> {
     let headers = response.headers().clone();
     let redirect_url = response.url().to_string();
-    let body = response.bytes()?;
+    let body = bytes::Bytes::from(read_with_limit(response, MAX_ARCHIVE_BYTES)?);
 
-    if let Ok(ro_crate) = serde_json::from_slice::<RoCrate>(&body) {
+    if body.len() <= MAX_METADATA_BYTES
+        && let Ok(ro_crate) = serde_json::from_slice::<RoCrate>(&body)
+    {
         return Ok(ro_crate);
     }
 
@@ -247,7 +356,7 @@ fn try_resolve_remote(id: &str) -> Result<RoCrate, FetchError> {
     }
 
     // Try content negotiation
-    if let Ok(ro_crate) = try_content_negotiation(&id).and_then(try_direct_resolve_or_zip) {
+    if let Ok(ro_crate) = try_content_negotiation(id).and_then(try_direct_resolve_or_zip) {
         return Ok(ro_crate);
     }
 
@@ -263,20 +372,18 @@ fn try_resolve_remote(id: &str) -> Result<RoCrate, FetchError> {
 
 /// Extract the metadata URL from subjectOf property
 fn try_property(entity: &DataEntity, value: &str) -> Option<String> {
-    if let Some(dynamic_entities) = &entity.dynamic_entity {
-        if let Some(value) = dynamic_entities.get(value).cloned() {
-            match value {
-                super::constraints::EntityValue::EntityId(Id::Id(id)) => return Some(id),
-                _ => {}
-            }
-        }
+    if let Some(dynamic_entities) = &entity.dynamic_entity
+        && let Some(value) = dynamic_entities.get(value).cloned()
+        && let super::constraints::EntityValue::EntityId(Id::Id(id)) = value
+    {
+        return Some(id);
     }
     None
 }
 
 fn get_id(entity: &DataEntity) -> String {
     // 1. Try subjectOf (to url/path that leads to ro-crate-metadata.json)
-    let id = if let Some(subject_of) = try_property(entity, "subjectOf") {
+    if let Some(subject_of) = try_property(entity, "subjectOf") {
         subject_of
     } else {
         // 2. Try distribution (to url that leads to an archive)
@@ -286,8 +393,7 @@ fn get_id(entity: &DataEntity) -> String {
             // 3. Try retrieving ro-crate by id
             entity.id.clone()
         }
-    };
-    id
+    }
 }
 
 fn try_signposting(headers: &HeaderMap) -> Result<Response, FetchError> {
@@ -301,14 +407,12 @@ fn try_signposting(headers: &HeaderMap) -> Result<Response, FetchError> {
                 let response = reqwest::blocking::get(&url)?;
                 return Ok(response);
             }
-        } else {
-            if values.contains("rel=\"describedBy\"") || values.contains("rel=\"item\"") {
-                if let Some((link, _)) = values.split_once(";") {
-                    let url = link.replace("<", "").replace(">", "");
-                    let response = reqwest::blocking::get(&url)?;
-                    return Ok(response);
-                }
-            }
+        } else if (values.contains("rel=\"describedBy\"") || values.contains("rel=\"item\""))
+            && let Some((link, _)) = values.split_once(";")
+        {
+            let url = link.replace("<", "").replace(">", "");
+            let response = reqwest::blocking::get(&url)?;
+            return Ok(response);
         }
     }
     Err(FetchError::NotFound("No valid rocrate found".to_string()))
@@ -354,14 +458,12 @@ fn guess_location(redirect_url: &str) -> Result<Response, FetchError> {
     //    then try `https://about.workflowhub.eu/Workflow-RO-Crate/1.0/ro-crate-metadata.json`
     let guessed_url = if redirect_url.ends_with("/") {
         format!("{}ro-crate-metadata.json", redirect_url)
+    } else if regex.is_match(redirect_url) {
+        regex
+            .replace(redirect_url, "/ro-crate-metadata.json")
+            .to_string()
     } else {
-        if regex.is_match(redirect_url) {
-            regex
-                .replace(redirect_url, "/ro-crate-metadata.json")
-                .to_string()
-        } else {
-            format!("{}/ro-crate-metadata.json", redirect_url.to_string())
-        }
+        format!("{}/ro-crate-metadata.json", redirect_url)
     };
 
     let response = reqwest::blocking::Client::new().get(guessed_url).send()?;
@@ -373,45 +475,44 @@ fn try_zip(headers: &HeaderMap, bytes: bytes::Bytes) -> Result<RoCrate, FetchErr
     // 4. If retrieved resource has `Content-Type: application/zip` or is a ZIP file
     //    extract ro-crate-metadata.json or if only contains single folder, extract
     //    folder/ro-crate-metadata.json
-    if let Some(content_type) = headers.get("Content-Type") {
-        if content_type.to_str()?.contains("application/zip") {
-            let reader = std::io::Cursor::new(bytes);
-            let mut archive = ZipArchive::new(reader)?;
+    if let Some(content_type) = headers.get("Content-Type")
+        && content_type.to_str()?.contains("application/zip")
+    {
+        let reader = std::io::Cursor::new(bytes);
+        let mut archive = ZipArchive::new(reader)?;
 
-            // Try retrieving file by name
-            match archive.by_name("ro-crate-metadata.json") {
-                Ok(mut file_in_zip) => {
-                    // Read the file contents into memory
-                    let mut buffer = Vec::new();
-                    file_in_zip.read_to_end(&mut buffer)?;
+        // A BagIt manifest is an integrity assertion. If verification fails,
+        // do not rediscover and return the same metadata via the generic ZIP path.
+        if archive.file_names().any(|name| name == "bagit.txt") {
+            return try_bagit(archive);
+        }
 
-                    let subcrate: RoCrate = serde_json::from_slice(&buffer)?;
-
-                    return Ok(subcrate);
-                }
-                Err(err) => warn!("{}", err),
-            }
-
-            // Try to extract rocrate from bagit
-            match try_bagit(archive.clone()) {
-                Ok(rocrate) => {
-                    return Ok(rocrate);
-                }
-                Err(err) => warn!("{}", err),
-            }
-
-            // Try finding rocrate in subdirectories
-            let names: Vec<String> = archive.file_names().map(|e| e.to_string()).collect();
-            if let Some(rocrate) = names.iter().find(|x| x.contains("metadata.json")) {
-                let mut file_in_zip = archive.by_name(rocrate)?;
-
-                let mut buffer = Vec::new();
-                file_in_zip.read_to_end(&mut buffer)?;
+        // Try retrieving file by name
+        match archive.by_name("ro-crate-metadata.json") {
+            Ok(mut file_in_zip) => {
+                // Read the file contents into memory
+                let buffer = read_with_limit(&mut file_in_zip, MAX_METADATA_BYTES)?;
 
                 let subcrate: RoCrate = serde_json::from_slice(&buffer)?;
 
                 return Ok(subcrate);
             }
+            Err(err) => warn!("{}", err),
+        }
+
+        // Try finding rocrate in subdirectories
+        let names: Vec<String> = archive.file_names().map(|e| e.to_string()).collect();
+        if let Some(rocrate) = names
+            .iter()
+            .find(|name| name.ends_with("/ro-crate-metadata.json"))
+        {
+            let mut file_in_zip = archive.by_name(rocrate)?;
+
+            let buffer = read_with_limit(&mut file_in_zip, MAX_METADATA_BYTES)?;
+
+            let subcrate: RoCrate = serde_json::from_slice(&buffer)?;
+
+            return Ok(subcrate);
         }
     }
     Err(FetchError::NotFound("No subcrate found".to_string()))
@@ -425,8 +526,7 @@ fn try_bagit(
         //    then return data/ro-crate-metadata.json
         let mut rocrate = archive.by_name("data/ro-crate-metadata.json")?;
         // Parse ro-crate
-        let mut ro_crate_buffer = Vec::new();
-        rocrate.read_to_end(&mut ro_crate_buffer)?;
+        let ro_crate_buffer = read_with_limit(&mut rocrate, MAX_METADATA_BYTES)?;
         let subcrate = serde_json::from_slice(&ro_crate_buffer)?;
         drop(rocrate);
 
@@ -468,8 +568,7 @@ fn try_verify_hash(
         Hash::Sha256 => "manifest-sha256.txt",
     };
     let mut sha512 = archive.by_name(manifest)?;
-    let mut buffer = Vec::new();
-    sha512.read_to_end(&mut buffer)?;
+    let buffer = read_with_limit(&mut sha512, MAX_METADATA_BYTES)?;
 
     let hashes = String::from_utf8(buffer)?;
     let hash = hashes
@@ -498,6 +597,202 @@ mod subcrate_tests {
     use crate::ro_crate::data_entity::DataEntity;
     use crate::ro_crate::modify::DynamicEntityManipulation;
     use std::collections::HashMap;
+
+    #[test]
+    fn zip_metadata_is_bounded_after_decompression() {
+        use std::io::Write;
+
+        let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::<u8>::new()));
+        writer
+            .start_file(
+                "ro-crate-metadata.json",
+                zip::write::SimpleFileOptions::default()
+                    .compression_method(zip::CompressionMethod::Deflated),
+            )
+            .unwrap();
+        writer
+            .write_all(&vec![b'a'; MAX_METADATA_BYTES + 1])
+            .unwrap();
+        let body = bytes::Bytes::from(writer.finish().unwrap().into_inner());
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            reqwest::header::CONTENT_TYPE,
+            reqwest::header::HeaderValue::from_static("application/zip"),
+        );
+
+        assert!(matches!(
+            try_zip(&headers, body),
+            Err(FetchError::IoError(error)) if error.kind() == std::io::ErrorKind::InvalidData
+        ));
+    }
+
+    #[test]
+    fn local_subcrate_cannot_escape_allowed_root() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let secret = outside.path().join("secret.json");
+        std::fs::write(&secret, b"{}").unwrap();
+        let options = FetchOptions {
+            local_root: Some(root.path().to_path_buf()),
+            ..Default::default()
+        };
+
+        assert!(matches!(
+            try_resolve_local(secret.to_str().unwrap(), &options),
+            Err(FetchError::LocalAccessDenied(_))
+        ));
+
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&secret, root.path().join("linked.json")).unwrap();
+            assert!(matches!(
+                try_resolve_local("linked.json", &options),
+                Err(FetchError::LocalAccessDenied(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn remote_subcrate_requires_opt_in() {
+        let root: RoCrate = serde_json::from_value(serde_json::json!({
+            "@context": "https://w3id.org/ro/crate/1.1/context",
+            "@graph": [
+                {
+                    "@id": "ro-crate-metadata.json",
+                    "@type": "CreativeWork",
+                    "conformsTo": {"@id": "https://w3id.org/ro/crate/1.1"},
+                    "about": {"@id": "./"}
+                },
+                {
+                    "@id": "http://127.0.0.1:12345/private",
+                    "@type": "Dataset",
+                    "conformsTo": {"@id": "https://w3id.org/ro/crate/1.1"}
+                }
+            ]
+        }))
+        .unwrap();
+
+        assert!(matches!(
+            fetch_subcrates(&root),
+            Err(FetchError::RemoteAccessDisabled(_))
+        ));
+        assert!(try_fetch_subcrates(&root).is_empty());
+    }
+
+    #[test]
+    fn recursive_fetch_stops_at_self_referential_subcrate() {
+        let directory = tempfile::tempdir().unwrap();
+        let metadata_path = directory.path().join("ro-crate-metadata.json");
+        let crate_json = serde_json::json!({
+            "@context": "https://w3id.org/ro/crate/1.1/context",
+            "@graph": [
+                {
+                    "@id": "ro-crate-metadata.json",
+                    "@type": "CreativeWork",
+                    "conformsTo": {"@id": "https://w3id.org/ro/crate/1.1"},
+                    "about": {"@id": "./"}
+                },
+                {
+                    "@id": metadata_path.to_string_lossy(),
+                    "@type": "Dataset",
+                    "conformsTo": {"@id": "https://w3id.org/ro/crate/1.1"}
+                }
+            ]
+        });
+        std::fs::write(&metadata_path, crate_json.to_string()).unwrap();
+        let root: RoCrate = serde_json::from_value(crate_json).unwrap();
+
+        let options = FetchOptions {
+            local_root: Some(directory.path().to_path_buf()),
+            ..Default::default()
+        };
+        assert_eq!(
+            fetch_subcrates_recursive_with_options(&root, options.clone())
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            try_fetch_subcrates_recursive_with_options(&root, options).len(),
+            1
+        );
+    }
+
+    #[test]
+    fn recursive_fetch_enforces_depth_limit() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths: Vec<_> = (0..=MAX_SUBCRATE_DEPTH + 1)
+            .map(|index| directory.path().join(format!("crate-{index}.json")))
+            .collect();
+
+        for (index, path) in paths.iter().enumerate() {
+            let mut graph = vec![serde_json::json!({
+                "@id": "ro-crate-metadata.json",
+                "@type": "CreativeWork",
+                "conformsTo": {"@id": "https://w3id.org/ro/crate/1.1"},
+                "about": {"@id": "./"}
+            })];
+            if let Some(next) = paths.get(index + 1) {
+                graph.push(serde_json::json!({
+                    "@id": next.to_string_lossy(),
+                    "@type": "Dataset",
+                    "conformsTo": {"@id": "https://w3id.org/ro/crate/1.1"}
+                }));
+            }
+            let metadata = serde_json::json!({
+                "@context": "https://w3id.org/ro/crate/1.1/context",
+                "@graph": graph
+            });
+            std::fs::write(path, metadata.to_string()).unwrap();
+        }
+
+        let root: RoCrate = serde_json::from_slice(&std::fs::read(&paths[0]).unwrap()).unwrap();
+        let options = FetchOptions {
+            local_root: Some(directory.path().to_path_buf()),
+            ..Default::default()
+        };
+        assert!(matches!(
+            fetch_subcrates_recursive_with_options(&root, options.clone()),
+            Err(FetchError::TraversalLimit(_))
+        ));
+        assert_eq!(
+            try_fetch_subcrates_recursive_with_options(&root, options).len(),
+            MAX_SUBCRATE_DEPTH
+        );
+    }
+
+    #[test]
+    fn bagit_with_bad_manifest_is_rejected() {
+        use std::io::Write;
+        use zip::write::SimpleFileOptions;
+
+        let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::<u8>::new()));
+        let options = SimpleFileOptions::default();
+        writer.start_file("bagit.txt", options).unwrap();
+        writer.write_all(b"BagIt-Version: 1.0\n").unwrap();
+        writer.start_file("manifest-sha256.txt", options).unwrap();
+        writer
+            .write_all(format!("{}  data/ro-crate-metadata.json\n", "0".repeat(64)).as_bytes())
+            .unwrap();
+        writer
+            .start_file("data/ro-crate-metadata.json", options)
+            .unwrap();
+        writer
+            .write_all(br#"{"@context":"https://w3id.org/ro/crate/1.3/context","@graph":[]}"#)
+            .unwrap();
+
+        let body = bytes::Bytes::from(writer.finish().unwrap().into_inner());
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            reqwest::header::CONTENT_TYPE,
+            reqwest::header::HeaderValue::from_static("application/zip"),
+        );
+
+        assert!(matches!(
+            try_zip(&headers, body),
+            Err(FetchError::BagItError(_))
+        ));
+    }
 
     // Helper function to create a DataEntity with properties
     fn create_data_entity_with_property(key: &str, value: &str) -> DataEntity {

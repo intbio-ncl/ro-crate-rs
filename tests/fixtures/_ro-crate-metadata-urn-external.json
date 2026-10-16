@@ -41,7 +41,7 @@
       "name": "External data"
     },
     {
-      "@id": "/home/matt/dev/ial/ro-crate-rs/tests/fixtures/test_experiment/data.csv",
+      "@id": "data.csv",
       "@type": "File",
       "name": "CSV data"
     },

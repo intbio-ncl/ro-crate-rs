@@ -7,10 +7,11 @@ use crate::ro_crate::read::{CrateReadError, read_crate};
 use crate::ro_crate::rocrate::RoCrate;
 use dirs;
 use log::{debug, error};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use tempfile::NamedTempFile;
 use thiserror::Error;
 use url::Url;
 use walkdir::WalkDir;
@@ -36,6 +37,16 @@ pub enum WriteError {
     ContextError(String),
     #[error("Read Error: {0}")]
     ReadError(#[from] CrateReadError),
+    #[error(
+        "Refusing to package external folder {0:?}: it is the home folder or contains the crate"
+    )]
+    UnsafeExternalPath(PathBuf),
+    #[error("Hidden path to include must exist inside the crate directory: {0:?}")]
+    InvalidIncludePath(PathBuf),
+    #[error("Duplicate ZIP entry: {0}")]
+    DuplicateZipEntry(String),
+    #[error("Directory traversal error: {0}")]
+    WalkDirError(#[from] walkdir::Error),
 }
 
 /// Serializes and writes an RO-Crate object to a JSON file.
@@ -85,10 +96,7 @@ fn write_crate_to_zip(
         .map_err(|e| WriteError::ZipOperationError(e.to_string()))?;
 
     // Start a new file in the zip archive with the given name and options
-    zip_data
-        .zip
-        .start_file(name, zip_data.options)
-        .map_err(|e| WriteError::ZipOperationError(e.to_string()))?;
+    zip_data.start_file(&name)?;
 
     zip_data
         .zip
@@ -104,13 +112,20 @@ fn write_crate_to_zip(
 /// This function compresses an entire RO-Crate directory, including all files within the directory structure,
 /// into a single zip archive. It's designed to include every file present, without checking their relevance
 /// to the crate's metadata, based on the principle that all files in the directory are part of the research
-/// data or experiment. If external is true, it will grab and copy external data files
-/// to a new `external` folder within the zip. This can increase storage costs, but allows
-/// exhaustive capture of data state.
+/// data or experiment. Hidden files and folders (names starting with `.`) are skipped unless
+/// the crate describes them or they are listed in `include_hidden`, and symbolic links are
+/// never followed.
+///
+/// If external is true, it will grab and copy external data files to a new `external` folder
+/// within the zip. This can increase storage costs, but allows exhaustive capture of data state.
+/// A crate can reference any local path, so only enable this for crates you trust.
 ///
 /// # Arguments
 /// * `crate_path` - The path to the RO-Crate file within crate to zip.
 /// * `external` - A boolean flag indicating whether to apply special handling for external resources.
+/// * `include_hidden` - Hidden files or folders to package anyway, relative to the crate
+///   directory. A folder is included with everything inside it. Each must exist inside the
+///   crate directory, or nothing is written.
 ///
 /// # Returns
 /// A `Result<(), WriteError>` reflecting the success or failure of the operation.
@@ -123,7 +138,7 @@ fn write_crate_to_zip(
 /// # Examples
 /// ```
 /// let crate_path = Path::new("/path/to/ro-crate-directory/ro-crate-metadata.json");
-/// zip_crate(crate_path, false)?;
+/// zip_crate(crate_path, false, 1, false, false, &[PathBuf::from(".github")])?;
 /// ```
 pub fn zip_crate(
     crate_path: &Path,
@@ -131,26 +146,20 @@ pub fn zip_crate(
     validation_level: i8,
     flatten: bool,
     unique: bool,
+    include_hidden: &[PathBuf],
 ) -> Result<(), WriteError> {
     // After prepping create the initial zip file
     let mut zip_paths = construct_paths(crate_path)?;
     debug!("{:?}", &zip_paths);
+
+    // Checked before anything is written, so a bad path leaves the crate untouched
+    let include_hidden = resolve_included_paths(include_hidden, &zip_paths.root_path)?;
 
     // Opens target crate ready for update
     let mut rocrate = read_crate(&zip_paths.absolute_path, validation_level)?;
 
     // Attach unique identifier if not already present
     rocrate.context.add_urn_uuid();
-    // This saves a modified copy with the updated urn -> prevents duplicate if already
-    // present
-    write_crate(
-        &rocrate,
-        zip_paths
-            .absolute_path
-            .canonicalize()?
-            .to_string_lossy()
-            .to_string(),
-    )?;
     if unique {
         let base_id = rocrate
             .context
@@ -169,21 +178,52 @@ pub fn zip_crate(
     }
     debug!("ZIP PATH NAME {:?}", zip_paths.zip_file_name);
 
-    let mut zip_data = build_zip(&zip_paths)?;
+    // Keep the existing archive intact until every entry has been written and
+    // the central directory has been finalized.
+    let archive_temp = NamedTempFile::new_in(&zip_paths.root_path)?;
+    let mut zip_data = build_zip(archive_temp.reopen()?);
 
-    let _ = directory_walk(&mut rocrate, &zip_paths, &mut zip_data, flatten);
+    directory_walk(
+        &mut rocrate,
+        &zip_paths,
+        &mut zip_data,
+        flatten,
+        &include_hidden,
+    )?;
 
     if external {
         zip_data = zip_crate_external(&mut rocrate, zip_data, &zip_paths)?
     }
 
-    let _ = write_crate_to_zip(
+    write_crate_to_zip(
         &rocrate,
         "ro-crate-metadata.json".to_string(),
         &mut zip_data,
-    );
+    )?;
 
-    let _ = zip_data.zip.finish();
+    let archive_file = zip_data
+        .zip
+        .finish()
+        .map_err(|e| WriteError::ZipOperationError(e.to_string()))?;
+    archive_file.sync_all()?;
+    drop(archive_file);
+
+    // Update the source metadata only after the archive is complete. If this
+    // fails, the temporary archive is discarded and the old archive survives.
+    let mut metadata_temp = NamedTempFile::new_in(&zip_paths.root_path)?;
+    let source_permissions = fs::metadata(&zip_paths.absolute_path)?.permissions();
+    metadata_temp
+        .as_file()
+        .set_permissions(source_permissions)?;
+    serde_json::to_writer_pretty(&mut metadata_temp, &rocrate)?;
+    metadata_temp.write_all(b"\n")?;
+    metadata_temp.as_file().sync_all()?;
+    metadata_temp
+        .persist(&zip_paths.absolute_path)
+        .map_err(|e| WriteError::IoError(e.error))?;
+    archive_temp
+        .persist(&zip_paths.zip_file_name)
+        .map_err(|e| WriteError::IoError(e.error))?;
 
     Ok(())
 }
@@ -216,8 +256,7 @@ fn construct_paths(crate_path: &Path) -> Result<RoCrateZipPaths, WriteError> {
     })
 }
 
-fn build_zip(path_information: &RoCrateZipPaths) -> Result<RoCrateZip, WriteError> {
-    let file = File::create(&path_information.zip_file_name).map_err(WriteError::IoError)?;
+fn build_zip(file: File) -> RoCrateZip {
     let zip = ZipWriter::new(file);
 
     // Can change this to deflated for standard compression
@@ -226,12 +265,28 @@ fn build_zip(path_information: &RoCrateZipPaths) -> Result<RoCrateZip, WriteErro
         .unix_permissions(0o755)
         .large_file(true);
 
-    Ok(RoCrateZip { zip, options })
+    RoCrateZip {
+        zip,
+        options,
+        names: HashSet::new(),
+    }
 }
 
 pub struct RoCrateZip {
     zip: ZipWriter<File>,
     options: SimpleFileOptions,
+    names: HashSet<String>,
+}
+
+impl RoCrateZip {
+    fn start_file(&mut self, name: &str) -> Result<(), WriteError> {
+        if !self.names.insert(name.to_string()) {
+            return Err(WriteError::DuplicateZipEntry(name.to_string()));
+        }
+        self.zip
+            .start_file(name, self.options)
+            .map_err(|e| WriteError::ZipOperationError(e.to_string()))
+    }
 }
 
 /// Sole focus must be on present data
@@ -244,17 +299,35 @@ fn directory_walk(
     zip_paths: &RoCrateZipPaths,
     zip_data: &mut RoCrateZip,
     flatten: bool,
+    include_hidden: &[PathBuf],
 ) -> Result<Vec<PathBuf>, WriteError> {
     let mut data_vec: Vec<PathBuf> = Vec::new();
     let contained = get_noncontained_data_entites(rocrate, zip_paths, true)?;
 
+    // Hidden entries (e.g. `.git`, `.env`) are only packaged when the crate
+    // describes them or something inside them, or the caller includes them
+    let described: Vec<&PathBuf> = contained
+        .values()
+        .filter(|path| **path != zip_paths.root_path)
+        .collect();
+
     for entry in WalkDir::new(&zip_paths.root_path)
         .min_depth(0)
         .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.path().is_file())
-    // Consider only files, not directories
+        .filter_entry(|e| {
+            e.depth() == 0
+                || !is_hidden(e)
+                || described.iter().any(|p| p.starts_with(e.path()))
+                || include_hidden
+                    .iter()
+                    .any(|p| p.starts_with(e.path()) || e.path().starts_with(p))
+        })
     {
+        let entry = entry?;
+        // Consider only regular files: directories are walked and symlinks are not followed.
+        if !entry.file_type().is_file() {
+            continue;
+        }
         let path = entry.path();
 
         if path == zip_paths.zip_file_name {
@@ -281,10 +354,7 @@ fn directory_walk(
 
         let mut file = fs::File::open(path).map_err(WriteError::IoError)?;
 
-        zip_data
-            .zip
-            .start_file(&file_name, zip_data.options)
-            .map_err(|e| WriteError::ZipOperationError(e.to_string()))?;
+        zip_data.start_file(&file_name)?;
 
         // Once copy the absolute path and relative path needs to be checked
         let abs_path = path.canonicalize()?;
@@ -292,17 +362,11 @@ fn directory_walk(
             data_vec.push(abs_path.clone());
         };
 
-        let copy_result = io::copy(&mut file, &mut zip_data.zip).map_err(WriteError::IoError);
-
-        match copy_result {
-            Ok(_) => {
-                for (key, value) in &contained {
-                    if abs_path == value.clone() {
-                        rocrate.update_id_recursive(key, &file_name)
-                    }
-                }
+        io::copy(&mut file, &mut zip_data.zip)?;
+        for (key, value) in &contained {
+            if abs_path == *value {
+                rocrate.update_id_recursive(key, &file_name)
             }
-            Err(e) => error!("{e}"),
         }
     }
     debug!("0 | Rocrate: {:?}", rocrate);
@@ -347,6 +411,12 @@ pub fn zip_crate_external(
             let zip_entry_name = format!("external/{}", file_name);
 
             if path.is_dir() {
+                // A folder holding the crate (e.g. `~` or `..`) would sweep in unrelated
+                // files and the archive being written
+                if is_unsafe_external_dir(&path, &crate_path.root_path) {
+                    return Err(WriteError::UnsafeExternalPath(path));
+                }
+
                 // It's a directory -> recursively add all of its contents
                 add_directory_recursively(&path, &zip_entry_name, &mut zip_data)?;
 
@@ -354,10 +424,7 @@ pub fn zip_crate_external(
             } else if path.is_file() {
                 let mut file = fs::File::open(&path).map_err(WriteError::IoError)?;
 
-                zip_data
-                    .zip
-                    .start_file(&zip_entry_name, zip_data.options)
-                    .map_err(|e| WriteError::ZipOperationError(e.to_string()))?;
+                zip_data.start_file(&zip_entry_name)?;
 
                 let copy_result =
                     io::copy(&mut file, &mut zip_data.zip).map_err(WriteError::IoError);
@@ -425,7 +492,7 @@ fn get_noncontained_paths(
         let temp_id = rocrate_path.join(id);
 
         // Resolve the absolute path of the current ID
-        if let Some(path) = Path::new(&temp_id).canonicalize().ok() {
+        if let Ok(path) = Path::new(&temp_id).canonicalize() {
             // Path exists and was canonicalized
             debug!("Absolute path: {:?}", path);
             // Check if the path is outside the base crate directory
@@ -485,25 +552,13 @@ fn get_noncontained_paths(
 }
 
 fn resolve_tilde_path(path: &str) -> PathBuf {
-    if let Some(home_dir) = dirs::home_dir() {
-        if path.starts_with("~") {
-            return home_dir.join(path.strip_prefix("~/").unwrap_or(""));
-        }
+    if let Some(home_dir) = dirs::home_dir()
+        && path.starts_with("~")
+    {
+        return home_dir.join(path.strip_prefix("~/").unwrap_or(""));
     }
     Path::new(path).to_path_buf()
 }
-/// Converts a relative path to an absolute one, if possible.
-///
-/// This utility function is useful for obtaining the absolute path representation of a file or directory.
-///
-/// # Arguments
-/// * `relative_path` - The path to be converted to its absolute form.
-///
-/// # Returns
-/// An `Option<PathBuf>` containing the absolute path, if the conversion was successful; otherwise, `None`.
-//fn get_absolute_path(relative_path: &Path) -> Option<PathBuf> {
-//    fs::canonicalize(relative_path).ok()
-//}
 
 /// Determines whether a given string is not a URL.
 ///
@@ -568,14 +623,49 @@ fn is_outside_base_folder(base_folder: &Path, file_path: &Path) -> bool {
     !file_path.starts_with(base_folder)
 }
 
+/// Resolves hidden paths to include against the crate directory, refusing any
+/// that do not exist inside it
+fn resolve_included_paths(
+    paths: &[PathBuf],
+    crate_root: &Path,
+) -> Result<Vec<PathBuf>, WriteError> {
+    paths
+        .iter()
+        .map(|path| match crate_root.join(path).canonicalize() {
+            Ok(resolved) if resolved.starts_with(crate_root) => Ok(resolved),
+            _ => Err(WriteError::InvalidIncludePath(path.clone())),
+        })
+        .collect()
+}
+
+/// Whether a walked entry is hidden, i.e. its name starts with `.`
+fn is_hidden(entry: &walkdir::DirEntry) -> bool {
+    entry
+        .file_name()
+        .to_str()
+        .is_some_and(|name| name.starts_with('.'))
+}
+
+/// Whether an external folder is too broad to package: the home folder, or any
+/// folder that contains the crate itself (e.g. `..` or `/`)
+fn is_unsafe_external_dir(dir: &Path, crate_root: &Path) -> bool {
+    let dir = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+    let home = dirs::home_dir().and_then(|home| home.canonicalize().ok());
+    crate_root.starts_with(&dir) || home.as_deref() == Some(dir.as_path())
+}
+
 /// Recursively adds an entire directory (and subdirectories) into the ZIP under `zip_prefix/…`.
 fn add_directory_recursively(
     base_dir: &Path,
     zip_prefix: &str,
     zip_data: &mut RoCrateZip,
 ) -> Result<(), WriteError> {
-    // WalkDir will yield subdirectories and files.
-    for entry in WalkDir::new(base_dir).into_iter().filter_map(|e| e.ok()) {
+    // WalkDir will yield subdirectories and files, skipping hidden entries below the base
+    for entry in WalkDir::new(base_dir)
+        .into_iter()
+        .filter_entry(|e| e.depth() == 0 || !is_hidden(e))
+    {
+        let entry = entry?;
         let p = entry.path();
         debug!("p = {:?}", p);
 
@@ -589,19 +679,17 @@ fn add_directory_recursively(
         // For example: "mydir/subdir/file.txt"
         let zip_entry_name = format!("{}/{}", zip_prefix, relative_subpath.display());
         debug!("zp entry name: {:?}", zip_entry_name);
-        if p.is_dir() {
+        // file_type() does not follow symlinks, so links are neither added nor walked
+        if entry.file_type().is_dir() {
             // Optional: add an explicit directory entry in the archive:
             zip_data
                 .zip
                 .add_directory(zip_entry_name, zip_data.options)
                 .map_err(|e| WriteError::ZipOperationError(e.to_string()))?;
-        } else if p.is_file() {
+        } else if entry.file_type().is_file() {
             let mut file = fs::File::open(p).map_err(WriteError::IoError)?;
             debug!("FILE: {:?}", file);
-            zip_data
-                .zip
-                .start_file(&zip_entry_name, zip_data.options)
-                .map_err(|e| WriteError::ZipOperationError(e.to_string()))?;
+            zip_data.start_file(&zip_entry_name)?;
             io::copy(&mut file, &mut zip_data.zip).map_err(WriteError::IoError)?;
         }
     }
@@ -782,12 +870,13 @@ mod write_crate_tests {
             zip: ZipWriter::new(File::create(&zip_paths.zip_file_name).unwrap()),
             options: SimpleFileOptions::default()
                 .compression_method(zip::CompressionMethod::Deflated),
+            names: HashSet::new(),
         };
 
         let mut rocrate = read_crate(&file_path, 0).unwrap();
 
         let mut directory_contents =
-            directory_walk(&mut rocrate, &zip_paths, &mut zip_data, false).unwrap();
+            directory_walk(&mut rocrate, &zip_paths, &mut zip_data, false, &[]).unwrap();
 
         let mut test_vec: Vec<PathBuf> = vec![
             dir_path.join(PathBuf::from("data.csv")),
@@ -819,8 +908,7 @@ mod write_crate_tests {
             // tilde path
             let home = home_dir().unwrap();
             let home_dir = tempfile::tempdir_in(home).unwrap();
-            let mut file =
-                std::fs::File::create_new(&home_dir.path().join("tempfile.txt")).unwrap();
+            let mut file = std::fs::File::create_new(home_dir.path().join("tempfile.txt")).unwrap();
             file.write_all(b"hello user temp").unwrap();
             let temp_base = home_dir.path().file_name().unwrap().to_string_lossy();
             path_types.insert(format!("~/{}/tempfile.txt", temp_base), true);
@@ -895,10 +983,10 @@ mod write_crate_tests {
             println!("{:?}", test);
             if test.is_empty() {
                 println!("Test is empty for relative ID: {}", key);
-                assert_eq!(value, false)
+                assert!(!value)
             } else {
                 println!("Test is successful for relative ID: {}", key);
-                assert_eq!(value, true)
+                assert!(value)
             }
         }
     }
@@ -935,6 +1023,7 @@ mod write_crate_tests {
             zip: ZipWriter::new(File::create(&zip_paths.zip_file_name).unwrap()),
             options: SimpleFileOptions::default()
                 .compression_method(zip::CompressionMethod::Deflated),
+            names: HashSet::new(),
         };
 
         assert!(zip_crate_external(&mut rocrate, zip_data, &zip_paths).is_ok());
@@ -970,9 +1059,57 @@ mod write_crate_tests {
         let base = path.path().file_name().unwrap().to_string_lossy();
         let zip_path = format!("{}/{}.zip", path.path().to_string_lossy(), base);
 
-        let zipped = zip_crate(&ro_path, false, 0, false, false);
+        let zipped = zip_crate(&ro_path, false, 0, false, false, &[]);
         println!("{:?}", zipped);
         assert!(parse_zip(&zip_path, 0).is_ok());
+    }
+
+    #[test]
+    fn test_zip_crate_flatten_collision_preserves_existing_files() {
+        let path = create_tempcrate(&|dir| {
+            fs::create_dir(dir.join("a")).unwrap();
+            fs::create_dir(dir.join("b")).unwrap();
+            fs::write(dir.join("a/data.csv"), "first").unwrap();
+            fs::write(dir.join("b/data.csv"), "second").unwrap();
+            ro_crate_minimal(dir)
+        });
+        let metadata_path = path.path().join("ro-crate-metadata.json");
+        let original_metadata = fs::read(&metadata_path).unwrap();
+        let archive_path = path.path().join(format!(
+            "{}.zip",
+            path.path().file_name().unwrap().to_string_lossy()
+        ));
+        fs::write(&archive_path, b"old archive").unwrap();
+
+        assert!(matches!(
+            zip_crate(&metadata_path, false, 0, true, false, &[]),
+            Err(WriteError::DuplicateZipEntry(name)) if name == "data.csv"
+        ));
+        assert_eq!(fs::read(&metadata_path).unwrap(), original_metadata);
+        assert_eq!(fs::read(&archive_path).unwrap(), b"old archive");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_zip_crate_unrepresentable_name_returns_error() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let path = create_tempcrate(&ro_crate_minimal);
+        let file_name = std::ffi::OsString::from_vec(vec![b'f', 0xff]);
+        fs::write(path.path().join(file_name), "content").unwrap();
+        let metadata_path = path.path().join("ro-crate-metadata.json");
+        let original_metadata = fs::read(&metadata_path).unwrap();
+        let archive_path = path.path().join(format!(
+            "{}.zip",
+            path.path().file_name().unwrap().to_string_lossy()
+        ));
+
+        assert!(matches!(
+            zip_crate(&metadata_path, false, 0, false, false, &[]),
+            Err(WriteError::FileNameConversionFailed)
+        ));
+        assert!(!archive_path.exists());
+        assert_eq!(fs::read(&metadata_path).unwrap(), original_metadata);
     }
 
     #[test]
@@ -982,7 +1119,7 @@ mod write_crate_tests {
         let base = path.path().file_name().unwrap().to_string_lossy();
         let zip_path = format!("{}/{}.zip", path.path().to_string_lossy(), base);
 
-        let zipped = zip_crate(&ro_path, true, 0, false, false);
+        let zipped = zip_crate(&ro_path, true, 0, false, false, &[]);
         println!("{:?}", zipped);
         assert!(parse_zip(&zip_path, 0).is_ok());
     }
@@ -992,9 +1129,112 @@ mod write_crate_tests {
         let path = create_tempcrate(&minimal_test_experiment_rocrate);
         let ro_path = path.path().join("ro-crate-metadata.json");
 
-        let zipped = zip_crate(&ro_path, true, 0, false, true);
+        let zipped = zip_crate(&ro_path, true, 0, false, true, &[]);
         println!("{:?}", zipped);
         assert!(zipped.is_ok())
+    }
+
+    /// Names of the entries in a zip archive
+    fn zip_entry_names(zip_path: &Path) -> Vec<String> {
+        let archive = zip::ZipArchive::new(File::open(zip_path).unwrap()).unwrap();
+        archive.file_names().map(String::from).collect()
+    }
+
+    #[test]
+    fn test_zip_crate_skips_hidden_and_symlinks() {
+        let path = create_tempcrate(&|dir: PathBuf| {
+            fs::write(dir.join("data.csv"), "a,b").unwrap();
+            fs::write(dir.join(".env"), "SECRET=1").unwrap();
+            fs::create_dir(dir.join(".git")).unwrap();
+            fs::write(dir.join(".git").join("config"), "x").unwrap();
+            fs::write(dir.join(".described.txt"), "kept").unwrap();
+            let mut crate_json = ro_crate_minimal(dir);
+            crate_json["@graph"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!({"@id": ".described.txt", "@type": "File"}));
+            crate_json
+        });
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(outside.path(), path.path().join("link.txt")).unwrap();
+
+        let ro_path = path.path().join("ro-crate-metadata.json");
+        zip_crate(&ro_path, false, 0, false, false, &[]).unwrap();
+
+        let base = path.path().file_name().unwrap().to_string_lossy();
+        let names = zip_entry_names(&path.path().join(format!("{}.zip", base)));
+        assert!(names.contains(&"data.csv".to_string()));
+        assert!(names.contains(&".described.txt".to_string()));
+        for skipped in [".env", ".git/config", "link.txt"] {
+            assert!(
+                !names.contains(&skipped.to_string()),
+                "{skipped} was zipped"
+            );
+        }
+    }
+
+    #[test]
+    fn test_zip_crate_includes_requested_hidden() {
+        let path = create_tempcrate(&|dir: PathBuf| {
+            fs::create_dir_all(dir.join(".github").join("workflows")).unwrap();
+            fs::write(dir.join(".github").join("workflows").join("ci.yml"), "x").unwrap();
+            fs::write(dir.join(".github").join(".keep"), "").unwrap();
+            fs::write(dir.join(".zenodo.json"), "{}").unwrap();
+            fs::write(dir.join(".env"), "SECRET=1").unwrap();
+            ro_crate_minimal(dir)
+        });
+        let ro_path = path.path().join("ro-crate-metadata.json");
+        let include = [PathBuf::from(".github"), PathBuf::from("./.zenodo.json")];
+        zip_crate(&ro_path, false, 0, false, false, &include).unwrap();
+
+        let base = path.path().file_name().unwrap().to_string_lossy();
+        let names = zip_entry_names(&path.path().join(format!("{}.zip", base)));
+        for kept in [".github/workflows/ci.yml", ".github/.keep", ".zenodo.json"] {
+            assert!(names.contains(&kept.to_string()), "{kept} was not zipped");
+        }
+        assert!(!names.contains(&".env".to_string()));
+    }
+
+    #[test]
+    fn test_zip_crate_rejects_invalid_include() {
+        let workdir = tempfile::tempdir().unwrap();
+        fs::write(workdir.path().join(".outside"), "x").unwrap();
+        let dir_path = workdir.path().join("test_experiment");
+        fs::create_dir(&dir_path).unwrap();
+        let crate_path = dir_path.join("ro-crate-metadata.json");
+        let crate_json = serde_json::to_vec(&ro_crate_minimal(dir_path.clone())).unwrap();
+        fs::write(&crate_path, &crate_json).unwrap();
+
+        for bad in [".missing", "../.outside"] {
+            assert!(matches!(
+                zip_crate(&crate_path, false, 0, false, false, &[PathBuf::from(bad)]),
+                Err(WriteError::InvalidIncludePath(_))
+            ));
+        }
+        // Rejected before anything is written
+        assert!(!dir_path.join("test_experiment.zip").exists());
+        assert_eq!(fs::read(&crate_path).unwrap(), crate_json);
+    }
+
+    #[test]
+    fn test_zip_crate_external_refuses_crate_ancestor() {
+        let workdir = tempfile::tempdir().unwrap();
+        let dir_path = workdir.path().join("test_experiment");
+        fs::create_dir(&dir_path).unwrap();
+        let mut crate_json = ro_crate_minimal(dir_path.clone());
+        crate_json["@graph"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"@id": "../", "@type": "Dataset"}));
+        let crate_path = dir_path.join("ro-crate-metadata.json");
+        fs::write(&crate_path, serde_json::to_vec(&crate_json).unwrap()).unwrap();
+
+        assert!(zip_crate(&crate_path, false, 0, false, false, &[]).is_ok());
+        assert!(matches!(
+            zip_crate(&crate_path, true, 0, false, false, &[]),
+            Err(WriteError::UnsafeExternalPath(_))
+        ));
     }
 
     #[test]

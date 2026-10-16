@@ -1,35 +1,86 @@
 //! Python bindings for ro-crate-rs core
 
+#[cfg(feature = "rdf")]
+mod rdf;
 mod utils;
 extern crate chrono;
 use ::rocraters::ro_crate::constraints::*;
 use ::rocraters::ro_crate::context::{ContextItem, RoCrateContext};
 #[cfg(feature = "parquet")]
-use ::rocraters::ro_crate::convert::{to_df, write_parquet as wr_par};
+use ::rocraters::ro_crate::convert::{to_df, write_csv as wr_csv, write_parquet as wr_par};
 use ::rocraters::ro_crate::graph_vector::GraphVector;
 use ::rocraters::ro_crate::metadata_descriptor::MetadataDescriptor;
 use ::rocraters::ro_crate::object_storage::relative_to_object_store;
 use ::rocraters::ro_crate::read::{
-    parse_zip, validate_crate_keys, CrateReadError, ValidationResult,
+    load_remote, parse_zip, validate_crate_keys, CrateReadError, ValidationResult,
 };
 use ::rocraters::ro_crate::root::RootDataEntity;
+use ::rocraters::ro_crate::schema::{load_rocrate_schema, RoCrateSchemaVersion};
+#[cfg(feature = "subcrate-resolution")]
+use ::rocraters::ro_crate::subcrate_resolution::{
+    fetch_subcrates_recursive_with_options, fetch_subcrates_with_options,
+    try_fetch_subcrates_recursive_with_options, try_fetch_subcrates_with_options, FetchOptions,
+};
 use ::rocraters::ro_crate::{
     read::{read_crate, read_crate_obj},
     rocrate::RoCrate,
     write::{write_crate as rs_write_crate, zip_crate as rs_zip_crate},
 };
 use chrono::prelude::*;
-use pyo3::exceptions::PyIOError;
+use pyo3::exceptions::{PyIOError, PyValueError};
 use pyo3::{
     prelude::*,
-    types::{PyDict, PyList, PyString},
-    Py,
-    PyAny,
+    types::{PyDict, PyList},
+    Py, PyAny,
 };
 use std::collections::HashMap;
-use std::path::Path;
-#[cfg(feature = "parquet")]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+/// Maps a schema version onto its "major.minor" string
+fn schema_version_to_str(version: RoCrateSchemaVersion) -> Option<&'static str> {
+    match version {
+        RoCrateSchemaVersion::V1_1 => Some("1.1"),
+        RoCrateSchemaVersion::V1_2 => Some("1.2"),
+        RoCrateSchemaVersion::V1_3 => Some("1.3"),
+        _ => None,
+    }
+}
+
+fn schema_version_from_str(version: &str) -> PyResult<RoCrateSchemaVersion> {
+    match version {
+        "1.1" => Ok(RoCrateSchemaVersion::V1_1),
+        "1.2" => Ok(RoCrateSchemaVersion::V1_2),
+        "1.3" => Ok(RoCrateSchemaVersion::V1_3),
+        other => Err(PyValueError::new_err(format!(
+            "Unsupported RO-Crate version '{other}': expected 1.1, 1.2 or 1.3"
+        ))),
+    }
+}
+
+/// Converts a string (reference) or dict (embedded) into a context item
+fn context_item_from_pyobject(obj: &Bound<'_, PyAny>) -> PyResult<ContextItem> {
+    if let Ok(reference) = obj.extract::<String>() {
+        return Ok(ContextItem::ReferenceItem(reference));
+    }
+    if let Ok(embedded) = obj.extract::<HashMap<String, String>>() {
+        return Ok(ContextItem::EmbeddedContext(embedded));
+    }
+    Err(PyValueError::new_err(
+        "Context items must be either strings or dictionaries of strings",
+    ))
+}
+
+fn entity_not_found(id: &str) -> PyErr {
+    PyValueError::new_err(format!("Entity '{id}' not found"))
+}
+
+fn read_error(error: CrateReadError) -> PyErr {
+    PyIOError::new_err(format!("Failed to read crate: {:#?}", error))
+}
+
+fn parse_url(url: &str) -> PyResult<url::Url> {
+    url::Url::parse(url).map_err(|e| PyValueError::new_err(format!("Invalid URL '{url}': {e}")))
+}
 
 fn build_validation_report(
     py: Python<'_>,
@@ -123,6 +174,15 @@ fn crate_read_error_to_report(py: Python<'_>, error: CrateReadError) -> PyResult
             Some("ReqwestError"),
             Some(err.to_string()),
         ),
+        CrateReadError::ZipError(err) => build_validation_report(
+            py,
+            false,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Some("ZipError"),
+            Some(err.to_string()),
+        ),
     }
 }
 
@@ -134,7 +194,7 @@ struct PyRoCrate {
 }
 
 /// PyO3 compatible wrapper around RoCrateContext struct
-#[pyclass]
+#[pyclass(skip_from_py_object)]
 #[derive(Clone, Debug)]
 struct PyRoCrateContext {
     inner: RoCrateContext,
@@ -173,28 +233,27 @@ impl PyRoCrateContext {
     /// A `PyRoCrateContext` containing an extended context.
     #[staticmethod]
     fn from_list<'py>(context: Bound<'py, PyList>) -> PyResult<Self> {
-        let mut context_items = Vec::new();
-        for obj in context.iter() {
-            // Check if obj is a string or a dict
-            if let Ok(string) = obj.extract() {
-                context_items.push(ContextItem::ReferenceItem(string));
-            } else if let Ok(dict) = obj.clone().downcast_into::<PyDict>() {
-                let mut map = HashMap::new();
-                for (key, val) in dict.into_iter() {
-                    let key_str: String = key.extract()?;
-                    let val_str: String = val.extract()?;
-                    map.insert(key_str, val_str);
-                }
-                context_items.push(ContextItem::EmbeddedContext(map));
-            } else {
-                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                    "List elements must be either strings or dictionaries",
-                ));
-            }
-        }
+        let context_items = context
+            .iter()
+            .map(|obj| context_item_from_pyobject(&obj))
+            .collect::<PyResult<Vec<_>>>()?;
         Ok(PyRoCrateContext {
             inner: RoCrateContext::ExtendedContext(context_items),
         })
+    }
+
+    /// Creates a fully embedded context
+    ///
+    /// # Arguments
+    /// * `context` - A list of dictionaries mapping terms to IRIs.
+    ///
+    /// # Returns
+    /// A `PyRoCrateContext` containing an embedded context.
+    #[staticmethod]
+    fn from_embedded(context: Vec<HashMap<String, String>>) -> Self {
+        PyRoCrateContext {
+            inner: RoCrateContext::EmbeddedContext(context),
+        }
     }
 }
 
@@ -276,37 +335,91 @@ impl PyRoCrate {
     /// Returns a specific context entry for the given key.
     ///
     /// # Arguments
-    /// * `context` - A Python string (or other PyObject) specifying the key.
+    /// * `context` - The embedded context key to look up (e.g. "@base").
     ///
     /// # Returns
-    /// A Python string representing the requested context entry.
-    fn get_specific_context(&mut self, py: Python, context: Py<PyAny>) -> PyResult<Py<PyString>> {
-        let context_str: &str = context.extract(py)?;
-        let specific_context = self
-            .inner
+    /// The value of the context entry, or `None` if it is not defined.
+    fn get_specific_context(&self, context: &str) -> Option<String> {
+        self.inner.context.get_specific_context(context)
+    }
+
+    /// Returns the keys of embedded contexts, or the reference for a
+    /// reference context.
+    fn get_context_items(&self) -> Vec<String> {
+        self.inner.get_context_items()
+    }
+
+    /// Adds a context item to the crate.
+    ///
+    /// # Arguments
+    /// * `item` - A context URL string or a dictionary of term mappings.
+    fn add_context(&mut self, item: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.inner.add_context(context_item_from_pyobject(item)?);
+        Ok(())
+    }
+
+    /// Removes a context item from the crate.
+    ///
+    /// # Arguments
+    /// * `item` - A context URL string or a dictionary of term mappings.
+    ///
+    /// # Errors
+    /// Raises a `ValueError` if the item is not present or cannot be removed.
+    fn remove_context(&mut self, item: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.inner
             .context
-            .get_specific_context(context_str)
-            .unwrap();
-        Ok(PyString::new(py, &specific_context).into())
+            .remove_context(&context_item_from_pyobject(item)?)
+            .map_err(PyValueError::new_err)
+    }
+
+    /// Replaces a context item with another.
+    ///
+    /// # Arguments
+    /// * `new` - The context item to add.
+    /// * `old` - The context item to remove.
+    ///
+    /// # Errors
+    /// Raises a `ValueError` if `old` is not present.
+    fn replace_context(&mut self, new: &Bound<'_, PyAny>, old: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.inner
+            .context
+            .replace_context(
+                &context_item_from_pyobject(new)?,
+                &context_item_from_pyobject(old)?,
+            )
+            .map_err(|e| PyValueError::new_err(e.to_string()))
+    }
+
+    /// Returns the RO-Crate specification version declared by the context.
+    ///
+    /// # Returns
+    /// "1.1", "1.2", "1.3" or `None` if it cannot be determined.
+    fn get_rocrate_version(&self) -> Option<&'static str> {
+        self.inner
+            .get_rocrate_version()
+            .and_then(schema_version_to_str)
     }
 
     /// Returns the crate's URN UUID.
     ///
     /// # Returns
-    /// A Python string containing the UUIDv7 (URN).
-    fn get_urn_uuid(&mut self, py: Python) -> PyResult<Py<PyString>> {
-        let urn = self.inner.context.get_urn_uuid().unwrap();
-        Ok(PyString::new(py, &urn).into())
+    /// The UUID from a `urn:uuid:` `@base`, or `None` if there is none.
+    fn get_urn_uuid(&self) -> Option<String> {
+        self.inner.context.get_urn_uuid()
     }
 
     /// Adds a URN UUID to crate
     ///
     /// # Returns
     /// A Python string containing the UUIDv7 (URN)
-    fn add_urn_uuid(&mut self, py: Python) -> PyResult<Py<PyString>> {
-        self.inner.context.add_urn_uuid();
-        let urn = self.inner.context.get_urn_uuid().unwrap();
-        Ok(PyString::new(py, &urn).into())
+    ///
+    /// # Errors
+    /// Raises a `ValueError` if the context cannot hold an `@base`.
+    fn add_urn_uuid(&mut self) -> PyResult<String> {
+        self.inner
+            .context
+            .add_urn_uuid()
+            .ok_or_else(|| PyValueError::new_err("Context does not support a urn:uuid @base"))
     }
 
     /// Retrieves an entity by its ID.
@@ -316,42 +429,125 @@ impl PyRoCrate {
     ///
     /// # Returns
     /// A Python dictionary representing the entity, if found. Otherwise raises `ValueError`.
-    fn get_entity(&mut self, py: Python, id: &str) -> PyResult<Py<PyAny>> {
+    fn get_entity(&self, py: Python, id: &str) -> PyResult<Py<PyAny>> {
         match self.inner.get_entity(id) {
-            Some(GraphVector::DataEntity(data_entity)) => {
-                utils::base_entity_to_pydict(py, data_entity)
-            }
-            Some(GraphVector::ContextualEntity(data_entity)) => {
-                utils::base_entity_to_pydict(py, data_entity)
-            }
-            Some(GraphVector::RootDataEntity(root_entity)) => {
-                utils::root_entity_to_pydict(py, root_entity)
-            }
-            Some(GraphVector::MetadataDescriptor(descriptor)) => {
-                utils::metadata_descriptor_to_pydict(py, descriptor)
-            }
-            // Handle other variants or None case
-            _ => Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+            Some(entity) => utils::graph_vector_to_pyobject(py, entity),
+            None => Err(PyValueError::new_err(
                 "ID not found or unsupported GraphVector variant",
             )),
         }
     }
     /// Returns all entities in the graph as a Python list of dicts.
     fn to_list(&self, py: Python) -> PyResult<Py<PyList>> {
-        let mut out: Vec<Py<PyAny>> = Vec::with_capacity(self.inner.graph.len());
-
-        for gv in &self.inner.graph {
-            let obj = match gv {
-                GraphVector::DataEntity(e) => utils::base_entity_to_pydict(py, e)?,
-                GraphVector::ContextualEntity(e) => utils::base_entity_to_pydict(py, e)?,
-                GraphVector::RootDataEntity(e) => utils::root_entity_to_pydict(py, e)?,
-                GraphVector::MetadataDescriptor(e) => utils::metadata_descriptor_to_pydict(py, e)?,
-                _ => continue,
-            };
-            out.push(obj);
-        }
+        let out = self
+            .inner
+            .graph
+            .iter()
+            .map(|entity| utils::graph_vector_to_pyobject(py, entity))
+            .collect::<PyResult<Vec<_>>>()?;
 
         Ok(PyList::new(py, out)?.into())
+    }
+
+    /// Returns the IDs of every entity in the graph.
+    fn get_all_ids(&self) -> Vec<String> {
+        self.inner.get_all_ids().into_iter().cloned().collect()
+    }
+
+    /// Returns every property key used across the crate (deduplicated).
+    fn get_all_properties(&self) -> Vec<String> {
+        self.inner.get_all_properties()
+    }
+
+    /// Returns the value of a property for every entity that has it.
+    ///
+    /// # Arguments
+    /// * `property` - The property key to search for (e.g. "name").
+    ///
+    /// # Returns
+    /// A list of `(entity_id, value)` tuples.
+    fn get_all_property_values(&self, py: Python, property: &str) -> Vec<(String, Py<PyAny>)> {
+        self.inner
+            .get_all_property_values(property)
+            .into_iter()
+            .map(|(id, value)| (id, utils::convert_dynamic_entity_to_pyobject(py, &value)))
+            .collect()
+    }
+
+    /// Finds entities whose (non-required) properties hold a specific value.
+    ///
+    /// # Arguments
+    /// * `value` - The value to search for.
+    ///
+    /// # Returns
+    /// A list of `(entity_id, property)` tuples.
+    fn get_specific_value(&self, value: &str) -> Vec<(String, String)> {
+        self.inner.get_specific_value(value)
+    }
+
+    /// Returns every ID an entity links to.
+    ///
+    /// # Arguments
+    /// * `id` - The entity to inspect.
+    ///
+    /// # Errors
+    /// Raises a `ValueError` if the entity does not exist.
+    fn get_linked_ids(&self, id: &str) -> PyResult<Vec<String>> {
+        let entity = self
+            .inner
+            .get_entity(id)
+            .ok_or_else(|| entity_not_found(id))?;
+        Ok(utils::ids_to_strings(entity.get_linked_ids()))
+    }
+
+    /// Returns the data entities that reference other RO-Crates (subcrates).
+    fn get_subcrates(&self, py: Python) -> PyResult<Py<PyList>> {
+        let out = self
+            .inner
+            .get_subcrates()
+            .into_iter()
+            .map(|entity| utils::graph_vector_to_pyobject(py, entity))
+            .collect::<PyResult<Vec<_>>>()?;
+
+        Ok(PyList::new(py, out)?.into())
+    }
+
+    /// Retrieves the subcrates referenced by this crate.
+    ///
+    /// Local subcrate paths are resolved relative to the current working
+    /// directory; remote subcrates are fetched over HTTP only when allow_remote is true.
+    ///
+    /// # Arguments
+    /// * `recursive` - Also fetch the subcrates of each subcrate.
+    /// * `strict` - Raise if a subcrate cannot be resolved, rather than skipping it.
+    ///
+    /// # Errors
+    /// Raises an `IOError` when `strict` and a subcrate cannot be resolved.
+    #[cfg(feature = "subcrate-resolution")]
+    #[pyo3(signature = (recursive = false, strict = true, allow_remote = false, local_root = None))]
+    fn fetch_subcrates(
+        &self,
+        py: Python<'_>,
+        recursive: bool,
+        strict: bool,
+        allow_remote: bool,
+        local_root: Option<String>,
+    ) -> PyResult<Vec<PyRoCrate>> {
+        let rocrate = &self.inner;
+        let options = FetchOptions {
+            allow_remote,
+            local_root: local_root.map(PathBuf::from),
+        };
+        let subcrates = py
+            .detach(|| match (recursive, strict) {
+                (false, true) => fetch_subcrates_with_options(rocrate, options),
+                (true, true) => fetch_subcrates_recursive_with_options(rocrate, options),
+                (false, false) => Ok(try_fetch_subcrates_with_options(rocrate, options)),
+                (true, false) => Ok(try_fetch_subcrates_recursive_with_options(rocrate, options)),
+            })
+            .map_err(|e| PyIOError::new_err(format!("Failed to fetch subcrates: {e}")))?;
+
+        Ok(subcrates.into_iter().map(PyRoCrate::from).collect())
     }
 
     /// Update a data entity with new data
@@ -484,16 +680,203 @@ impl PyRoCrate {
         Ok(())
     }
 
+    /// Adds a type to an entity's `@type`.
+    ///
+    /// # Errors
+    /// Raises a `ValueError` if the entity does not exist.
+    fn add_type(&mut self, id: &str, data_type: String) -> PyResult<()> {
+        let entity = self
+            .inner
+            .get_entity_mutable(id)
+            .ok_or_else(|| entity_not_found(id))?;
+        entity.add_type(data_type);
+        Ok(())
+    }
+
+    /// Removes a type from an entity's `@type`.
+    ///
+    /// # Errors
+    /// Raises a `ValueError` if the entity does not exist, the type is not
+    /// present, or it is the entity's only type.
+    fn remove_type(&mut self, id: &str, data_type: String) -> PyResult<()> {
+        let entity = self
+            .inner
+            .get_entity_mutable(id)
+            .ok_or_else(|| entity_not_found(id))?;
+        entity
+            .remove_type(data_type)
+            .map(|_| ())
+            .map_err(PyValueError::new_err)
+    }
+
+    /// Adds or overwrites properties on an entity.
+    ///
+    /// # Arguments
+    /// * `id` - The entity to update.
+    /// * `properties` - A dictionary of property keys to values. Values use
+    ///   the same conventions as `update_data` (e.g. `{"id": "#ref"}` for a link).
+    ///
+    /// # Returns
+    /// `True` if the entity was found and updated, `False` otherwise.
+    fn add_dynamic_entity_property(
+        &mut self,
+        id: &str,
+        properties: &Bound<'_, PyDict>,
+    ) -> PyResult<bool> {
+        if self.inner.get_entity(id).is_none() {
+            return Ok(false);
+        }
+        let mut values = HashMap::new();
+        for (key, value) in properties {
+            values.insert(
+                key.extract::<String>()?,
+                utils::convert_pyobject_to_dynamic_entity(&value)?,
+            );
+        }
+        Ok(self.inner.add_dynamic_entity_property(id, values))
+    }
+
+    /// Removes a property from an entity.
+    ///
+    /// # Returns
+    /// `True` if the entity was found, `False` otherwise.
+    fn remove_dynamic_entity_property(&mut self, id: &str, property: &str) -> bool {
+        self.inner.remove_dynamic_entity_property(id, property)
+    }
+
+    /// Adds an entity ID to the root data entity's `hasPart`.
+    fn add_data_to_partof_root(&mut self, id: &str) {
+        self.inner.add_data_to_partof_root(id);
+    }
+
+    /// Validates the crate's keys and local IDs against its RO-Crate version.
+    ///
+    /// Returns the same report dictionary shape as `validate`.
+    fn validate(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
+        validation_result_to_report(py, validate_crate_keys(&self.inner))
+    }
+
+    /// Serialises the crate to an RO-Crate JSON-LD string.
+    ///
+    /// # Arguments
+    /// * `pretty` - Indent the output.
+    #[pyo3(signature = (pretty = true))]
+    fn to_json(&self, pretty: bool) -> PyResult<String> {
+        let json = if pretty {
+            serde_json::to_string_pretty(&self.inner)
+        } else {
+            serde_json::to_string(&self.inner)
+        };
+        json.map_err(|e| PyValueError::new_err(e.to_string()))
+    }
+
     /// Writes ro-crate back to ro-crate-metadata.json
     /// # Arguments
     /// * `file_path` - An optional string path to write the crate JSON.
     ///
-    /// # Returns
-    /// `Ok(())` on success; an error otherwise.
+    /// # Errors
+    /// Raises an `IOError` if the file cannot be written.
+    #[pyo3(signature = (file_path = None))]
     fn write(&self, file_path: Option<String>) -> PyResult<()> {
         let path = file_path.unwrap_or_else(|| "ro-crate-metadata.json".to_string());
-        rs_write_crate(&self.inner, path);
-        Ok(())
+        rs_write_crate(&self.inner, path)
+            .map_err(|e| PyIOError::new_err(format!("Failed to write crate: {e}")))
+    }
+
+    /// Converts the crate to RDF and serialises it.
+    ///
+    /// # Arguments
+    /// * `format` - turtle, ntriples, nquads or rdfxml.
+    /// * `base` - Base IRI for relative IDs when the context has no `@base`.
+    /// * `allow_relative` - Leave unresolvable relative IRIs as they are.
+    /// * `allow_remote` - Fetch unknown context documents over HTTP.
+    /// * `contexts` - Context documents to preload, as `{url: json_string}`.
+    ///
+    /// # Errors
+    /// Raises a `ValueError` if the crate cannot be converted.
+    #[cfg(feature = "rdf")]
+    #[pyo3(signature = (format = "turtle", base = None, allow_relative = false, allow_remote = false, contexts = None))]
+    fn to_rdf(
+        &self,
+        py: Python<'_>,
+        format: &str,
+        base: Option<String>,
+        allow_relative: bool,
+        allow_remote: bool,
+        contexts: Option<HashMap<String, String>>,
+    ) -> PyResult<String> {
+        let format = rdf::parse_format(format)?;
+        self.to_rdf_graph(py, base, allow_relative, allow_remote, contexts)?
+            .inner
+            .to_string(format)
+            .map_err(rdf::rdf_error)
+    }
+
+    /// Converts the crate to an RDF graph.
+    ///
+    /// Takes the same options as `to_rdf`. The graph keeps the crate's
+    /// context, so `graph.to_rocrate()` round-trips custom terms.
+    #[cfg(feature = "rdf")]
+    #[pyo3(signature = (base = None, allow_relative = false, allow_remote = false, contexts = None))]
+    fn to_rdf_graph(
+        &self,
+        py: Python<'_>,
+        base: Option<String>,
+        allow_relative: bool,
+        allow_remote: bool,
+        contexts: Option<HashMap<String, String>>,
+    ) -> PyResult<rdf::PyRdfGraph> {
+        let resolver = rdf::build_resolver(allow_remote, contexts)?;
+        let options = rdf::conversion_options(base, allow_relative)?;
+        let rocrate = &self.inner;
+        let graph = py
+            .detach(|| {
+                ::rocraters::ro_crate::rdf::rocrate_to_rdf_with_options(rocrate, resolver, options)
+            })
+            .map_err(rdf::rdf_error)?;
+        Ok(rdf::PyRdfGraph { inner: graph })
+    }
+
+    /// Expands a term or relative ID to a full IRI using the crate's context.
+    ///
+    /// # Arguments
+    /// * `term` - The term to expand (e.g. "name" or "schema:Person").
+    /// * `strict` - Raise instead of returning a term that cannot be made absolute.
+    /// * `allow_remote` - Fetch unknown context documents over HTTP.
+    /// * `contexts` - Context documents to preload, as `{url: json_string}`.
+    #[cfg(feature = "rdf")]
+    #[pyo3(signature = (term, strict = false, allow_remote = false, contexts = None))]
+    fn expand_term(
+        &self,
+        py: Python<'_>,
+        term: &str,
+        strict: bool,
+        allow_remote: bool,
+        contexts: Option<HashMap<String, String>>,
+    ) -> PyResult<String> {
+        let resolved = rdf::resolve_context(py, &self.inner.context, allow_remote, contexts)?;
+        if strict {
+            resolved.expand_term_checked(term, false)
+        } else {
+            resolved.expand_term(term)
+        }
+        .map_err(rdf::rdf_error)
+    }
+
+    /// Compacts a full IRI to the shortest term in the crate's context.
+    ///
+    /// Takes the same `allow_remote` and `contexts` options as `expand_term`.
+    #[cfg(feature = "rdf")]
+    #[pyo3(signature = (iri, allow_remote = false, contexts = None))]
+    fn compact_iri(
+        &self,
+        py: Python<'_>,
+        iri: &str,
+        allow_remote: bool,
+        contexts: Option<HashMap<String, String>>,
+    ) -> PyResult<String> {
+        let resolved = rdf::resolve_context(py, &self.inner.context, allow_remote, contexts)?;
+        Ok(resolved.compact_iri(iri))
     }
 
     /// Print's full crate
@@ -525,8 +908,7 @@ impl From<RoCrate> for PyRoCrate {
 #[pyfunction]
 fn read(relative_path: &str, validation_level: i8) -> PyResult<PyRoCrate> {
     let path = Path::new(relative_path).to_path_buf();
-    let rocrate = read_crate(&path, validation_level)
-        .map_err(|e| PyIOError::new_err(format!("Failed to read crate: {:#?}", e)))?;
+    let rocrate = read_crate(&path, validation_level).map_err(read_error)?;
     Ok(PyRoCrate::from(rocrate))
 }
 
@@ -546,8 +928,7 @@ fn read(relative_path: &str, validation_level: i8) -> PyResult<PyRoCrate> {
 
 #[pyfunction]
 fn read_object(obj: &str, validation_level: i8) -> PyResult<PyRoCrate> {
-    let rocrate = read_crate_obj(obj, validation_level)
-        .map_err(|e| PyIOError::new_err(format!("Failed to read crate: {:#?}", e)))?;
+    let rocrate = read_crate_obj(obj, validation_level).map_err(read_error)?;
     Ok(PyRoCrate::from(rocrate))
 }
 /// Reads a Zip of a crate into memory allowing manipulation
@@ -565,8 +946,26 @@ fn read_object(obj: &str, validation_level: i8) -> PyResult<PyRoCrate> {
 /// A `PyRoCrate` on success.
 #[pyfunction]
 fn read_zip(path: &str, validation_level: i8) -> PyResult<PyRoCrate> {
-    let rocrate = parse_zip(path, validation_level)
-        .map_err(|e| PyIOError::new_err(format!("Failed to read crate: {:#?}", e)))?;
+    let rocrate = parse_zip(path, validation_level).map_err(read_error)?;
+    Ok(PyRoCrate::from(rocrate))
+}
+
+/// Reads a crate from a URL into memory allowing manipulation
+///
+/// # Arguments
+/// * `url` - URL that returns an RO-Crate JSON-LD document.
+/// * `validation_level` - An integer specifying how strictly the crate is validated.
+///                        0-2, 0 no validation, 1 warnings, 2 strict
+///
+/// # Errors
+/// Raises a `ValueError` for an invalid URL, or an `IOError` if it cannot
+/// fetch or parse the crate.
+#[pyfunction]
+fn read_remote(py: Python<'_>, url: &str, validation_level: i8) -> PyResult<PyRoCrate> {
+    let url = parse_url(url)?;
+    let rocrate = py
+        .detach(|| load_remote(url, validation_level))
+        .map_err(read_error)?;
     Ok(PyRoCrate::from(rocrate))
 }
 
@@ -608,20 +1007,76 @@ fn validate_zip(py: Python<'_>, path: &str) -> PyResult<Py<PyDict>> {
     }
 }
 
-/// Writes to parquet
+/// Validates a crate fetched from a URL and returns a structured report dictionary.
+///
+/// # Errors
+/// Raises a `ValueError` for an invalid URL; fetch failures are reported in the dictionary.
+#[pyfunction]
+fn validate_remote(py: Python<'_>, url: &str) -> PyResult<Py<PyDict>> {
+    let url = parse_url(url)?;
+    match py.detach(|| load_remote(url, 0)) {
+        Ok(rocrate) => validation_result_to_report(py, validate_crate_keys(&rocrate)),
+        Err(err) => crate_read_error_to_report(py, err),
+    }
+}
+
+/// Loads the bundled RO-Crate JSON-LD context for a specification version.
+///
 /// # Arguments
-/// * `rocrate` - The `PyRoCrate` to be written.
-/// * `path` - The output path to the Parquet file.
+/// * `version` - "1.1", "1.2" or "1.3".
 ///
 /// # Returns
-/// No explicit return; writes the file or raises an error.
+/// The context document as a dictionary; term mappings are under "@context".
+#[pyfunction]
+#[pyo3(signature = (version = "1.3"))]
+fn load_schema(py: Python<'_>, version: &str) -> PyResult<Py<PyAny>> {
+    let schema = load_rocrate_schema(schema_version_from_str(version)?)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    let value = serde_json::to_value(&schema).map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(utils::convert_serde_json_value_to_pyobject(py, &value))
+}
+
+/// The tabular conversion keys every row by the crate's urn:uuid
+#[cfg(feature = "parquet")]
+fn require_urn_uuid(rocrate: &PyRoCrate) -> PyResult<()> {
+    match rocrate.inner.context.get_urn_uuid() {
+        Some(_) => Ok(()),
+        None => Err(PyValueError::new_err(
+            "Crate has no urn:uuid @base in its context: call add_urn_uuid() first",
+        )),
+    }
+}
+
+/// Writes to parquet
+/// # Arguments
+/// * `rocrate` - The `PyRoCrate` to be written. Must have a urn:uuid `@base`.
+/// * `path` - The output path to the Parquet file.
+///
+/// # Errors
+/// Raises a `ValueError` if the crate has no urn:uuid, or an `IOError` if the
+/// file cannot be written.
 #[pyfunction]
 #[cfg(feature = "parquet")]
-fn write_parquet(rocrate: &PyRoCrate, path: &str) {
+fn write_parquet(rocrate: &PyRoCrate, path: &str) -> PyResult<()> {
+    require_urn_uuid(rocrate)?;
     let mut df = to_df(&rocrate.inner);
+    wr_par(&mut df, PathBuf::from(path)).map_err(|e| PyIOError::new_err(e.to_string()))
+}
 
-    let target_path = PathBuf::from(path);
-    wr_par(&mut df, target_path);
+/// Writes the crate as a uuid/id/key/value CSV table
+/// # Arguments
+/// * `rocrate` - The `PyRoCrate` to be written. Must have a urn:uuid `@base`.
+/// * `path` - The output path to the CSV file.
+///
+/// # Errors
+/// Raises a `ValueError` if the crate has no urn:uuid, or an `IOError` if the
+/// file cannot be written.
+#[pyfunction]
+#[cfg(feature = "parquet")]
+fn write_csv(rocrate: &PyRoCrate, path: &str) -> PyResult<()> {
+    require_urn_uuid(rocrate)?;
+    let mut df = to_df(&rocrate.inner);
+    wr_csv(&mut df, PathBuf::from(path)).map_err(|e| PyIOError::new_err(e.to_string()))
 }
 
 /// Enables objects URLs to be prefixed against ro-crate location to rewrite for
@@ -646,20 +1101,31 @@ fn prefix_object_id(rocrate: &mut PyRoCrate, object_root: &str) {
 /// strict).
 /// * `flatten` - If true, flattens the directory structure inside the ZIP.
 /// * `unique` - If true, ensures unique file names within the ZIP.
+/// * `include_hidden` - Hidden files or folders to package anyway, relative to the crate
+///   directory.
 ///
-/// # Returns
-/// `Ok(())` on success; raises an error otherwise.
+/// # Errors
+/// Raises an `IOError` if the crate cannot be read or the archive written.
 #[pyfunction]
+#[pyo3(signature = (crate_path, external, validation_level, flatten, unique, include_hidden = None))]
 fn zip(
     crate_path: &str,
     external: bool,
     validation_level: i8,
     flatten: bool,
     unique: bool,
+    include_hidden: Option<Vec<PathBuf>>,
 ) -> PyResult<()> {
     let path = Path::new(crate_path).to_path_buf();
-    let _ = rs_zip_crate(&path, external, validation_level, flatten, unique);
-    Ok(())
+    rs_zip_crate(
+        &path,
+        external,
+        validation_level,
+        flatten,
+        unique,
+        &include_hidden.unwrap_or_default(),
+    )
+    .map_err(|e| PyIOError::new_err(format!("Failed to zip crate: {e}")))
 }
 
 impl Default for PyRoCrate {
@@ -715,13 +1181,23 @@ fn rocraters(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(read, m)?)?;
     m.add_function(wrap_pyfunction!(read_object, m)?)?;
     m.add_function(wrap_pyfunction!(read_zip, m)?)?;
+    m.add_function(wrap_pyfunction!(read_remote, m)?)?;
     m.add_function(wrap_pyfunction!(validate, m)?)?;
     m.add_function(wrap_pyfunction!(validate_object, m)?)?;
     m.add_function(wrap_pyfunction!(validate_zip, m)?)?;
+    m.add_function(wrap_pyfunction!(validate_remote, m)?)?;
+    m.add_function(wrap_pyfunction!(load_schema, m)?)?;
     m.add_function(wrap_pyfunction!(zip, m)?)?;
     #[cfg(feature = "parquet")]
     m.add_function(wrap_pyfunction!(write_parquet, m)?)?;
+    #[cfg(feature = "parquet")]
+    m.add_function(wrap_pyfunction!(write_csv, m)?)?;
     m.add_function(wrap_pyfunction!(prefix_object_id, m)?)?;
+    #[cfg(feature = "rdf")]
+    {
+        m.add_class::<rdf::PyRdfGraph>()?;
+        m.add_function(wrap_pyfunction!(rdf::from_rdf, m)?)?;
+    }
     Ok(())
 }
 

@@ -31,13 +31,9 @@ pub trait DynamicEntityManipulation: Serialize {
     /// # Arguments
     /// * 'values' - A 'Hashmap' containing a key and a valid EntityValue type
     fn add_dynamic_fields(&mut self, values: HashMap<String, EntityValue>) {
-        for (key, value) in values {
-            match value {
-                EntityValue::EntityString(s) => self.add_string_value(key, s),
-                EntityValue::EntityId(id) => self.add_id_value(key, id),
-                _ => todo!(),
-            }
-        }
+        self.dynamic_entity()
+            .get_or_insert_with(HashMap::new)
+            .extend(values);
     }
 
     /// Adds a string value to the dynamic entity.
@@ -110,10 +106,10 @@ pub trait DynamicEntityManipulation: Serialize {
                 if key == search_property {
                     return Some(value.clone());
                 }
-                if let EntityValue::EntityObject(inner_object) = value {
-                    if let Some(result) = search_obj(inner_object, search_property) {
-                        return Some(result);
-                    }
+                if let EntityValue::EntityObject(inner_object) = value
+                    && let Some(result) = search_obj(inner_object, search_property)
+                {
+                    return Some(result);
                 }
             }
             None
@@ -125,10 +121,10 @@ pub trait DynamicEntityManipulation: Serialize {
                 if key == search_property {
                     return Some(value.clone());
                 }
-                if let EntityValue::EntityObject(object) = value {
-                    if let Some(result) = search_obj(object, search_property) {
-                        return Some(result);
-                    }
+                if let EntityValue::EntityObject(object) = value
+                    && let Some(result) = search_obj(object, search_property)
+                {
+                    return Some(result);
                 }
             }
         }
@@ -229,10 +225,10 @@ pub trait DynamicEntityManipulation: Serialize {
 
             // Potentially depreciated need to test
             for key in fallback_keys_to_modify {
-                if let Some(EntityValue::Fallback(fallback_value)) = dynamic_entity.get_mut(&key) {
-                    if let Some(fallback_value) = fallback_value.as_mut() {
-                        remove_matching_value_from_json(fallback_value, target_id);
-                    }
+                if let Some(EntityValue::Fallback(fallback_value)) = dynamic_entity.get_mut(&key)
+                    && let Some(fallback_value) = fallback_value.as_mut()
+                {
+                    remove_matching_value_from_json(fallback_value, target_id);
                 }
             }
 
@@ -365,10 +361,10 @@ pub fn search_dynamic_entity_for_key(
         }
 
         // If the value is a nested object, search recursively
-        if let EntityValue::EntityObject(inner_object) = value {
-            if let Some(inner_key) = search_dynamic_entity_for_key(inner_object, target_value) {
-                return Some(inner_key);
-            }
+        if let EntityValue::EntityObject(inner_object) = value
+            && let Some(inner_key) = search_dynamic_entity_for_key(inner_object, target_value)
+        {
+            return Some(inner_key);
         }
     }
 
@@ -464,6 +460,23 @@ mod tests {
     }
 
     #[test]
+    fn add_dynamic_fields_accepts_boolean_values() {
+        let mut entity = TestEntity {
+            id: "test_id".to_string(),
+            type_: DataType::Term("test_type".to_string()),
+            dynamic_entity: None,
+        };
+        entity.add_dynamic_fields(HashMap::from([(
+            "enabled".to_string(),
+            EntityValue::EntityBool(true),
+        )]));
+        assert_eq!(
+            entity.dynamic_entity.unwrap().get("enabled"),
+            Some(&EntityValue::EntityBool(true))
+        );
+    }
+
+    #[test]
     fn test_remove_field() {
         let mut entity = TestEntity {
             id: "test_id".to_string(),
@@ -475,7 +488,7 @@ mod tests {
         };
 
         entity.remove_field("key1");
-        assert!(entity.dynamic_entity.unwrap().get("key1").is_none());
+        assert!(!entity.dynamic_entity.unwrap().contains_key("key1"));
     }
 
     #[test]

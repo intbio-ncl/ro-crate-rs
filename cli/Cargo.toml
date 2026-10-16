@@ -1,6 +1,6 @@
 [package]
 name = "ro-crate-rs-cli"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 repository = "https://github.com/intbio-ncl/ro-crate-rs"
 authors = ["Matt Burridge <m.burridge1@newcastle.ac.uk>"]
@@ -13,7 +13,7 @@ categories = ["command-line-utilities"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-ro-crate-rs = {path = "../", version = "0.6.0"}
+ro-crate-rs = {path = "../", version = "0.7.0"}
 clap = { version = "4.5.53", features = ["derive"] }
 chrono = { workspace = true }
 serde_json = { workspace = true }
@@ -21,6 +21,17 @@ serde = { version = "1.0", features = ["derive"] }
 json_to_table = "0.12.0"
 tabled = "0.20.0"
 log = { workspace = true }
+url = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.24"
+zip = { workspace = true }
+
+[features]
+default = ["rdf", "subcrate-resolution"]
+parquet = ["ro-crate-rs/parquet"]
+rdf = ["ro-crate-rs/rdf"]
+subcrate-resolution = ["ro-crate-rs/subcrate-resolution"]
 
 [[bin]]
 name = "rocraters"  

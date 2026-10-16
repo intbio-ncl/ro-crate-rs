@@ -1,7 +1,8 @@
 //! Allows RO-Crates (ro-crate-metadata.json) files to be read into the
 //! RoCrate data structure
 
-use crate::ro_crate::constraints::Id;
+use crate::ro_crate::constraints::{DataType, Id};
+use crate::ro_crate::graph_vector::GraphVector;
 use crate::ro_crate::rocrate::RoCrate;
 use crate::ro_crate::schema::load_rocrate_schema;
 use crate::ro_crate::write::is_not_url;
@@ -16,6 +17,27 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 use zip::ZipArchive;
+
+pub(crate) const MAX_METADATA_BYTES: usize = 16 * 1024 * 1024;
+#[cfg(feature = "subcrate-resolution")]
+pub(crate) const MAX_ARCHIVE_BYTES: usize = 128 * 1024 * 1024;
+#[cfg(feature = "rdf")]
+pub(crate) const MAX_CONTEXT_BYTES: usize = 2 * 1024 * 1024;
+
+pub(crate) fn read_with_limit(mut reader: impl Read, limit: usize) -> io::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    reader
+        .by_ref()
+        .take(limit as u64 + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > limit {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Input exceeds {limit} bytes"),
+        ));
+    }
+    Ok(bytes)
+}
 
 /// Reads and deserialises an RO-Crate from a specified file path.
 ///
@@ -138,10 +160,10 @@ pub fn read_crate_obj(crate_obj: &str, validation_level: i8) -> Result<RoCrate, 
 /// * 'url' - An url containing a valid ro-crate json object
 /// * 'valid' - A boolean flag indiciating whether to validate the crate's keys against the schema.
 pub fn load_remote(url: url::Url, validation_level: i8) -> Result<RoCrate, CrateReadError> {
-    let content = reqwest::blocking::get(url)
-        .map_err(|e| CrateReadError::ReqwestError(e))?
-        .text()
-        .map_err(|e| CrateReadError::ReqwestError(e))?;
+    let response = reqwest::blocking::get(url)?;
+    let content = read_with_limit(response, MAX_METADATA_BYTES)?;
+    let content =
+        String::from_utf8(content).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
     read_crate_obj(&content, validation_level)
 }
@@ -204,6 +226,8 @@ pub enum CrateReadError {
     SchemaError(String),
     #[error("{0}")]
     ReqwestError(#[from] reqwest::Error),
+    #[error("{0}")]
+    ZipError(#[from] zip::result::ZipError),
 }
 
 impl PartialEq for CrateReadError {
@@ -255,6 +279,57 @@ pub fn validate_crate_keys(rocrate: &RoCrate) -> ValidationResult {
             }
 
             validation.invalid_ids = dangling_local_ids(rocrate);
+
+            let descriptor = rocrate.graph.iter().find_map(|entity| match entity {
+                GraphVector::MetadataDescriptor(metadata)
+                    if metadata.id == "ro-crate-metadata.json" =>
+                {
+                    Some(metadata)
+                }
+                _ => None,
+            });
+            match descriptor {
+                Some(metadata) => {
+                    let root_id = match &metadata.about {
+                        Id::Id(id) => Some(id.as_str()),
+                        Id::IdArray(_) => None,
+                    };
+                    if !root_id.is_some_and(|id| {
+                        rocrate.graph.iter().any(|entity| {
+                            matches!(entity, GraphVector::RootDataEntity(root) if root.id == id)
+                        })
+                    }) {
+                        validation
+                            .invalid_ids
+                            .push(root_id.unwrap_or("metadata descriptor about").to_string());
+                    }
+                }
+                None => validation
+                    .invalid_ids
+                    .push("ro-crate-metadata.json".to_string()),
+            }
+
+            for entity in &rocrate.graph {
+                let data_type = match entity {
+                    GraphVector::MetadataDescriptor(item) => &item.type_,
+                    GraphVector::RootDataEntity(item) => &item.type_,
+                    GraphVector::DataEntity(item) => &item.type_,
+                    GraphVector::ContextualEntity(item) => &item.type_,
+                };
+                let terms = match data_type {
+                    DataType::Term(term) => vec![term.as_str()],
+                    DataType::TermArray(terms) => terms.iter().map(String::as_str).collect(),
+                };
+                for term in terms {
+                    if !set1.contains(term) && !set2.contains(term) && is_not_url(term) {
+                        validation
+                            .invalid_types
+                            .push(format!("{}: {term}", entity.get_id()));
+                    }
+                }
+            }
+            validation.invalid_ids.sort();
+            validation.invalid_ids.dedup();
 
             if validation.is_valid() {
                 ValidationResult::Valid
@@ -332,15 +407,14 @@ impl CrateValidation {
 /// Extracts an ro-crate-metadata.json file from a zipped ro-crate
 pub fn parse_zip(zip_path: &str, validation_level: i8) -> Result<RoCrate, CrateReadError> {
     // 1. Open the .zip file
-    let file = fs::File::open(zip_path).unwrap();
-    let mut archive = ZipArchive::new(file).unwrap();
+    let file = fs::File::open(zip_path)?;
+    let mut archive = ZipArchive::new(file)?;
 
     // 2. Retrieve the file by name
-    let mut file_in_zip = archive.by_name("ro-crate-metadata.json").unwrap();
+    let mut file_in_zip = archive.by_name("ro-crate-metadata.json")?;
 
     // 3. Read the file contents into memory
-    let mut buffer = Vec::new();
-    file_in_zip.read_to_end(&mut buffer)?;
+    let buffer = read_with_limit(&mut file_in_zip, MAX_METADATA_BYTES)?;
 
     match serde_json::from_slice::<RoCrate>(&buffer) {
         Ok(rocrate) => {
@@ -365,6 +439,16 @@ pub enum ValidationResult {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn bounded_reader_rejects_data_after_limit() {
+        let data = std::io::Cursor::new(b"123456".as_slice());
+        let err = super::read_with_limit(data, 5).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert_eq!(
+            super::read_with_limit(b"12345".as_slice(), 5).unwrap(),
+            b"12345"
+        );
+    }
 
     use super::*;
 
@@ -390,9 +474,86 @@ mod tests {
     }
 
     #[test]
+    fn strict_validation_rejects_missing_required_entities() {
+        let empty = r#"{"@context":"https://w3id.org/ro/crate/1.1/context","@graph":[]}"#;
+        assert!(matches!(
+            read_crate_obj(empty, 2),
+            Err(CrateReadError::VocabNotValid(_))
+        ));
+
+        let mut fixture: serde_json::Value = serde_json::from_slice(
+            &fs::read(fixture_path("_ro-crate-metadata-minimal.json")).unwrap(),
+        )
+        .unwrap();
+        fixture["@graph"].as_array_mut().unwrap().remove(1);
+        assert!(matches!(
+            read_crate_obj(&fixture.to_string(), 2),
+            Err(CrateReadError::VocabNotValid(_))
+        ));
+    }
+
+    #[test]
+    fn strict_validation_reports_unknown_type() {
+        let mut fixture: serde_json::Value = serde_json::from_slice(
+            &fs::read(fixture_path("_ro-crate-metadata-minimal.json")).unwrap(),
+        )
+        .unwrap();
+        fixture["@graph"][2]["@type"] = serde_json::json!("UnknownUnmappedType");
+        let crate_data: RoCrate = serde_json::from_value(fixture).unwrap();
+        match validate_crate_keys(&crate_data) {
+            ValidationResult::Invalid(validation) => assert!(
+                validation
+                    .invalid_types
+                    .iter()
+                    .any(|item| item.contains("UnknownUnmappedType"))
+            ),
+            _ => panic!("unknown type should be invalid"),
+        }
+    }
+
+    #[test]
+    fn validation_accepts_a_plain_string_license() {
+        let mut fixture: serde_json::Value = serde_json::from_slice(
+            &fs::read(fixture_path("_ro-crate-metadata-minimal.json")).unwrap(),
+        )
+        .unwrap();
+        fixture["@graph"][1]["license"] = serde_json::json!("Private");
+        let crate_data: RoCrate = serde_json::from_value(fixture).unwrap();
+        assert!(matches!(
+            validate_crate_keys(&crate_data),
+            ValidationResult::Valid
+        ));
+    }
+
+    #[test]
     fn test_parse_zip() {
         let zip = parse_zip("tests/fixtures/zip_test/fixtures.zip", 0);
         assert!(zip.is_ok());
+    }
+
+    #[test]
+    fn parse_zip_returns_errors_for_invalid_archives() {
+        let directory = tempfile::tempdir().unwrap();
+        let missing = directory.path().join("missing.zip");
+        assert!(matches!(
+            parse_zip(missing.to_str().unwrap(), 0),
+            Err(CrateReadError::IoError(_))
+        ));
+
+        let invalid = directory.path().join("invalid.zip");
+        fs::write(&invalid, b"not a zip").unwrap();
+        assert!(matches!(
+            parse_zip(invalid.to_str().unwrap(), 0),
+            Err(CrateReadError::ZipError(_))
+        ));
+
+        let empty = directory.path().join("empty.zip");
+        let writer = zip::ZipWriter::new(fs::File::create(&empty).unwrap());
+        writer.finish().unwrap();
+        assert!(matches!(
+            parse_zip(empty.to_str().unwrap(), 0),
+            Err(CrateReadError::ZipError(_))
+        ));
     }
 
     #[test]
@@ -439,7 +600,7 @@ mod tests {
 
     #[test]
     fn test_crate_read_error_from_io_error() {
-        let io_error = io::Error::new(io::ErrorKind::Other, "io error");
+        let io_error = io::Error::other("io error");
         let crate_error: CrateReadError = io_error.into();
         matches!(crate_error, CrateReadError::IoError(_));
     }

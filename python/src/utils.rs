@@ -4,6 +4,7 @@ use ::rocraters::ro_crate::contextual_entity::ContextualEntity;
 use ::rocraters::ro_crate::data_entity::DataEntity;
 use ::rocraters::ro_crate::{
     constraints::{DataType, EntityValue, Id, License},
+    graph_vector::GraphVector,
     metadata_descriptor::MetadataDescriptor,
     root::RootDataEntity,
 };
@@ -11,9 +12,7 @@ use pyo3::exceptions::PyTypeError;
 use pyo3::{
     prelude::*,
     types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString},
-    Borrowed,
-    Py,
-    PyAny,
+    Borrowed, Py, PyAny,
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -50,6 +49,26 @@ impl EntityTrait for ContextualEntity {
     fn dynamic_entity(&self) -> &Option<HashMap<String, EntityValue>> {
         &self.dynamic_entity
     }
+}
+
+/// Converts any graph entity to a python dict
+pub fn graph_vector_to_pyobject(py: Python, entity: &GraphVector) -> PyResult<Py<PyAny>> {
+    match entity {
+        GraphVector::DataEntity(e) => base_entity_to_pydict(py, e),
+        GraphVector::ContextualEntity(e) => base_entity_to_pydict(py, e),
+        GraphVector::RootDataEntity(e) => root_entity_to_pydict(py, e),
+        GraphVector::MetadataDescriptor(e) => metadata_descriptor_to_pydict(py, e),
+    }
+}
+
+/// Flattens single and array ids into a list of id strings
+pub fn ids_to_strings(ids: Vec<Id>) -> Vec<String> {
+    ids.into_iter()
+        .flat_map(|id| match id {
+            Id::Id(id) => vec![id],
+            Id::IdArray(ids) => ids,
+        })
+        .collect()
 }
 
 /// Converts base entities (data and contextual) to python dicts
@@ -236,18 +255,15 @@ pub fn convert_dynamic_entity_to_pyobject(py: Python, value: &EntityValue) -> Py
         EntityValue::NestedDynamicEntity(boxed_entity) => {
             convert_dynamic_entity_to_pyobject(py, boxed_entity)
         }
-        EntityValue::EntityNull(n) => {
-            match n {
-                Some(_value) => PyString::new(py, "Null").into_any().unbind(),
-                None => py.None(),
-            }
-        }
-        EntityValue::EntityNone(n) => {
-            match n {
-                Some(_value) => PyString::new(py, "Null").into_any().unbind(),
-                None => py.None(),
-            }
-        }
+        // JSON booleans deserialise into EntityNull(Some(_)) as it precedes EntityBool
+        EntityValue::EntityNull(n) => match n {
+            Some(value) => PyBool::new(py, *value).to_owned().into_any().unbind(),
+            None => py.None(),
+        },
+        EntityValue::EntityNone(n) => match n {
+            Some(value) => PyString::new(py, value).into_any().unbind(),
+            None => py.None(),
+        },
         EntityValue::Fallback(value_option) => {
             // Convert serde_json::Value to PyObject
             if let Some(value) = value_option {
@@ -264,6 +280,8 @@ pub fn convert_dynamic_entity_to_pyobject(py: Python, value: &EntityValue) -> Py
 // Function to handle conversion of serde_json::Value
 pub fn convert_serde_json_value_to_pyobject(py: Python, value: &Value) -> Py<PyAny> {
     match value {
+        Value::Null => py.None(),
+        Value::Bool(b) => PyBool::new(py, *b).to_owned().into_any().unbind(),
         Value::String(s) => PyString::new(py, s).into_any().unbind(),
         Value::Number(num) => {
             if let Some(i) = num.as_i64() {
@@ -274,9 +292,24 @@ pub fn convert_serde_json_value_to_pyobject(py: Python, value: &Value) -> Py<PyA
                 PyString::new(py, &num.to_string()).into_any().unbind()
             }
         }
-        // Handle other serde_json::Value types as needed
-        // ...
-        _ => PyString::new(py, "Unsupported serde_json::Value type").into_any().unbind(),
+        Value::Array(items) => PyList::new(
+            py,
+            items
+                .iter()
+                .map(|item| convert_serde_json_value_to_pyobject(py, item)),
+        )
+        .unwrap()
+        .into_any()
+        .unbind(),
+        Value::Object(map) => {
+            let py_dict = PyDict::new(py);
+            for (key, val) in map {
+                py_dict
+                    .set_item(key, convert_serde_json_value_to_pyobject(py, val))
+                    .unwrap();
+            }
+            py_dict.into_any().unbind()
+        }
     }
 }
 
@@ -312,16 +345,10 @@ impl<'a, 'py> FromPyObject<'a, 'py> for DataEntityWrapper {
     type Error = PyErr;
 
     fn extract(obj: Borrowed<'a, 'py, PyAny>) -> Result<Self, Self::Error> {
-        let py_dict: Bound<'py, PyDict> = obj
-            .to_owned()
-            .cast_into()
-            .map_err(PyErr::from)?;
+        let py_dict: Bound<'py, PyDict> = obj.to_owned().cast_into().map_err(PyErr::from)?;
 
         // Extract the "id" and "type_" fields explicitly
-        let id: String = match py_dict.get_item("id") {
-            Ok(str) => str.unwrap().to_string(),
-            Err(e) => return Err(e),
-        };
+        let id: String = required_item(&py_dict, "id")?.to_string();
 
         let type_ = create_data_type_from_dict(&py_dict)?;
 
@@ -359,16 +386,10 @@ impl<'a, 'py> FromPyObject<'a, 'py> for ContextualEntityWrapper {
     type Error = PyErr;
 
     fn extract(obj: Borrowed<'a, 'py, PyAny>) -> Result<Self, Self::Error> {
-        let py_dict: Bound<'py, PyDict> = obj
-            .to_owned()
-            .cast_into()
-            .map_err(PyErr::from)?;
+        let py_dict: Bound<'py, PyDict> = obj.to_owned().cast_into().map_err(PyErr::from)?;
 
         // Extract the "id" and "type_" fields explicitly
-        let id: String = match py_dict.get_item("id") {
-            Ok(str) => str.unwrap().to_string(),
-            Err(e) => return Err(e),
-        };
+        let id: String = required_item(&py_dict, "id")?.to_string();
         let type_ = create_data_type_from_dict(&py_dict)?;
 
         // Initialize an empty HashMap to hold dynamic_entity entries
@@ -404,37 +425,19 @@ impl<'a, 'py> FromPyObject<'a, 'py> for RootDataEntityWrapper {
     type Error = PyErr;
 
     fn extract(obj: Borrowed<'a, 'py, PyAny>) -> Result<Self, Self::Error> {
-        let py_dict: Bound<'py, PyDict> = obj
-            .to_owned()
-            .cast_into()
-            .map_err(PyErr::from)?;
+        let py_dict: Bound<'py, PyDict> = obj.to_owned().cast_into().map_err(PyErr::from)?;
 
         // Extract the "id" and "type_" fields explicitly
-        let id: String = match py_dict.get_item("id") {
-            Ok(str) => str.unwrap().to_string(),
-            Err(e) => return Err(e),
-        };
+        let id: String = required_item(&py_dict, "id")?.to_string();
         let type_ = create_data_type_from_dict(&py_dict)?;
 
-        let name: String = match py_dict.get_item("name") {
-            Ok(str) => str.unwrap().to_string(),
-            Err(e) => return Err(e),
-        };
+        let name: String = required_item(&py_dict, "name")?.to_string();
 
-        let description = match py_dict.get_item("description") {
-            Ok(str) => str.unwrap().to_string(),
-            Err(e) => return Err(e),
-        };
+        let description = required_item(&py_dict, "description")?.to_string();
 
-        let license = match py_dict.get_item("license") {
-            Ok(license_obj) => convert_pyobject_to_license(&license_obj.unwrap())?,
-            Err(e) => return Err(e),
-        };
+        let license = convert_pyobject_to_license(&required_item(&py_dict, "license")?)?;
 
-        let date_published = match py_dict.get_item("datePublished") {
-            Ok(str) => str.unwrap().to_string(),
-            Err(e) => return Err(e),
-        };
+        let date_published = required_item(&py_dict, "datePublished")?.to_string();
 
         // Initialize an empty HashMap to hold dynamic_entity entries
         let mut dynamic_entity_map: HashMap<String, EntityValue> = HashMap::new();
@@ -479,30 +482,14 @@ impl<'a, 'py> FromPyObject<'a, 'py> for MetadataDescriptorWrapper {
     type Error = PyErr;
 
     fn extract(obj: Borrowed<'a, 'py, PyAny>) -> Result<Self, Self::Error> {
-        let py_dict: Bound<'py, PyDict> = obj
-            .to_owned()
-            .cast_into()
-            .map_err(PyErr::from)?;
+        let py_dict: Bound<'py, PyDict> = obj.to_owned().cast_into().map_err(PyErr::from)?;
 
         // Extract the "id" and "type_" fields explicitly
-        let id: String = match py_dict.get_item("id") {
-            Ok(str) => str.unwrap().to_string(),
-            Err(e) => return Err(e),
-        };
+        let id: String = required_item(&py_dict, "id")?.to_string();
         let type_ = create_data_type_from_dict(&py_dict)?;
 
-        // This won't work because it cant pick the key TODO
-        let conforms_to = if let Ok(value) = py_dict.get_item("conformsTo") {
-            convert_dict_to_id(&value.unwrap())?
-        } else {
-            todo!()
-        };
-
-        let about = if let Ok(about_check) = py_dict.get_item("about") {
-            convert_dict_to_id(&about_check.unwrap())?
-        } else {
-            todo!()
-        };
+        let conforms_to = convert_dict_to_id(&required_item(&py_dict, "conformsTo")?)?;
+        let about = convert_dict_to_id(&required_item(&py_dict, "about")?)?;
 
         // Initialize an empty HashMap to hold dynamic_entity entries
         let mut dynamic_entity_map: HashMap<String, EntityValue> = HashMap::new();
@@ -535,22 +522,25 @@ impl<'a, 'py> FromPyObject<'a, 'py> for MetadataDescriptorWrapper {
     }
 }
 
+/// Returns a required dictionary item, raising a `TypeError` when it is missing
+fn required_item<'py>(dict: &Bound<'py, PyDict>, key: &str) -> PyResult<Bound<'py, PyAny>> {
+    dict.get_item(key)?.ok_or_else(|| {
+        PyErr::new::<pyo3::exceptions::PyTypeError, _>(format!(
+            "Dictionary must contain the '{}' key",
+            key
+        ))
+    })
+}
+
 fn create_data_type_from_dict(input: &Bound<'_, PyDict>) -> PyResult<DataType> {
-    if let Ok(value) = input.get_item("type") {
-        if let Ok(s) = value.clone().unwrap().extract::<&str>() {
-            Ok(DataType::Term(s.to_string()))
-        } else if let Ok(arr) = value.unwrap().extract::<Vec<String>>() {
-            Ok(DataType::TermArray(
-                arr.into_iter().map(String::from).collect(),
-            ))
-        } else {
-            Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                "The 'type' key must be associated with a string or a list of strings",
-            ))
-        }
+    let value = required_item(input, "type")?;
+    if let Ok(s) = value.extract::<&str>() {
+        Ok(DataType::Term(s.to_string()))
+    } else if let Ok(arr) = value.extract::<Vec<String>>() {
+        Ok(DataType::TermArray(arr))
     } else {
         Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-            "Dictionary must contain the 'type' key",
+            "The 'type' key must be associated with a string or a list of strings",
         ))
     }
 }
@@ -573,23 +563,22 @@ fn convert_pyobject_to_license(input: &Bound<'_, PyAny>) -> Result<License, PyEr
 fn convert_dict_to_id(input: &Bound<'_, PyAny>) -> PyResult<Id> {
     // Check if input is a single object with "id"
     // Converts to pydidct then checks id
-    if let Ok(py_dict) = input.downcast::<PyDict>() {
-        if let Ok(id_str) = py_dict.get_item("id") {
-            return Ok(Id::Id(id_str.unwrap().to_string()));
+    if let Ok(py_dict) = input.cast::<PyDict>() {
+        if let Ok(Some(id_str)) = py_dict.get_item("id") {
+            return Ok(Id::Id(id_str.to_string()));
         }
     }
 
-    // Check if input is a list of objects each with "id"
-    if let Ok(py_list) = input.downcast::<PyList>() {
+    // Check if input is a list of objects that all have an "id"
+    if let Ok(py_list) = input.cast::<PyList>() {
         let mut id_values: Vec<String> = Vec::new();
         for item in py_list {
-            if let Ok(py_dict) = item.downcast::<PyDict>() {
-                if let Ok(id_str) = py_dict.get_item("id") {
-                    id_values.push(id_str.unwrap().to_string());
-                } else {
+            match item.cast::<PyDict>().map(|py_dict| py_dict.get_item("id")) {
+                Ok(Ok(Some(id_str))) => id_values.push(id_str.to_string()),
+                _ => {
                     return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
                         "List items must be dictionaries with an 'id' key",
-                    ));
+                    ))
                 }
             }
         }
@@ -605,7 +594,11 @@ fn convert_dict_to_id(input: &Bound<'_, PyAny>) -> PyResult<Id> {
 }
 
 // converts a PyObject to any required dynamic entity
-fn convert_pyobject_to_dynamic_entity(obj: &Bound<'_, PyAny>) -> PyResult<EntityValue> {
+pub fn convert_pyobject_to_dynamic_entity(obj: &Bound<'_, PyAny>) -> PyResult<EntityValue> {
+    // None is serialised as JSON null
+    if obj.is_none() {
+        return Ok(EntityValue::EntityNull(None));
+    }
     // String
     if let Ok(s) = obj.extract::<String>() {
         return Ok(EntityValue::EntityString(s));
@@ -639,13 +632,7 @@ fn convert_pyobject_to_dynamic_entity(obj: &Bound<'_, PyAny>) -> PyResult<Entity
         return Ok(EntityValue::EntityId(id));
     }
 
-    // Check if the object is None
-    if obj.is_none() {
-        // Directly return if obj is Python None
-        return Ok(EntityValue::EntityString("None".to_string()));
-    }
-
-    if let Ok(list) = obj.downcast::<PyList>() {
+    if let Ok(list) = obj.cast::<PyList>() {
         let mut vec = Vec::new();
         for item in list {
             let entity = convert_pyobject_to_dynamic_entity(&item)?;
@@ -655,7 +642,7 @@ fn convert_pyobject_to_dynamic_entity(obj: &Bound<'_, PyAny>) -> PyResult<Entity
     }
 
     // HashMap<String, EntityValue> or Vec<HashMap<String, EntityValue>>
-    if let Ok(dict) = obj.downcast::<PyDict>() {
+    if let Ok(dict) = obj.cast::<PyDict>() {
         let mut map: HashMap<String, EntityValue> = HashMap::new();
         for (k, v) in dict {
             let key: String = k.extract()?;

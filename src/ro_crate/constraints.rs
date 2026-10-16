@@ -81,10 +81,10 @@ impl<'de> Deserialize<'de> for Id {
                 let key: Option<String> = map.next_key()?;
                 let id_value: String = map.next_value()?;
 
-                if let Some(key) = key {
-                    if key == "@id" {
-                        return Ok(Id::Id(id_value));
-                    }
+                if let Some(key) = key
+                    && key == "@id"
+                {
+                    return Ok(Id::Id(id_value));
                 }
 
                 Err(de::Error::missing_field("@id"))
@@ -199,9 +199,10 @@ pub enum EntityValue {
     EntityVecf64(Vec<f64>),
     EntityLicense(License),
     EntityDataType(DataType),
-    // Option to capture nulls before nesting
-    EntityNull(Option<bool>),
     EntityBool(bool),
+    // Serde tries untagged variants in order. A bool must be matched before
+    // Option<bool>, which also accepts non-null booleans.
+    EntityNull(Option<bool>),
     EntityNone(Option<String>),
     EntityVec(Vec<EntityValue>),
     EntityObject(HashMap<String, EntityValue>),
@@ -363,6 +364,16 @@ mod tests {
     }
 
     #[test]
+    fn deserialized_booleans_keep_the_boolean_variant() {
+        for (json, expected) in [("true", true), ("false", false)] {
+            let value: EntityValue = serde_json::from_str(json).unwrap();
+            assert_eq!(value, EntityValue::EntityBool(expected));
+        }
+        let null: EntityValue = serde_json::from_str("null").unwrap();
+        assert_eq!(null, EntityValue::EntityNull(None));
+    }
+
+    #[test]
     fn test_dynamic_entity_id() {
         let id = Id::Id("entity_id".to_string());
         let entity = EntityValue::EntityId(id.clone());
@@ -383,9 +394,9 @@ mod tests {
 
     #[test]
     fn test_dynamic_entity_f64() {
-        let entity = EntityValue::Entityf64(3.14);
+        let entity = EntityValue::Entityf64(2.75);
         match entity {
-            EntityValue::Entityf64(value) => assert!((value - 3.14).abs() < f64::EPSILON),
+            EntityValue::Entityf64(value) => assert!((value - 2.75).abs() < f64::EPSILON),
             _ => panic!("Entityf64 variant expected"),
         }
     }

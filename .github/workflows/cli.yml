@@ -68,16 +68,16 @@ jobs:
           ARCHIVE=dist/${{ matrix.platform }}/rocraters-${{ matrix.rust_target }}.${{ matrix.archive }}
           if [[ "${{ matrix.archive }}" == "zip" ]]; then
             if [[ "${{ matrix.platform }}" == "windows" ]]; then 
-              zip -j $ARCHIVE $WIN_BINARY
+              zip -j $ARCHIVE $WIN_BINARY LICENSE.md
             else 
-              zip -j $ARCHIVE $BINARY
+              zip -j $ARCHIVE $BINARY LICENSE.md
             fi
           elif [[ "${{ matrix.archive }}" == "tar.gz" ]]; then
-            tar -czvf $ARCHIVE -C target/${{ matrix.rust_target }}/release rocraters
+            tar -czvf $ARCHIVE -C target/${{ matrix.rust_target }}/release rocraters -C "$PWD" LICENSE.md
           elif [[ "${{ matrix.archive }}" == "tar.xz" ]]; then
-            tar -cJvf $ARCHIVE -C target/${{ matrix.rust_target }}/release rocraters
+            tar -cJvf $ARCHIVE -C target/${{ matrix.rust_target }}/release rocraters -C "$PWD" LICENSE.md
           elif [[ "${{ matrix.archive }}" == "tar.zst" ]]; then
-            tar --zstd -cvf $ARCHIVE -C target/${{ matrix.rust_target }}/release rocraters
+            tar --zstd -cvf $ARCHIVE -C target/${{ matrix.rust_target }}/release rocraters -C "$PWD" LICENSE.md
           fi
 
       # Upload artifacts

@@ -1,6 +1,6 @@
 [package]
 name = "rocraters-python"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 authors = ["Matt Burridge <m.burridge1@newcastle.ac.uk>"]
 description = "Lightweight Python library for RO-Crate manipulation implemented in Rust"
@@ -19,11 +19,14 @@ pyo3 = "0.28.1"
 serde_json = "1.0.149"
 chrono = { version = "0.4.41", features = ["serde"] }
 serde_with = "3.16.1"
+url = "2.5"
 
 [dependencies.ro-crate-rs]
 path = "../"
 version = "0"
 
 [features]
-default = []
+default = ["rdf", "subcrate-resolution"]
 parquet = ["ro-crate-rs/parquet"]
+rdf = ["ro-crate-rs/rdf"]
+subcrate-resolution = ["ro-crate-rs/subcrate-resolution"]

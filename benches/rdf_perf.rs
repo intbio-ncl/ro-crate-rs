@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use rocraters::ro_crate::constraints::{DataType, EntityValue, Id, License};
 use rocraters::ro_crate::context::RoCrateContext;
 use rocraters::ro_crate::contextual_entity::ContextualEntity;
@@ -13,6 +13,7 @@ use rocraters::ro_crate::rdf::{
 };
 use rocraters::ro_crate::rocrate::RoCrate;
 use rocraters::ro_crate::root::RootDataEntity;
+use std::hint::black_box;
 
 const BASE_IRI: &str = "https://example.org/bench/";
 const ROCRATE_CONTEXT_IRI: &str = "https://w3id.org/ro/crate/1.2/context";

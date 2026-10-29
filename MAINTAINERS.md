@@ -5,6 +5,7 @@ This document lists the Maintainers of the Project. Maintainers may be added onc
 | **NAME** | **Organization** |
 | --- | --- |
 | Matt Burridge | Newcastle University |
+| Sebastian Beyvers | Justus Liebig University Giessen |
 
 ---
 Adapted from MVG-0.1-beta.

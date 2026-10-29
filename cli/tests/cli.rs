@@ -1453,10 +1453,13 @@ mod package {
         ];
         ok(&d, &args);
         let archive = zip::ZipArchive::new(fs::File::open(d.join("mycrate.zip")).unwrap()).unwrap();
-        let names: Vec<&str> = archive.file_names().collect();
-        assert!(names.contains(&".zenodo.json"));
-        assert!(names.contains(&".config/settings.toml"));
-        assert!(!names.contains(&".env"));
+        let names: Vec<String> = archive
+            .file_names()
+            .map(|n| n.unwrap().into_owned())
+            .collect();
+        assert!(names.contains(&".zenodo.json".to_string()));
+        assert!(names.contains(&".config/settings.toml".to_string()));
+        assert!(!names.contains(&".env".to_string()));
 
         err(&d, &["package", "zip", "-i", ".missing"]);
     }

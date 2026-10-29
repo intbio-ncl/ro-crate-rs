@@ -1137,7 +1137,10 @@ mod write_crate_tests {
     /// Names of the entries in a zip archive
     fn zip_entry_names(zip_path: &Path) -> Vec<String> {
         let archive = zip::ZipArchive::new(File::open(zip_path).unwrap()).unwrap();
-        archive.file_names().map(String::from).collect()
+        archive
+            .file_names()
+            .map(|n| n.unwrap().into_owned())
+            .collect()
     }
 
     #[test]

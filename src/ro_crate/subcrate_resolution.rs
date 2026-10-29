@@ -483,7 +483,10 @@ fn try_zip(headers: &HeaderMap, bytes: bytes::Bytes) -> Result<RoCrate, FetchErr
 
         // A BagIt manifest is an integrity assertion. If verification fails,
         // do not rediscover and return the same metadata via the generic ZIP path.
-        if archive.file_names().any(|name| name == "bagit.txt") {
+        if archive
+            .file_names()
+            .any(|name| matches!(name.as_deref(), Ok("bagit.txt")))
+        {
             return try_bagit(archive);
         }
 
@@ -501,7 +504,10 @@ fn try_zip(headers: &HeaderMap, bytes: bytes::Bytes) -> Result<RoCrate, FetchErr
         }
 
         // Try finding rocrate in subdirectories
-        let names: Vec<String> = archive.file_names().map(|e| e.to_string()).collect();
+        let names: Vec<String> = archive
+            .file_names()
+            .map(|e| e.map(|n| n.to_string()))
+            .collect::<Result<_, _>>()?;
         if let Some(rocrate) = names
             .iter()
             .find(|name| name.ends_with("/ro-crate-metadata.json"))
